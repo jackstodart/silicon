@@ -466,7 +466,7 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       val appliedSorts = appliedArgs.map(_.sort)
       val func = fresh(id, appliedSorts, sort)
 
-      App(func, appliedArgs)
+      App(func, appliedArgs, None)
     }
 
     private def prover_fresh[F <: Function : ClassTag]

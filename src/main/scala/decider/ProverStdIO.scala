@@ -331,7 +331,7 @@ abstract class ProverStdIO(uniqueId: String,
     setTimeout(timeout)
 
     val guard = fresh("grd", Nil, sorts.Bool)
-    val guardApp = App(guard, Nil)
+    val guardApp = App(guard, Nil, None)
 
     writeLine(s"(assert (=> $guardApp (not $goal)))")
     readSuccess()

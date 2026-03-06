@@ -68,14 +68,14 @@ class DefaultQuantifierSupporter(triggerGenerator: TriggerGenerator) extends Qua
 
   def makeTriggersHeapIndependent(q: Quantification, fresh: (String, Sort, Option[PType]) => Var): Seq[Quantification] = {
     def computeHeapDeps(t: Term): Seq[Term] = t match {
-      case App(HeapDepFun(_,_,_), args) => args.flatMap(computeHeapDeps)
+      case App(HeapDepFun(_,_,_), args, _) => args.flatMap(computeHeapDeps)
       case fvf: Application[_] if fvf.sort.isInstanceOf[sorts.FieldValueFunction] => Seq(fvf)
       case psf: Application[_] if psf.sort.isInstanceOf[sorts.PredicateSnapFunction] => Seq(psf)
       case _ => Seq()
     }
 
     def replaceHeapDeps(t: Term, m: Map[Term, Var]): Term = t match {
-      case App(f, args) => App(f, args.map(replaceHeapDeps(_,m)))
+      case App(f, args, label) => App(f, args.map(replaceHeapDeps(_,m)), label)
       case fvf: Application[_] if fvf.sort.isInstanceOf[sorts.FieldValueFunction] => m(fvf)
       case psf: Application[_] if psf.sort.isInstanceOf[sorts.PredicateSnapFunction] => m(psf)
       case _ => t

@@ -56,7 +56,7 @@ case class InverseFunctions(condition: Term,
   def inversesOf(arguments: Seq[Term]): Seq[App] =
     /* TODO: Memoisation might be worthwhile, e.g. because often used with `?r` */
     qvarsToInverses.values.map(inv =>
-      App(inv, additionalArguments ++ arguments)
+      App(inv, additionalArguments ++ arguments, None)
     ).to(Seq)
 
   def qvarsToInversesOf(argument: Term): Map[Var, App] =
@@ -65,7 +65,7 @@ case class InverseFunctions(condition: Term,
   def qvarsToInversesOf(arguments: Seq[Term]): Map[Var, App] =
     /* TODO: Memoisation might be worthwhile, e.g. because often used with `?r` */
     qvarsToInverses.map {
-      case (x, inv) => x -> App(inv, additionalArguments ++ arguments)
+      case (x, inv) => x -> App(inv, additionalArguments ++ arguments, None)
     }.to(Map)
 
   override lazy val toString: String = indentedToString("")
@@ -1573,7 +1573,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
         val permsTakenDecl = v.decider.freshMacro("pTaken", permsTakenArgs, permsTakenBody)
         val permsTakenMacro = Macro(permsTakenDecl.id, permsTakenDecl.args.map(_.sort), permsTakenDecl.body.sort)
         currentFunctionRecorder = currentFunctionRecorder.recordFreshMacro(permsTakenDecl)
-        val permsTakenApp = App(permsTakenMacro, permsTakenArgs)
+        val permsTakenApp = App(permsTakenMacro, permsTakenArgs, None)
         v.symbExLog.addMacro(permsTakenApp, permsTakenBody)
         permsTakenApp
       } else {
@@ -1857,14 +1857,14 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
 
     qvarsWithIndices foreach { case (qvar, idx) =>
       val fun = v.decider.fresh("inv", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), qvar.sort)
-      val inv = (ts: Seq[Term]) => App(fun, additionalInvArgs ++ ts)
+      val inv = (ts: Seq[Term]) => App(fun, additionalInvArgs ++ ts, None)
 
       inverseFunctions(idx) = fun
       inversesOfFcts(idx) = inv(invertibles)
       inversesOfCodomains(idx) = inv(codomainQVars)
 
       val imgFun = v.decider.fresh("img", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), sorts.Bool)
-      val img = (ts: Seq[Term]) => App(imgFun, additionalInvArgs ++ ts)
+      val img = (ts: Seq[Term]) => App(imgFun, additionalInvArgs ++ ts, None)
 
       imageFunctions(idx) = imgFun
       imagesOfFcts(idx) = img(invertibles)
@@ -1962,13 +1962,13 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
   override def findChunk(chunks: Iterable[Chunk], chunk: QuantifiedChunk, v: Verifier): Option[QuantifiedChunk] = {
     val lr = chunk match {
       case qfc: QuantifiedFieldChunk if qfc.invs.isDefined =>
-        val qvarsAndInverses = qfc.invs.get.qvarsToInverses.map(qvi => (qvi._1, App(qvi._2, qfc.invs.get.additionalArguments.toSeq ++ qfc.quantifiedVars)))
+        val qvarsAndInverses = qfc.invs.get.qvarsToInverses.map(qvi => (qvi._1, App(qvi._2, qfc.invs.get.additionalArguments.toSeq ++ qfc.quantifiedVars, None)))
         val invertiblesReplaced = qfc.invs.get.invertibles.map(_.replace(qvarsAndInverses))
         Left(invertiblesReplaced, qfc.quantifiedVars, qfc.condition)
       case qfc: QuantifiedFieldChunk if qfc.singletonArguments.isDefined =>
         Right(qfc.singletonArguments.get, qfc.condition)
       case qpc: QuantifiedPredicateChunk if qpc.invs.isDefined =>
-        val qvarsAndInverses = qpc.invs.get.qvarsToInverses.map(qvi => (qvi._1, App(qvi._2, qpc.invs.get.additionalArguments.toSeq ++ qpc.quantifiedVars)))
+        val qvarsAndInverses = qpc.invs.get.qvarsToInverses.map(qvi => (qvi._1, App(qvi._2, qpc.invs.get.additionalArguments.toSeq ++ qpc.quantifiedVars, None)))
         val invertiblesReplaced = qpc.invs.get.invertibles.map(_.replace(qvarsAndInverses))
         Left(invertiblesReplaced, qpc.quantifiedVars, qpc.condition)
       case qpc: QuantifiedPredicateChunk if qpc.singletonArguments.isDefined =>
@@ -2014,11 +2014,11 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
     relevantChunks.find { ch =>
       val chunkInfo = ch match {
         case qfc: QuantifiedFieldChunk if qfc.invs.isDefined =>
-          val qvarsAndInverses = qfc.invs.get.qvarsToInverses.map(qvi => (qvi._1, App(qvi._2, qfc.invs.get.additionalArguments.toSeq ++ qfc.quantifiedVars)))
+          val qvarsAndInverses = qfc.invs.get.qvarsToInverses.map(qvi => (qvi._1, App(qvi._2, qfc.invs.get.additionalArguments.toSeq ++ qfc.quantifiedVars, None)))
           val invertiblesReplaced = qfc.invs.get.invertibles.map(_.replace(qvarsAndInverses))
           Some(invertiblesReplaced, qfc.quantifiedVars, qfc.condition)
         case qpc: QuantifiedPredicateChunk if qpc.invs.isDefined =>
-          val qvarsAndInverses = qpc.invs.get.qvarsToInverses.map(qvi => (qvi._1, App(qvi._2, qpc.invs.get.additionalArguments.toSeq ++ qpc.quantifiedVars)))
+          val qvarsAndInverses = qpc.invs.get.qvarsToInverses.map(qvi => (qvi._1, App(qvi._2, qpc.invs.get.additionalArguments.toSeq ++ qpc.quantifiedVars, None)))
           val invertiblesReplaced = qpc.invs.get.invertibles.map(_.replace(qvarsAndInverses))
           Some(invertiblesReplaced, qpc.quantifiedVars, qpc.condition)
         case _ => None
@@ -2175,7 +2175,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
       arguments.flatMap {
         case SeqAt(seq, _) => Some(seq)
         case MapLookup(map, _) => Some(map)
-        case App(f, _) => Some(AppHint(f))
+        case App(f, _, _) => Some(AppHint(f))
         case _ => None
       }
 
