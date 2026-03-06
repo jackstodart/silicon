@@ -72,13 +72,13 @@ trait FunctionRecorderHandler {
     freshSymbolsAcrossAllPhases ++= freshFvfsAndDomains map (fvfDef =>
       fvfDef.sm match {
         case x: Var => ConstDecl(x)
-        case App(f: Function, _) => FunctionDecl(f)
+        case App(f: Function, _, _) => FunctionDecl(f)
         case other => sys.error(s"Unexpected SM $other of type ${other.getClass.getSimpleName}")
       })
     freshSymbolsAcrossAllPhases ++= freshPermMaps map (pmDef =>
       pmDef.pm match {
         case x: Var => ConstDecl(x)
-        case App(f: Function, _) => FunctionDecl(f)
+        case App(f: Function, _, _) => FunctionDecl(f)
         case other => sys.error(s"Unexpected permission map $other of type ${other.getClass.getSimpleName}")
       })
   }
@@ -130,10 +130,10 @@ class FunctionData(val programFunction: ast.Function,
     else
       Seq.fill(1 + formalArgs.size)(None)
 
-  val functionApplication = App(function, `?s` +: formalArgs.values.toSeq)
-  val limitedFunctionApplication = App(limitedFunction, `?s` +: formalArgs.values.toSeq)
-  val triggerFunctionApplication = App(statelessFunction, formalArgs.values.toSeq)
-  val preconditionFunctionApplication = App(preconditionFunction, `?s` +: formalArgs.values.toSeq)
+  val functionApplication = App(function, `?s` +: formalArgs.values.toSeq, None)
+  val limitedFunctionApplication = App(limitedFunction, `?s` +: formalArgs.values.toSeq, None)
+  val triggerFunctionApplication = App(statelessFunction, formalArgs.values.toSeq, None)
+  val preconditionFunctionApplication = App(preconditionFunction, `?s` +: formalArgs.values.toSeq, None)
 
   val limitedAxiom =
     Forall(arguments,
@@ -269,7 +269,7 @@ class FunctionData(val programFunction: ast.Function,
            expressionTranslator.getOrFail(locToSnap, predAcc, Seq(), sorts.Snap, Option.when(Verifier.config.enableDebugging())(PUnknown()))
         +: expressionTranslator.translatePrecondition(program, predAcc.args, this))
 
-      val fapp = App(triggerFunction, args)
+      val fapp = App(triggerFunction, args, None)
 
       predicate.name -> fapp
     }))

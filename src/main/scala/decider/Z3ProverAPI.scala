@@ -373,7 +373,7 @@ class Z3ProverAPI(uniqueId: String,
     setTimeout(timeout)
 
     val guard = fresh("grd", Nil, sorts.Bool)
-    val guardApp = App(guard, Nil)
+    val guardApp = App(guard, Nil, None)
     val goalImplication = Implies(guardApp, Not(goal))
 
     prover.add(termConverter.convertTerm(goalImplication).asInstanceOf[BoolExpr])

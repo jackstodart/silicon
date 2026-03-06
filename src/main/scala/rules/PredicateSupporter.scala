@@ -78,7 +78,7 @@ object predicateSupporter extends PredicateSupportRules {
     consume(s1, body, true, pve, v)((s1a, snap, v1) => {
       if (!Verifier.config.disableFunctionUnfoldTrigger()) {
         val predTrigger = App(s1a.predicateData(predicate.name).triggerFunction,
-          snap.get.convert(terms.sorts.Snap) +: tArgs)
+          snap.get.convert(terms.sorts.Snap) +: tArgs, None)
         val eArgsString = eArgs.mkString(", ")
         v1.decider.assume(predTrigger, Option.when(withExp)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eArgsString))")))
       }
@@ -208,7 +208,7 @@ object predicateSupporter extends PredicateSupportRules {
           if (!Verifier.config.disableFunctionUnfoldTrigger()) {
             val predicateTrigger =
               App(s4.predicateData(predicate.name).triggerFunction,
-                snap.get.convert(terms.sorts.Snap) +: tArgs)
+                snap.get.convert(terms.sorts.Snap) +: tArgs, None)
             val eargs = eArgs.mkString(", ")
             v4.decider.assume(predicateTrigger, Option.when(withExp)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eargs))")))
           }
@@ -223,7 +223,7 @@ object predicateSupporter extends PredicateSupportRules {
           if (!Verifier.config.disableFunctionUnfoldTrigger()) {
             val predicateTrigger =
               App(s4.predicateData(predicate.name).triggerFunction,
-                snap.get.convert(terms.sorts.Snap) +: tArgs)
+                snap.get.convert(terms.sorts.Snap) +: tArgs, None)
             val eargs = eArgs.mkString(", ")
             v2.decider.assume(predicateTrigger, Option.when(withExp)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eargs))")))
           }

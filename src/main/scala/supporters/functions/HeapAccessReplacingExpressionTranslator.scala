@@ -155,7 +155,7 @@ class HeapAccessReplacingExpressionTranslator(symbolConverter: SymbolConverter,
         }
         val args = eFApp.args map (arg => translate(arg))
         val snap = getOrFail(data.fappToSnap, eFApp, context, sorts.Snap, Option.when(Verifier.config.enableDebugging())(PUnknown()))
-        val fapp = App(fun, snap +: args)
+        val fapp = App(fun, snap +: args, None)
 
         val callerHeight = data.height
         val calleeHeight = functionData(eFApp.funcname).height

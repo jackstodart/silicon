@@ -270,27 +270,29 @@ object Var extends CondFlyweightFactory[(Identifier, Sort, Boolean), Var, Var] {
   override def actualCreate(args: (Identifier, Sort, Boolean)): Var = new Var(args._1, args._2, args._3)
 }
 
-class App private[terms] (val applicable: Applicable, val args: Seq[Term])
-    extends Application[Applicable]
-       with ConditionalFlyweight[(Applicable, Seq[Term]), App] {
-       /*with PossibleTrigger*/
+class App private[terms] (val applicable: Applicable, val args: Seq[Term], val heapLabel: Option[String])
+  extends Application[Applicable]
+    with ConditionalFlyweight[(Applicable, Seq[Term], Option[String]), App] {
+  /*with PossibleTrigger*/
 
   utils.assertExpectedSorts(applicable, args)
 
   val sort: Sort = applicable.resultSort
-  val equalityDefiningMembers = (applicable, args)
-  def copy(applicable: Applicable = applicable, args: Seq[Term] = args) = App(applicable, args)
+  val equalityDefiningMembers = (applicable, args, heapLabel)
+  def copy(applicable: Applicable = applicable, args: Seq[Term] = args, heapLabel: Option[String] = heapLabel) =
+    App(applicable, args, heapLabel)
 
+  val maybeLabel = if (heapLabel.isDefined) s"[${heapLabel.get}]" else ""
   override lazy val toString =
     if (args.isEmpty) applicable.id.toString
-    else s"${applicable.id}${args.mkString("(", ", ", ")")}"
+    else s"${applicable.id}$maybeLabel${args.mkString("(", ", ", ")")}"
 }
 
-object App extends CondFlyweightTermFactory[(Applicable, Seq[Term]), App] {
-  def apply(applicable: Applicable, args: Seq[Term]) = createIfNonExistent((applicable, args))
-  def apply(applicable: Applicable, arg: Term) = createIfNonExistent((applicable, Seq(arg)))
+object App extends CondFlyweightTermFactory[(Applicable, Seq[Term], Option[String]), App] {
+  def apply(applicable: Applicable, args: Seq[Term], heapLabel: Option[String]) = createIfNonExistent((applicable, args, heapLabel))
+  def apply(applicable: Applicable, arg: Term, heapLabel: Option[String]) = createIfNonExistent((applicable, Seq(arg), heapLabel))
 
-  override def actualCreate(args: (Applicable, Seq[Term])): App = new App(args._1, args._2)
+  override def actualCreate(args: (Applicable, Seq[Term], Option[String])): App = new App(args._1, args._2, args._3)
 }
 
 /*
@@ -1452,7 +1454,7 @@ object PermLess extends CondFlyweightTermFactory[(Term, Term), PermLess] {
     v0 match {
       case (t0, t1) if t0 == t1 => False
       case (p0: PermLiteral, p1: PermLiteral) => if (p0.literal < p1.literal) True else False
-
+      case (NoPerm, PermMinus(p0, p1)) => PermLess(p0, p1)
       case (t0, Ite(tCond, tIf, tElse)) =>
         /* The pattern p0 < b ? p1 : p2 arises very often in the context of quantified permissions.
          * Pushing the comparisons into the ite allows further simplifications.
@@ -1496,6 +1498,10 @@ object PermMin extends CondFlyweightTermFactory[(Term, Term), PermMin] {
   override def apply(v0: (Term, Term)) = v0 match {
     case (t0, t1) if t0 == t1 => t0
     case (p0: PermLiteral, p1: PermLiteral) => if (p0.literal > p1.literal) p1 else p0
+    case (p0, FullPerm) => p0
+    case (FullPerm, p1) => p1
+    case (_, NoPerm) => NoPerm
+    case (NoPerm, _) => NoPerm
     case _ => createIfNonExistent(v0)
   }
 

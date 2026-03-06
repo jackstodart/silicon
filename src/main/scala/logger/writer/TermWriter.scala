@@ -73,11 +73,12 @@ object TermWriter {
         "name" -> (if (name != null) JsString(name) else JsNull)
       )
 
-    case a @ App(applicable, args) =>
+    case a @ App(applicable, args, heapLabel) =>
       JsObject(
         "type" -> JsString("application"),
         "applicable" -> JsString(applicable.id.name),
         "args" -> JsArray((args map toJSON).toVector),
+        "heapLabel" -> JsString(heapLabel.getOrElse("n/a")),
         "sort" -> toJSON(a.sort)
       )
 
