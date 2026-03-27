@@ -38,4 +38,18 @@ final class ListBackedHeap private[state] (chunks: Vector[Chunk])
 
     new ListBackedHeap(prefix ++ suffix.tail)
   }
+
+  private def chunkOrd(c: Chunk): (Int, String) = {
+    c match {
+      case _: BasicChunk => (0, "")
+      case _: QuantifiedFieldChunk => (1, "")
+      case _: QuantifiedPredicateChunk => (2, "")
+      case _: MagicWandChunk => (3, "")
+      case _: QuantifiedMagicWandChunk => (4, "")
+    }
+  }
+
+  def chunksEqual(other: Heap): Boolean = {
+    this.values.sortBy(chunkOrd) == other.values.toVector.sortBy(chunkOrd)
+  }
 }

@@ -645,8 +645,8 @@ object evaluator extends EvaluationRules {
                                s2.assertReadAccessOnly /* should currently always be false */ else true)
             consumes(s3, pres, true, _ => pvePre, v2)((s4, snap, v3) => {
               val snap1 = snap.get.convert(sorts.Snap)
-              val heapLabel = v3.getDebugHeapLabel(s4)
-              val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func)), snap1 :: tArgs, Some(heapLabel))
+              // val heapLabel = v3.getDebugHeapLabel(s4)
+              val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func)), snap1 :: tArgs, Some(debugHeapName))
               val preExp = Option.when(withExp)({
                 DebugExp.createInstance(Some(s"precondition of ${func.name}(${eArgsNew.get.mkString(", ")}) holds"), None, None, InsertionOrderedSet.empty)
               })
@@ -656,10 +656,10 @@ object evaluator extends EvaluationRules {
                 case Some(a) if a.values.contains("opaque") =>
                   val funcAppAnn = fapp.info.getUniqueInfo[AnnotationInfo]
                   funcAppAnn match {
-                    case Some(a) if a.values.contains("reveal") => App(v3.symbolConverter.toFunction(func), snap1 :: tArgs, Some(heapLabel))
-                    case _ => App(functionSupporter.limitedVersion(v3.symbolConverter.toFunction(func)), snap1 :: tArgs, Some(heapLabel))
+                    case Some(a) if a.values.contains("reveal") => App(v3.symbolConverter.toFunction(func), snap1 :: tArgs, Some(debugHeapName))
+                    case _ => App(functionSupporter.limitedVersion(v3.symbolConverter.toFunction(func)), snap1 :: tArgs, Some(debugHeapName))
                   }
-                case _ => App(v3.symbolConverter.toFunction(func), snap1 :: tArgs, Some(heapLabel))
+                case _ => App(v3.symbolConverter.toFunction(func), snap1 :: tArgs, Some(debugHeapName))
               }
               val fr5 =
                 s4.functionRecorder.changeDepthBy(-1)
@@ -674,7 +674,7 @@ object evaluator extends EvaluationRules {
               val funcAppNew = eArgsNew.map(args => ast.FuncApp(funcName, args)(fapp.pos, fapp.info, fapp.typ, fapp.errT))
               val funcAppNewOld = Option.when(withExp)({
                 if (s5.isEvalInOld || pres.forall(_.isPure)) funcAppNew.get
-                else ast.DebugLabelledOld(funcAppNew.get, debugLabel)(fapp.pos, fapp.info, fapp.errT)
+                else ast.DebugLabelledOld(funcAppNew.get, debugHeapName)(fapp.pos, fapp.info, fapp.errT)
               })
               QB(s5, (tFApp, funcAppNewOld), v3)})
             /* TODO: The join-function is heap-independent, and it is not obvious how a
