@@ -194,13 +194,11 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
   private def translateFunctionDefs(fn: ast.Function): Unit = {
     val argString = (if (fn.isPure) "" else "h ") + fn.formalArgs.map(_.name).mkString(" ")
+    val argStringWTypes = (if (fn.isPure) "" else "h ") + fn.formalArgs.map(a => s"(${a.name}::${translateType(a.typ)})").mkString(" ")
 
     // Translate function body
     if (fn.body.isDefined) {
-      val fnRHS = fn.body.get match {
-        case _: ast.Not => "(" + translateExp(fn.body.get) + ")"
-        case _ => translateExp(fn.body.get)
-      }
+      val fnRHS = "(" + translateExp(fn.body.get) + ")"
       if (fn.pres.isEmpty) {
         strings += s"  assumes ${fn.name}_def: \"\\<And>$argString. ${fn.name} $argString =\n    $fnRHS\""
       } else {
@@ -210,6 +208,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       // Translate internal function calls
       extractPropagation(fn.name) match {
         case None =>
+        case Some((_, terms.True)) =>
         case Some((vars, body)) =>
           var newRenames = vars.tail.map(v => (v.id, v.id.name.takeWhile(_ != '@'))).toMap
           if (!fn.isPure) newRenames = newRenames + (vars.head.id -> "h")
@@ -217,22 +216,28 @@ class Translator(val obl: ProofObligation, val filename: String) {
           def translate: Term => String = translateTerm(_, newRewrites, options = defaultOptions.collapseSnapsOn())
 
           val bodyString = body match {
-            case terms.Implies(p0, p1) => translate(p0) + " \\<Longrightarrow> " + translate(p1)
+            case terms.Implies(p0, p1) => s"${translate(p0)} \\<Longrightarrow> ${translate(p1)}"
             case _ => translate(body)
           }
           //val propString = translateTerm(prop, newRewrites, collapseSnaps = true).replace("NO_HEAP", "h")
           // TODO: use argString and fix variables with unnecessary suffixes
-          strings += s"  assumes ${fn.name}_calls: \"\\<And>$argString. ${bodyString.replace("NO_HEAP", "h")}\""
+          strings += s"  assumes ${fn.name}_calls: \"\\<And>$argStringWTypes. ${bodyString.replace("NO_HEAP", "h")}\""
       }
     }
-    // TODO: Translate function postconditions???
-    // Framing axioms, currently only added if no function body
-    if (!fn.isPure && fn.body.isEmpty) {
+    // Postconditions
+    if (fn.posts.nonEmpty) {
+      strings += s"  assumes ${fn.name}_posts: \"\\<And>$argStringWTypes. ${fn.name}_pre $argString \\<Longrightarrow>"
+      val postStrings = fn.posts.map(translateExp(_, resultString = Some(s"${fn.name} $argString")))
+      val combined = "    " + postStrings.mkString("\n    \\<and> ")
+      strings += combined + "\""
+    }
+    // Framing axioms
+    if (!fn.isPure) {
       val argStringH1 = "h1" + argString.drop(1)
       val argStringH2 = "h2" + argString.drop(1)
       val footprint = fn.pres.filter(!_.isPure).map(translateExp(_, isFrameAxiom = true)).mkString(" \\<and> ")
       strings += s"  assumes ${fn.name}_framing: \"\\<And>h1 $argStringH2. " +
-        s"${fn.name}_pre $argString \\<and> ${fn.name}_pre $argStringH2"
+        s"${fn.name}_pre $argStringH1 \\<and> ${fn.name}_pre $argStringH2"
       strings += s"    \\<and> $footprint"
       strings += s"    \\<Longrightarrow> ${fn.name} $argStringH1 = ${fn.name} $argStringH2\""
     }
@@ -248,8 +253,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case _ => None
     }
   }
-
-
 
   private def abbreviateFields(): Unit = {
     strings += "text \\<open>Simpler field notation for the current heap\\<close>\n"
@@ -277,8 +280,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
     translateStore()
     translateHeaps()
     strings += "  (* Assumptions *)"
-    obl.assumptionsExp.foreach(translateDebugExp)
+    obl.assumptionsExp.foreach(translateDebugExp(_))
 
+    // val assertionTerm = obl.eAssertion.term.getOrElse(obl.assertion)
     strings += "  shows \"" + translateTerm(obl.assertion) + "\""
     strings += "  (* Complete proof here *)\n  sorry\n"
     strings += "end\n"
@@ -370,10 +374,13 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.Null => "Null"
       case terms.Unit => "UNIT"
       case terms.App(applicable, args, heapLabel) =>
+        // TODO: if it is spurious precondition then remove it
         val og_fn = applicable.id.name.takeWhile(_ != '%')
         obl.s.program.findFunctionOptionally(og_fn) match {
           case None => safeId(applicable.id) + args.map(" " + maybeBracket(_)).mkString("")
-          case Some(f) => if (f.isPure) s"${safeId(applicable.id)}" + args.tail.map(" " + maybeBracket(_)).mkString("")
+          case Some(f) =>
+            if (applicable.id.name.contains("%precondition") && f.pres.isEmpty) "True"
+            else if (f.isPure) s"${safeId(applicable.id)}" + args.tail.map(" " + maybeBracket(_)).mkString("")
             else s"${safeId(applicable.id)} ${safeString(heapLabel.getOrElse("NO_HEAP"))} " + args.tail.map(maybeBracket(_)).mkString(" ")
         }
       // Stuff
@@ -509,8 +516,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
-  private def translateExp(e: ast.Exp, isFrameAxiom: Boolean = false): String = {
-    def rec(e2: ast.Exp): String = translateExp(e2, isFrameAxiom)
+  private def translateExp(e: ast.Exp, isFrameAxiom: Boolean = false, resultString: Option[String] = None): String = {
+    def rec(e2: ast.Exp): String = translateExp(e2, isFrameAxiom, resultString)
     def maybeBracket(e2: ast.Exp): String = if (isSingleTokenExp(e2)) rec(e2) else "(" + rec(e2) + ")"
 
     e match {
@@ -532,8 +539,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.And(left, right) =>
         if (isFrameAxiom && left.isPure) rec(right)
         else if (isFrameAxiom && right.isPure) rec(left)
-        else rec(left) + " \\<and> " + rec(right)
-      case ast.Implies(left, right) => translateExp(left) + " \\<longrightarrow> " + rec(right)
+        else maybeBracket(left) + " \\<and> " + maybeBracket(right)
+      case ast.Implies(left, right) =>
+        translateExp(left, isFrameAxiom = false, resultString) + " \\<longrightarrow> " + rec(right)
       case ast.MagicWand(left, right) => rec(left) + " \\<longrightarrow> " + rec(right)
       case ast.Not(exp) => "\\<not>(" + rec(exp) + ")"
       case ast.TrueLit() => "True"
@@ -560,7 +568,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.Exists(variables, _, exp) =>
         "(\\<exists>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + translateExp(exp) + ")"
       case ast.LocalVar(name, _) => safeString(name)
-      case ast.Result(_) => "result" // TODO: this is currently meaningless
+      case ast.Result(_) => resultString.getOrElse("result")
       case ast.LocalVarWithVersion(name, _) => safeString(name)
 
       case ast.EmptySeq(_) => "[]"
@@ -923,7 +931,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     varMap.toMap
   }
 
-  private def translateDebugExp(de: DebugExp): Unit = {
+  private def translateDebugExp(de: DebugExp, prefix: String = "", suffix: String = ""): Unit = {
     if (de.description.contains("Loop invariant")) {
       strings += "  (* Begin loop invariant *)"
       for (child <- de.children) {
@@ -934,9 +942,44 @@ class Translator(val obl: ProofObligation, val filename: String) {
       for (child <- de.children) {
         translateDebugExp(child)
       }
-    } else if (de.description.contains("precondition of")) {
+      // } else if (de.description.contains("precondition of")) {
       // Do nothing
-    } else if (de.term.isDefined) {
+    } else {
+      de match {
+        case ide: ImplicationDebugExp =>
+          if (ide.term.isDefined) {
+            val filtered = filterPure(ide.term.get)
+            if (filtered.isDefined) {
+              val LHS = translateTerm(filtered.get)
+              ide.children.foreach { translateDebugExp(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix) }
+            }
+          }
+        case qde: QuantifiedDebugExp =>
+          val qvarString = ""
+          qde.children.foreach { translateDebugExp(_, prefix + qvarString, suffix) }
+        case _ =>
+          if (de.term.isDefined) {
+            if (notSnap(de.term.get)) {
+              val filtered = filterPure(de.term.get)
+              if (filtered.isDefined)
+                strings += s"  assumes ${de.id}: \"$prefix${translateTerm(filtered.get)}$suffix\""
+            }
+          }
+      }
+    }
+  }
+
+  /*
+      val prefixString = maybePrefix match {
+        case None => ""
+        case Some(t) => filterPure(t) match {
+          case None => ""
+          case Some(t2) => translateTerm(t2)
+        }
+      }
+      de.children.foreach()
+
+    } if (de.term.isDefined) {
       if (notSnap(de.term.get)) {
         //val varTerm = filterPure(variablise(de.term.get))
         val varTerm = filterPure(de.term.get)
@@ -946,7 +989,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
         }
       }
     }
-  }
+    }
+  } */
 
 }
 
@@ -1106,5 +1150,10 @@ object ExportUtils {
       case terms.Forall => "\\<forall>"
       case terms.Exists => "\\<exists>"
     }
+  }
+
+  def validName(name: String): Boolean = {
+    val isabelleKeywords = Seq("value")
+    !isabelleKeywords.contains(name)
   }
 }

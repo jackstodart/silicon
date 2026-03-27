@@ -1454,7 +1454,7 @@ object PermLess extends CondFlyweightTermFactory[(Term, Term), PermLess] {
     v0 match {
       case (t0, t1) if t0 == t1 => False
       case (p0: PermLiteral, p1: PermLiteral) => if (p0.literal < p1.literal) True else False
-      case (NoPerm, PermMinus(p0, p1)) => PermLess(p0, p1)
+      case (NoPerm, PermMinus(p0, p1)) => PermLess(p1, p0)
       case (t0, Ite(tCond, tIf, tElse)) =>
         /* The pattern p0 < b ? p1 : p2 arises very often in the context of quantified permissions.
          * Pushing the comparisons into the ite allows further simplifications.
