@@ -87,6 +87,8 @@ object Rewrites {
 class Translator(val obl: ProofObligation, val filename: String) {
   var strings = ArrayBuffer[String]() // Strings to be written to .thy file
   private lazy val basicRewrites: Rewrites = Rewrites(renaming2, immutable.Map())
+  // TODO: Not sure if safe, this assumes correct key insertion order???
+  private val currentHeapLabel: String = obl.s.oldHeaps.keys.last
 
   def translateObligation(): Unit = {
     strings += s"theory $filename\n"
@@ -126,7 +128,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
     def functionType(fn: FuncLike, isPrecondition: Boolean = false, isHeapDep: Boolean = false): String = {
       val name = if (isPrecondition) fn.name + "_pre" else fn.name
-      val maybeHeap = if (isHeapDep) " Heap \\<Rightarrow> " else ""
+      val maybeHeap = if (isHeapDep) "Heap \\<Rightarrow> " else ""
       val argString = fn.formalArgs.map(a => translateType(a.typ) + " \\<Rightarrow> ").mkString("")
       val typeString = if (isPrecondition) "bool" else translateType(fn.typ)
       name + " :: \"" + maybeHeap + argString + typeString + "\""
@@ -168,8 +170,22 @@ class Translator(val obl: ProofObligation, val filename: String) {
       strings += ""
     }
 
+    // Pure part of predicates
+    strings += "locale Predicates ="
+    if (obl.s.program.predicates.isEmpty) {
+      strings += "  assumes True (* no predicates to translate *)\n"
+    } else {
+      for (pred <- obl.s.program.predicates) {
+        val typeString = "Heap \\<Rightarrow> " + pred.formalArgs.map(a => translateType(a.typ) + " \\<Rightarrow> ").mkString("")
+        strings += s"  fixes ${pred.name} :: \"${typeString}bool\""
+        val typeTuple = s"Heap \\<times> ${pred.formalArgs.map(a => translateType(a.typ)).mkString(" \\<times> ")}"
+        strings += s"  fixes ${pred.name}_eq :: \"$typeTuple \\<Rightarrow> $typeTuple \\<Rightarrow> bool\""
+      }
+      strings += ""
+    }
+
     // Create combined locale
-    strings += "locale All_Functions = Program_Functions +"
+    strings += "locale All_Functions = Program_Functions + Predicates +"
     independentDomains.foreach(d => strings += s"  ${d._1.name}_Domain +")
     dependentDomains.foreach(d => strings += s"  ${d._1.name}_Functions +")
 
@@ -188,11 +204,13 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
     // Function definitions
     strings += "  (* Function definitions and posts *)"
-    obl.s.program.functions.foreach(translateFunctionDefs)
+    obl.s.program.functions.foreach(translateFunctionDef)
+    strings += "  (* Predicate properties *)"
+    obl.s.program.predicates.foreach(translatePredicate)
     strings += ""
   }
 
-  private def translateFunctionDefs(fn: ast.Function): Unit = {
+  private def translateFunctionDef(fn: ast.Function): Unit = {
     val argString = (if (fn.isPure) "" else "h ") + fn.formalArgs.map(_.name).mkString(" ")
     val argStringWTypes = (if (fn.isPure) "" else "h ") + fn.formalArgs.map(a => s"(${a.name}::${translateType(a.typ)})").mkString(" ")
 
@@ -213,7 +231,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
           var newRenames = vars.tail.map(v => (v.id, v.id.name.takeWhile(_ != '@'))).toMap
           if (!fn.isPure) newRenames = newRenames + (vars.head.id -> "h")
           val newRewrites = addRenames(basicRewrites, newRenames)
-          def translate: Term => String = translateTerm(_, newRewrites, options = defaultOptions.collapseSnapsOn())
+          def translate: Term => String = translateTerm(_, 50, newRewrites, options = defaultOptions.collapseSnapsOn())
 
           val bodyString = body match {
             case terms.Implies(p0, p1) => s"${translate(p0)} \\<Longrightarrow> ${translate(p1)}"
@@ -227,7 +245,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     // Postconditions
     if (fn.posts.nonEmpty) {
       strings += s"  assumes ${fn.name}_posts: \"\\<And>$argStringWTypes. ${fn.name}_pre $argString \\<Longrightarrow>"
-      val postStrings = fn.posts.map(translateExp(_, resultString = Some(s"${fn.name} $argString")))
+      val postStrings = fn.posts.map(translateExp(_, parenthesisLevel = 35, resultString = Some(s"${fn.name} $argString")))
       val combined = "    " + postStrings.mkString("\n    \\<and> ")
       strings += combined + "\""
     }
@@ -235,7 +253,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     if (!fn.isPure) {
       val argStringH1 = "h1" + argString.drop(1)
       val argStringH2 = "h2" + argString.drop(1)
-      val footprint = fn.pres.filter(!_.isPure).map(translateExp(_, isFrameAxiom = true)).mkString(" \\<and> ")
+      val footprint = fn.pres.filter(!_.isPure).map(translateExp(_, parenthesisLevel = 35, isFrameAxiom = true)).mkString(" \\<and> ")
       strings += s"  assumes ${fn.name}_framing: \"\\<And>h1 $argStringH2. " +
         s"${fn.name}_pre $argStringH1 \\<and> ${fn.name}_pre $argStringH2"
       strings += s"    \\<and> $footprint"
@@ -254,6 +272,16 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
+  private def translatePredicate(pred: ast.Predicate): Unit = {
+    pred.getPureFragment match {
+      case Some(exp) =>
+        val argString = "h " + pred.formalArgs.map(_.name).mkString(" ")
+        val bodyString = translateExp(exp, parenthesisLevel = 51)
+        strings += s"  assumes unfold_${pred.name}: \"\\<And>$argString. ${pred.name} $argString \\<Longrightarrow>\n$bodyString\""
+      case None =>
+    }
+  }
+
   private def abbreviateFields(): Unit = {
     strings += "text \\<open>Simpler field notation for the current heap\\<close>\n"
     strings += "locale Program = All_Functions +"
@@ -265,11 +293,11 @@ class Translator(val obl: ProofObligation, val filename: String) {
     for (h <- obl.s.oldHeaps) {
       strings += s"  fixes ${safeString(h._1)} :: Heap"
     }
-    strings += "  fixes curr :: Heap"
     strings += "\ncontext Program\nbegin\n"
+    val safeLabel = safeString(currentHeapLabel)
     for (f <- obl.s.program.fields) {
       strings += s"abbreviation ${f.name} :: \"ref \\<Rightarrow> ${translateType(f.typ)}\" where"
-      strings += s"  \"${f.name} r \\<equiv> ${f.name}_' (curr r)\"\n"
+      strings += s"  \"${f.name} r \\<equiv> ${f.name}_' ($safeLabel r)\"\n"
     }
     strings += "end\n"
   }
@@ -302,7 +330,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
   }
 
   private def translateHeaps(): Unit = {
-    translateHeap(obl.s.h, "curr")
     obl.s.oldHeaps.foreach { case (label, heap) => translateHeap(heap, label) }
   }
 
@@ -319,8 +346,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
               if (bc.args.length == 1) {
                 val ref = translateTerm(bc.args.head)
                 val permCondition = permCondSimp(bc.perm)
+                val condString = if (permCondition == terms.True) "" else translateTerm(permCondition) + " \\<Longrightarrow> "
                 val field = if (label == "curr") s"${bc.id.name} $ref" else s"${bc.id.name}_' (${safeString(label)} r)"
-                val chunk = translateTerm(permCondition) + s" \\<Longrightarrow> $field = ${translateTerm(bc.snap)}"
+                val chunk = s"$condString$field = ${translateTerm(bc.snap)}"
                 strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
               } else {
                 strings += s"  (* Error: $bc has wrong args *)"
@@ -329,9 +357,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
           }
         case qfc: state.QuantifiedFieldChunk =>
           val permCondition = terms.And(qfc.condition, permCondSimp(qfc.permValue))
+          val condString = translateTerm(permCondition) + " \\<Longrightarrow>"
           val field = if (label == "curr") s"${qfc.id.name} r" else s"${qfc.id.name}_' (${safeString(label)} r)"
-          val chunk = "\\<And>r. " + translateTerm(permCondition) + " \\<Longrightarrow> " +
-            s"$field = ${qfc.id}_${translateTerm(qfc.fvf)} r"
+          val chunk = s"\\<And>r. $condString $field = ${qfc.id}_${translateTerm(qfc.fvf)} r"
           strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
       }
     }
@@ -356,122 +384,130 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
   // Main translation function
   private def translateTerm(term: terms.Term,
+                            parenthesisLevel: Int = 0,
                             rewrites: Rewrites = basicRewrites,
                             options: TranslationOptions = defaultOptions): String = {
     // Recursive call, for convenience
-    def rec(term2: Term): String = translateTerm(term2, rewrites, options)
-    def maybeBracket(term2: terms.Term, options2: TranslationOptions = options): String =
-      if (isSingleTokenTerm(term2))
-        translateTerm(term2, rewrites, options2)
-      else "(" + translateTerm(term2, rewrites, options2) + ")"
+    def rec(term2: Term, pLevel: Int, ops: TranslationOptions = options): String = translateTerm(term2, pLevel, rewrites, options)
+    def wrap(s: String, pLevel: Int): String = if (pLevel <= parenthesisLevel) s"($s)" else s
+    def recOp(left: Term, op: String, right: Term, pLevel: Int): String = {
+      wrap(rec(left, pLevel) + s" $op " + rec(right, pLevel), pLevel)
+    }
 
     term match {
       // Functions and Applications
       case terms.Var(id, _, _) => rewrites.varRenames getOrElse(id, safeId(id))
       case terms.Let(bindings, body) =>
-        val bindString = bindings.transform((bVar, bTerm) => rec(bVar) + " = " + rec(bTerm)).mkString("; ")
-        s"let $bindString in ${rec(body)}"
+        val bindString = bindings.transform((bVar, bTerm) => rec(bVar, 10) + " = " + rec(bTerm, 10)).mkString("; ")
+        wrap(s"let $bindString in ${rec(body, 10)}", 10)
       case terms.Null => "Null"
       case terms.Unit => "UNIT"
       case terms.App(applicable, args, heapLabel) =>
         // TODO: if it is spurious precondition then remove it
         val og_fn = applicable.id.name.takeWhile(_ != '%')
         obl.s.program.findFunctionOptionally(og_fn) match {
-          case None => safeId(applicable.id) + args.map(" " + maybeBracket(_)).mkString("")
+          case None => safeId(applicable.id) + args.map(" " + rec(_, 100)).mkString("")
           case Some(f) =>
             if (applicable.id.name.contains("%precondition") && f.pres.isEmpty) "True"
-            else if (f.isPure) s"${safeId(applicable.id)}" + args.tail.map(" " + maybeBracket(_)).mkString("")
-            else s"${safeId(applicable.id)} ${safeString(heapLabel.getOrElse("NO_HEAP"))} " + args.tail.map(maybeBracket(_)).mkString(" ")
+            else if (f.isPure) s"${safeId(applicable.id)}" + args.tail.map(" " + rec(_, 100)).mkString("")
+            else s"${safeId(applicable.id)} ${safeString(heapLabel.getOrElse("NO_HEAP"))} " + args.tail.map(rec(_, 100)).mkString(" ")
         }
       // Stuff
       case terms.IntLiteral(i) => if (options.annotateIntLits) s"($i::int)" else i.toString()
       case b: terms.BooleanLiteral => b.toString
-      case terms.Quantification(q, vars, body, _, _, _, _) => quantifierToString(q) +
-        vars.map(v =>
+      case terms.Quantification(q, vars, body, _, _, _, _) =>
+        val varString = vars.map(v =>
           if (rewrites.varRenames.contains(v.id)) rewrites.varRenames(v.id)
-          else safeId(v.id)).mkString(" ") + ". " + rec(body)
+          else safeId(v.id) // TODO: use get or else?
+        ).mkString(" ")
+        wrap(s"${quantifierToString(q)}$varString. ${rec(body, 10)}", 10)
       // Arithmetic
-      case terms.Plus(left, right) => rec(left) + " + " + rec(right)
-      case terms.Minus(left, right) => rec(left) + " - " + rec(right)
-      case terms.Times(left, right) => rec(left) + " * " + rec(right)
-      case terms.Div(left, right) => "(" + rec(left) + " div " + rec(right) + ")"
-      case terms.Mod(left, right) => rec(left) + " mod " + rec(right)
+      case terms.Plus(left, right) => recOp(left, "+", right, 65)
+      case terms.Minus(left, right) => recOp(left, "-", right, 65)
+      case terms.Times(left, right) => recOp(left, "*", right, 70)
+      case terms.Div(left, right) => recOp(left, "div", right, 70)
+      case terms.Mod(left, right) => recOp(left, "mod", right, 70)
       // Logic
-      case terms.Not(t) => "\\<not>" + maybeBracket(t)
-      case terms.Or(subterms) => subterms.map(maybeBracket(_)).mkString(" \\<or> ") //seqOpToString(subterms, "\\<or>")
-      case terms.And(subterms) => subterms.map(maybeBracket(_)).mkString(" \\<and> ")
-      case terms.Implies(left, right) =>
-        maybeBracket(left) + " \\<longrightarrow> " + maybeBracket(right)
-      case terms.Iff(left, right) =>
-        rec(left) + " \\<longleftrightarrow> " + rec(right)
-      case terms.Ite(cond, tThen, tElse) => s"if ${maybeBracket(cond)} then ${maybeBracket(tThen)} else ${maybeBracket(tElse)}"
-      case terms.BuiltinEquals(left, right) => maybeBracket(left) + " = " + maybeBracket(right)
-      case terms.CustomEquals(left, right) => maybeBracket(left) + " = " + maybeBracket(right)
+      case terms.Not(t) => t match {
+        case terms.BuiltinEquals(left, right) => recOp(left, "\\<noteq>", right, 50)
+        case terms.CustomEquals(left, right) => recOp(left, "\\<noteq>", right, 50)
+        case terms.SeqIn(seq, elem) => recOp(elem, "\\<notin>:", seq, 51)
+        case terms.SetIn(elem, set) => recOp(elem, "\\<notin>\\<^sup>+", set, 51)
+        case _ => wrap("\\<not>" + rec(t, 40), 40)
+      }
+      case terms.Or(subterms) => subterms.map(rec(_, 30)).mkString(" \\<or> ") //seqOpToString(subterms, "\\<or>")
+      case terms.And(subterms) => subterms.map(rec(_, 35)).mkString(" \\<and> ")
+      case terms.Implies(left, right) => recOp(left, "\\<longrightarrow>", right, 25)
+      case terms.Iff(left, right) => recOp(left, "\\<longleftrightarrow>", right, 25)
+      case terms.Ite(t0, t1, t2) => wrap(s"if ${rec(t0, 10)} then ${rec(t1, 10)} else ${rec(t2, 10)}", 10)
+      case terms.BuiltinEquals(left, right) => recOp(left, "=", right, 50)
+      case terms.CustomEquals(left, right) => recOp(left, "=", right, 50)
       //Comparison
-      case terms.Less(left, right) => rec(left) + " < " + rec(right)
-      case terms.AtMost(left, right) => rec(left) + " \\<le> " + rec(right)
-      case terms.Greater(left, right) => rec(left) + " > " + rec(right)
-      case terms.AtLeast(left, right) => rec(left) + " \\<ge> " + rec(right)
+      case terms.Less(left, right) => recOp(left, "<", right, 51)
+      case terms.AtMost(left, right) => recOp(left, "\\<le>", right, 51)
+      case terms.Greater(left, right) => recOp(left, ">", right, 51)
+      case terms.AtLeast(left, right) => recOp(left, "\\<ge>", right, 51)
       // Permissions
       case terms.NoPerm => "(0::perm)"
       case terms.FullPerm => "(1::perm)"
       case terms.FractionPermLiteral(r) => r.toString
-      case terms.PermTimes(p0, p1) => s"${maybeBracket(p0)} * ${maybeBracket(p1)}"
-      case terms.IntPermTimes(p0, p1) => s"${maybeBracket(p0)} * ${maybeBracket(p1, options.annotateIntLitsOff())}"
-      case terms.PermIntDiv(p0, p1) => s"${maybeBracket(p0)} / ${maybeBracket(p1, options.annotateIntLitsOff())}"
-      case terms.PermPermDiv(p0, p1) => s"${maybeBracket(p0)} / ${maybeBracket(p1)}"
-      case terms.PermPlus(p0, p1) => s"${maybeBracket(p0)} + ${maybeBracket(p1)}"
-      case terms.PermMinus(p0, p1) => s"${maybeBracket(p0)} - ${maybeBracket(p1)}"
-      case terms.PermLess(p0, p1) => s"${maybeBracket(p0)} < ${maybeBracket(p1)}"
-      case terms.PermMin(p0, p1) => s"min ${maybeBracket(p0)} ${maybeBracket(p1)}"
+      case terms.PermTimes(p0, p1) => recOp(p0, "*", p1, 70)
+      case terms.IntPermTimes(p0, p1) => s"${rec(p0, 70)} * ${rec(p1, 70, options.annotateIntLitsOff())}"
+      case terms.PermIntDiv(p0, p1) => s"${rec(p0, 70)} / ${rec(p1, 70, options.annotateIntLitsOff())}"
+      case terms.PermPermDiv(p0, p1) => recOp(p0, "/", p1, 70)
+      case terms.PermPlus(p0, p1) => recOp(p0, "+", p1, 65)
+      case terms.PermMinus(p0, p1) => recOp(p0, "-", p1, 65)
+      case terms.PermLess(p0, p1) => recOp(p0, "<", p1, 51)
+      case terms.PermMin(p0, p1) => wrap(s"min ${rec(p0, 100)} ${rec(p1, 100)}", 100)
       // Sequences
-      case terms.SeqRanged(from, to) => "[" + rec(from) + ".." + rec(to) + "]"
+      case terms.SeqRanged(from, to) => "[" + rec(from, 0) + ".." + rec(to, 0) + "]"
       case terms.SeqNil(_) => "[]" // Note: not using sort, maybe add type annotation
-      case terms.SeqSingleton(elem) => "[" + rec(elem) + "]"
-      case terms.SeqAppend(left, right) => rec(left) + "@" + rec(right)
-      case terms.SeqDrop(seq, n) => "drop\\<^sub>Z " + maybeBracket(n) + " " + maybeBracket(seq)
-      case terms.SeqTake(seq, n) => "take\\<^sub>Z " + maybeBracket(n) + " " + maybeBracket(seq)
-      case terms.SeqLength(seq) => "length\\<^sub>Z " + maybeBracket(seq)
-      case terms.SeqAt(seq, idx) => maybeBracket(seq) + "!\\<^sub>Z" + maybeBracket(idx)
-      case terms.SeqIn(seq, elem) => rec(elem) + " \\<in>: " + rec(seq)
+      case terms.SeqSingleton(elem) => "[" + rec(elem, 0) + "]"
+      case terms.SeqAppend(left, right) => wrap(rec(left, 65) + "@" + rec(right, 65), 65)
+      case terms.SeqDrop(seq, n) => wrap(s"drop\\<^sub>Z ${rec(n, 100)} ${rec(seq, 100)}", 100)
+      case terms.SeqTake(seq, n) => wrap(s"take\\<^sub>Z ${rec(n, 100)} ${rec(seq, 100)}", 100)
+      case terms.SeqLength(seq) => wrap("length\\<^sub>Z " + rec(seq, 100), 100)
+      case terms.SeqAt(seq, idx) => recOp(seq, "!\\<^sub>Z", idx, 100)
+      case terms.SeqIn(seq, elem) => recOp(elem, "\\<in>:", seq, 51)
       case terms.SeqInTrigger(_, _) => "error: SeqInTrigger"
-      case terms.SeqUpdate(seq, idx, value) => s"list_update ${rec(seq)} ${rec(idx)} ${rec(value)}"
+      case terms.SeqUpdate(seq, idx, value) => wrap(s"list_update ${rec(seq, 100)} ${rec(idx, 100)} ${rec(value, 100)}", 100)
       // Sets
       case terms.EmptySet(_) => "{}\\<^sup>+"
-      case terms.SingletonSet(elem) => s"{${rec(elem)}}\\<^sup>+"
-      case terms.SetAdd(left, right) => "insert_fin " + maybeBracket(right) + " " + maybeBracket(left)
-      case terms.SetUnion(left, right) => rec(left) + " \\<union>\\<^sup>+ " + rec(right)
-      case terms.SetIntersection(left, right) => rec(left) + " \\<inter>\\<^sup>+ " + rec(right)
-      case terms.SetSubset(left, right) => rec(left) + " \\<subset>\\<^sup>+ " + rec(right)
-      case terms.SetDisjoint(left, right) => "disjnt_finset " + maybeBracket(left) + " " + maybeBracket(right)
-      case terms.SetDifference(left, right) => rec(left) + " \\<setminus>\\<^sup>+ " + rec(right)
-      case terms.SetIn(elem, set) => rec(elem) + " \\<in>\\<^sup>+ " + maybeBracket(set)
-      case terms.SetCardinality(set) => "card\\<^sub>Z " + maybeBracket(set)
+      case terms.SingletonSet(elem) => s"{${rec(elem, 0)}}\\<^sup>+"
+      case terms.SetAdd(left, right) => wrap(s"insert_fin ${rec(right, 100)} ${rec(left, 100)}", 100)
+      case terms.SetUnion(left, right) => recOp(left, "\\<union>\\<^sup>+", right, 65)
+      case terms.SetIntersection(left, right) => recOp(left, "\\<inter>\\<^sup>+", right, 70)
+      case terms.SetSubset(left, right) => recOp(left, "\\<subset>\\<^sup>+", right, 75)
+      case terms.SetDisjoint(left, right) => wrap(s"disjnt_finset ${rec(left, 100)} ${rec(right, 100)}", 100)
+      case terms.SetDifference(left, right) => recOp(left, "-", right, 65)
+      case terms.SetIn(elem, set) => recOp(elem, "\\<in>\\<^sup>+", set, 51)
+      case terms.SetCardinality(set) => wrap(s"card\\<^sub>Z ${rec(set, 100)}", 100)
       // Multisets
       case terms.EmptyMultiset(_) => "{#}"
-      case terms.SingletonMultiset(elem) => "{#" + rec(elem) + "#}"
-      case terms.MultisetAdd(_, _) => "error multiset add"
-      case terms.MultisetUnion(left, right) => rec(left) + " + " + rec(right)
-      case terms.MultisetCardinality(mset) => "size\\<^sub>Z " + maybeBracket(mset)
-      case terms.MultisetCount(mset, elem) => "count\\<^sub>Z " + maybeBracket(mset) + " " + maybeBracket(elem)
+      case terms.SingletonMultiset(elem) => s"{#${rec(elem, 0)}#}"
+      case terms.MultisetAdd(_, _) => "error: multiset add"
+      case terms.MultisetUnion(left, right) => recOp(left, "+", right, 65)
+      case terms.MultisetCardinality(mset) => wrap(s"size\\<^sub>Z ${rec(mset, 100)}", 100)
+      case terms.MultisetCount(mset, elem) => wrap(s"count\\<^sub>Z ${rec(mset, 100)} ${rec(elem, 100)}", 100)
       // Maps
+      // TODO: Use HOL-Finite_Map instead, fix everything
       case terms.EmptyMap(_, _) => "Map.empty"
-      case terms.MapLookup(base, key) => maybeBracket(base) + "@@" + maybeBracket(key)
-      case terms.MapCardinality(map) => "card\\<^sub>Z (dom " + maybeBracket(map) + ")"
-      case terms.MapUpdate(map, key, value) => maybeBracket(map) + "(" + rec(key) + "\\<mapsto>" + rec(value) + ")"
-      case terms.MapDomain(map) => "dom " + maybeBracket(map)
-      case terms.MapRange(map) => "ran " + maybeBracket(map)
+      case terms.MapLookup(base, key) => wrap(rec(base, 100) + "@@" + rec(key, 100), 100)
+      case terms.MapCardinality(map) => "card\\<^sub>Z (dom " + rec(map, 100) + ")"
+      case terms.MapUpdate(map, key, value) => rec(map, 100) + "(" + rec(key, 100) + "\\<mapsto>" + rec(value, 100) + ")"
+      case terms.MapDomain(map) => wrap(s"dom ${rec(map, 100)}", 100)
+      case terms.MapRange(map) => wrap(s"ran ${rec(map, 100)}", 100)
       // Snapshots
       case terms.Combine(_, _) => "undefined"
-      case terms.First(snap) => if (options.collapseSnaps) rec(snap) else "F" + rec(snap)
-      case terms.Second(snap) => if (options.collapseSnaps) rec(snap) else "S" + rec(snap)
+      case terms.First(snap) => if (options.collapseSnaps) rec(snap, parenthesisLevel) else "F" + rec(snap, parenthesisLevel)
+      case terms.Second(snap) => if (options.collapseSnaps) rec(snap, parenthesisLevel) else "S" + rec(snap, parenthesisLevel)
       // Quantified Permissions
       case terms.Lookup(field, fvf, at) =>
-        if (options.collapseSnaps) s"$field (${rec(fvf)} ${maybeBracket(at)})"
-        else s"${field}_${rec(fvf)} ${maybeBracket(at)}"
+        if (options.collapseSnaps) wrap(s"$field (${rec(fvf, 100)} ${rec(at, 100)})", 100)
+        else s"${field}_${rec(fvf, 0)} ${rec(at, 100)}"
       case terms.PermLookup(field, pm, at) => "undefined"
-      case terms.Domain(field, fvf) => s"(fvf_domain ${field}_${rec(fvf)})"
-      case terms.HasDomain(field, fvf, _) => s"(has_domain ${field}_${rec(fvf)})"
+      case terms.Domain(field, fvf) => wrap(s"fvf_domain ${field}_${rec(fvf, 0)}", 100)
+      case terms.HasDomain(field, fvf, _) => wrap(s"has_domain ${field}_${rec(fvf, 100)}", 100)
       case _: terms.FieldTrigger
            | _: terms.PredicateLookup
            | _: terms.PredicatePermLookup
@@ -483,7 +519,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.MWSFLookup(_) => "undefined"
       case terms.MagicWandChunkTerm(_) => "undefined"
       // Miscellaneous
-      case terms.SortWrapper(t, _) => rec(t)
+      case terms.SortWrapper(t, _) => rec(t, parenthesisLevel)
       case terms.Distinct(_) => "undefined"
       //case _ => term.getClass.toString + term.toString
     }
@@ -516,103 +552,121 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
-  private def translateExp(e: ast.Exp, isFrameAxiom: Boolean = false, resultString: Option[String] = None): String = {
-    def rec(e2: ast.Exp): String = translateExp(e2, isFrameAxiom, resultString)
-    def maybeBracket(e2: ast.Exp): String = if (isSingleTokenExp(e2)) rec(e2) else "(" + rec(e2) + ")"
+  private def translateExp(e: ast.Exp,
+                           parenthesisLevel: Int = 0,
+                           isFrameAxiom: Boolean = false,
+                           resultString: Option[String] = None): String = {
+    def rec(e2: ast.Exp, pLevel: Int): String = translateExp(e2, pLevel, isFrameAxiom, resultString)
+    def wrap(s: String, pLevel: Int): String = if (pLevel <= parenthesisLevel) s"($s)" else s
+    def recOp(left: ast.Exp, op: String, right: ast.Exp, pLevel: Int): String = {
+      wrap(rec(left, pLevel) + s" $op " + rec(right, pLevel), pLevel)
+    }
 
     e match {
-      case ast.Add(left, right) => rec(left) + " + " + rec(right)
-      case ast.Sub(left, right) => rec(left) + " - " + rec(right)
-      case ast.Mul(left, right) => rec(left) + " * " + rec(right)
-      case ast.Div(left, right) => rec(left) + " / " + rec(right)
-      case ast.Mod(left, right) => rec(left) + " % " + rec(right)
-      case ast.LtCmp(left, right) => rec(left) + " < " + rec(right)
-      case ast.LeCmp(left, right) => rec(left) + " \\<le> " + rec(right)
-      case ast.GtCmp(left, right) => rec(left) + " > " + rec(right)
-      case ast.GeCmp(left, right) => rec(left) + " \\<ge> " + rec(right)
-      case ast.EqCmp(left, right) => rec(left) + " = " + rec(right)
-      case ast.NeCmp(left, right) => rec(left) + " \\<noteq> " + rec(right)
+      case ast.Add(left, right) => recOp(left, "+", right, 65)
+      case ast.Sub(left, right) => recOp(left, "-", right, 65)
+      case ast.Mul(left, right) => recOp(left, "*", right, 70)
+      case ast.Div(left, right) => recOp(left, "div", right, 70)
+      case ast.Mod(left, right) => recOp(left, "mod", right, 70)
+      case ast.LtCmp(left, right) => recOp(left, "<", right, 51)
+      case ast.LeCmp(left, right) => recOp(left, "\\<le>", right, 51)
+      case ast.GtCmp(left, right) => recOp(left, ">", right, 51)
+      case ast.GeCmp(left, right) => recOp(left, "\\<ge>", right, 51)
+      case ast.EqCmp(left, right) => recOp(left, "=", right, 50)
+      case ast.NeCmp(left, right) => recOp(left, "\\<noteq>", right, 50)
 
       case ast.IntLit(i) => i.toString()
-      case ast.Minus(exp) => "(-" + rec(exp) + ")"
-      case ast.Or(left, right) => rec(left) + " \\<or> " + rec(right)
+      case ast.Minus(exp) => wrap("-" + rec(exp, 80), 80)
+      case ast.Or(left, right) => recOp(left, "\\<or>", right, 30)
       case ast.And(left, right) =>
-        if (isFrameAxiom && left.isPure) rec(right)
-        else if (isFrameAxiom && right.isPure) rec(left)
-        else maybeBracket(left) + " \\<and> " + maybeBracket(right)
+        if (isFrameAxiom && left.isPure) rec(right, parenthesisLevel)
+        else if (isFrameAxiom && right.isPure) rec(left, parenthesisLevel)
+        else rec(left, 35) + " \\<and> " + rec(right, 35)
       case ast.Implies(left, right) =>
-        translateExp(left, isFrameAxiom = false, resultString) + " \\<longrightarrow> " + rec(right)
-      case ast.MagicWand(left, right) => rec(left) + " \\<longrightarrow> " + rec(right)
-      case ast.Not(exp) => "\\<not>(" + rec(exp) + ")"
+        val translation = translateExp(left, parenthesisLevel, isFrameAxiom = false, resultString) +
+          " \\<longrightarrow> " + rec(right, 25)
+        wrap(translation, 25)
+      case ast.MagicWand(left, right) => rec(left, 50) + " \\<longrightarrow> " + rec(right, 50) // TODO: remove?
+      case ast.Not(exp) => wrap("\\<not>" + rec(exp, 40), 40)
       case ast.TrueLit() => "True"
       case ast.FalseLit() => "False"
       case ast.NullLit() => "Null"
       case ast.FieldAccessPredicate(loc, _) =>
-        if (isFrameAxiom) s"${loc.field.name}_' (h1 ${maybeBracket(loc.rcv)}) = ${loc.field.name}_' (h2 ${maybeBracket(loc.rcv)})"
+        if (isFrameAxiom) s"${loc.field.name}_' (h1 ${rec(loc.rcv, 100)}) = ${loc.field.name}_' (h2 ${rec(loc.rcv, 100)})"
         else "undefined"
+      case ast.PredicateAccessPredicate(loc, _) =>
+        if (isFrameAxiom){
+          val argString = loc.args.map(rec(_, 100)).mkString(", ")
+          s"${loc.predicateName}_eq (h1, $argString) (h2, $argString)"
+        } else {
+          val argString = loc.args.map(rec(_, 100)).mkString(" ")
+          wrap(s"${loc.predicateName} h $argString", 100)
+        }
 
       case ast.FuncApp(funcname, args) =>
         // Add implicit heap argument for heap-dep functions
         val maybeHeap = if (obl.s.program.findFunction(funcname).isPure) "" else " h"
-        funcname + maybeHeap + args.map(a => " " + maybeBracket(a)).mkString("")
-      case ast.DomainFuncApp(funcname, args, _) => funcname + " " + args.map(maybeBracket).mkString(" ")
-      case ast.FieldAccess(rcv, field) => s"(${field.name}_' (h ${maybeBracket(rcv)}))"
+        wrap(funcname + maybeHeap + args.map(a => " " + rec(a, 100)).mkString(""), 100)
+      case ast.DomainFuncApp(funcname, args, _) =>
+        wrap(funcname + " " + args.map(rec(_, 100)).mkString(" "), 100)
+      case ast.FieldAccess(rcv, field) => s"(${field.name}_' (h ${rec(rcv, 100)}))"
 
-      case ast.CondExp(cond, thn, els) => "(if " + rec(cond) + " then " + rec(thn) +
-        " else " + rec(els) + ")"
-      case ast.Asserting(_, body) => rec(body)
+      case ast.CondExp(cond, thn, els) => "(if " + rec(cond, 10) + " then " + rec(thn, 10) +
+        " else " + rec(els, 10) + ")"
+      case ast.Unfolding(_, body) => rec(body, parenthesisLevel)
+      case ast.Asserting(_, body) => rec(body, parenthesisLevel)
       case ast.Let(variable, exp, body) =>
-        s"let ${safeString(variable.name)} = ${rec(exp)} in ${rec(body)}"
+        s"let ${safeString(variable.name)} = ${rec(exp, 10)} in ${rec(body, 10)}"
       case ast.Forall(variables, _, exp) =>
-        "(\\<forall>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + rec(exp) + ")"
+        wrap("\\<forall>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + rec(exp, 10), 10)
       case ast.Exists(variables, _, exp) =>
-        "(\\<exists>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + translateExp(exp) + ")"
+        wrap("\\<exists>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + rec(exp, 10), 10)
       case ast.LocalVar(name, _) => safeString(name)
-      case ast.Result(_) => resultString.getOrElse("result")
+      case ast.Result(_) => wrap(resultString.getOrElse("result"), 100)
       case ast.LocalVarWithVersion(name, _) => safeString(name)
 
       case ast.EmptySeq(_) => "[]"
-      case ast.ExplicitSeq(elems) => "[" + elems.map(rec).mkString(", ") + "]"
-      case ast.RangeSeq(low, high) => s"[${rec(low)}..${rec(high)}]"
-      case ast.SeqAppend(left, right) => rec(left) + " @ " + rec(right)
-      case ast.SeqIndex(s, idx) => s"${maybeBracket(s)} !\\<^sub>Z ${maybeBracket(idx)}"
-      case ast.SeqTake(s, n) => "take\\<^sub>Z " + maybeBracket(n) + " " + maybeBracket(s)
-      case ast.SeqDrop(s, n) => "drop\\<^sub>Z " + maybeBracket(n) + " " + maybeBracket(s)
-      case ast.SeqContains(elem, s) => rec(elem) + " \\<in>: " + rec(s)
-      case ast.SeqUpdate(s, idx, elem) => s"list_update ${maybeBracket(s)} ${maybeBracket(idx)} ${maybeBracket(elem)}"
-      case ast.SeqLength(s) => "length\\<^sub>Z " + maybeBracket(s)
+      case ast.ExplicitSeq(elems) => "[" + elems.map(rec(_, 0)).mkString(", ") + "]"
+      case ast.RangeSeq(low, high) => s"[${rec(low, 0)}..${rec(high, 0)}]"
+      case ast.SeqAppend(left, right) => recOp(left, "@", right, 65)
+      case ast.SeqIndex(s, idx) => recOp(s, "!\\<^sub>Z", idx, 100)
+      case ast.SeqTake(s, n) => wrap("take\\<^sub>Z " + rec(n, 100) + " " + rec(s, 100), 100)
+      case ast.SeqDrop(s, n) => wrap("drop\\<^sub>Z " + rec(n, 100) + " " + rec(s, 100), 100)
+      case ast.SeqContains(elem, s) => recOp(elem, "\\<in>:", s, 51)
+      case ast.SeqUpdate(s, idx, elem) => wrap(s"list_update ${rec(s, 100)} ${rec(idx, 100)} ${rec(elem, 100)}", 100)
+      case ast.SeqLength(s) => wrap("length\\<^sub>Z " + rec(s, 100), 100)
 
       case ast.EmptySet(_) => "{}\\<^sup>+"
-      case ast.ExplicitSet(elems) => "{" + elems.map(rec).mkString(", ") + "}\\<^sup>+"
+      case ast.ExplicitSet(elems) => "{" + elems.map(rec(_, 0)).mkString(", ") + "}\\<^sup>+"
       case ast.EmptyMultiset(_) => "{#}"
-      case ast.ExplicitMultiset(elems) => "{#" + elems.map(rec).mkString(", ") + "#}"
+      case ast.ExplicitMultiset(elems) => "{#" + elems.map(rec(_, 0)).mkString(", ") + "#}"
       case ast.AnySetUnion(left, right) =>
-        maybeBracket(left) + s" \\<union>${setPostfix(left.typ)} " + maybeBracket(right)
+        wrap(rec(left, 65) + s" \\<union>${setPostfix(left.typ)} " + rec(right, 65), 65)
       case ast.AnySetIntersection(left, right) =>
-        maybeBracket(left) + s" \\<inter>${setPostfix(left.typ)} " + maybeBracket(right)
+        rec(left, 70) + s" \\<inter>${setPostfix(left.typ)} " + rec(right, 70)
       case ast.AnySetSubset(left, right) =>
-        maybeBracket(left) + s" \\<subset>${setPostfix(left.typ)} " + maybeBracket(right)
-      case ast.AnySetMinus(left, right) =>
-        maybeBracket(left) + " - " + maybeBracket(right)
-      case ast.AnySetContains(elem, s) =>
-        maybeBracket(elem) + s" \\<in>${setPostfix(s.typ)} " + maybeBracket(s)
+        wrap(rec(left, 75) + s" \\<subset>${setPostfix(left.typ)} " + rec(right, 75), 75)
+      case ast.AnySetMinus(left, right) => recOp(left, "-", right, 65)
+      case ast.AnySetContains(elem, s) => recOp(elem, s"\\<in>${setPostfix(s.typ)}", s, 51)
       case ast.AnySetCardinality(s) =>
         s.typ match {
-          case _: ast.SetType => "card\\<^sub>Z"
-          case _: ast.MultisetType => "size\\<^sub>Z"
+          case _: ast.SetType => "card\\<^sub>Z " + rec(s, 100)
+          case _: ast.MultisetType => "size\\<^sub>Z " + rec(s, 100)
         }
 
       case ast.EmptyMap(_, _) => "empty_finmap"
       case ast.ExplicitMap(elems) => "" //TODO
-      case ast.Maplet(key, value) => s"[${rec(key)}\\<mapsto>${rec(value)}]\\<^sup>+"
+      case ast.Maplet(key, value) => s"[${rec(key, 0)}\\<mapsto>${rec(value, 0)}]\\<^sup>+"
       case ast.MapUpdate(base, key, value) => "" // TODO
-      case ast.MapContains(key, base) => maybeBracket(key) + " \\<in>m " + maybeBracket(base)
-      case ast.MapCardinality(base) => "finmap_card " + maybeBracket(base)
-      case ast.MapDomain(base) => "dom_finmap " + maybeBracket(base)
-      case ast.MapRange(base) => "ran_finmap " + maybeBracket(base)
+      case ast.MapContains(key, base) => recOp(key, "\\<in>m", base, 46)
+      case ast.MapCardinality(base) => "finmap_card " + rec(base, 100)
+      case ast.MapDomain(base) => "dom_finmap " + rec(base, 100)
+      case ast.MapRange(base) => "ran_finmap " + rec(base, 100)
 
       case todo => "TODO: " + todo.toString
     }
+
+
   }
 
   // TODO: Can we swap this for the finalExp from de?
@@ -913,21 +967,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     // Add other free variables not in the store
     val fvs = freeVars.map(v => v.id) -- varMap.keys
     val newVars = fvs.map(id => id.name.replaceFirst("@", "_").split('@')(0))
-
     varMap ++= fvs.zip(newVars)
-
-    /* OLD VERSION WITH SORTING
-    val idGroups = (freeVars.map(v => v.id) -- varMap.keys).groupBy(id => id.toString.split('@')(0))
-
-    def orderId(id1: Identifier, id2: Identifier): Boolean = {
-      id1.name.split('@')(1).toInt > id2.name.split('@')(1).toInt
-    }
-
-    for ((prefix, list) <- idGroups) {
-      val ordered = list.toArray.sortWith(orderId)
-      val newVars = ordered.zipWithIndex.map { case (id, n) => safeString(prefix) + s"_$n" }
-      varMap ++= ordered.zip(newVars)
-    }*/
     varMap.toMap
   }
 
