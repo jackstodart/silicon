@@ -58,16 +58,13 @@ object DebugExporter {
   }
 }
 
-// Old type, should delete
-case class ReplacementTriple(exp: ast.Exp, condition: Option[ast.Exp], fun: ast.Function)
-
 // Things to rewrite as you translate terms
 case class Rewrites(varRenames: immutable.Map[state.Identifier, String],
-                    termReplacements: immutable.Map[ast.Exp, ReplacementTriple])
+                    termReplacements: immutable.Map[Term, String])
 
 object Rewrites {
   def apply(varRenames: immutable.Map[state.Identifier, String],
-            termReplacements: immutable.Map[ast.Exp, ReplacementTriple]): Rewrites = {
+            termReplacements: immutable.Map[Term, String]): Rewrites = {
     new Rewrites(varRenames, termReplacements)
   }
 
@@ -77,6 +74,10 @@ object Rewrites {
 
   def addRenames(rewrites: Rewrites, toAdd: Map[Identifier, String]): Rewrites = {
     Rewrites(rewrites.varRenames ++ toAdd, rewrites.termReplacements)
+  }
+
+  def addTermReplace(rewrites: Rewrites, t: Term, rep: String): Rewrites = {
+    Rewrites(rewrites.varRenames, rewrites.termReplacements + (t -> rep))
   }
 }
 
@@ -96,9 +97,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
     strings += "begin\n\n"
 
     declareDomainTypes()
-    defineFields()
-    translateDomainsAndFunctions()
-    abbreviateFields()
+    defineHeaps()
+    translateDomainsFunctionsPredicates()
     generateLemma()
 
     strings += "end"
@@ -109,27 +109,49 @@ class Translator(val obl: ProofObligation, val filename: String) {
     if (domains.nonEmpty) {
       strings += "text \\<open>Declare domain types\\<close>\n"
       domains.foreach(d => strings += "typedecl " + d._1.name)
-      strings += ""
+      strings += "\n"
     }
   }
 
-  private def defineFields(): Unit = {
-    if (obl.s.program.fields.isEmpty) return
+  private def defineHeaps(): Unit = {
+    strings += "text \\<open>Define fields and heaps\\<close>\n"
+    strings += "locale Heaps ="
+    if (obl.s.program.fields.nonEmpty) {
+      strings += "  (* Fields *)"
+      val fieldLength = obl.s.program.fields.map(_.name.length).max
+      for (fld <- obl.s.program.fields) {
+        val nameString = padString(safeString(fld.name) + "'", fieldLength+1)
+        strings += s"  fixes $nameString :: \"Heap $FN_ARR ref $FN_ARR ${translateType(fld.typ)}\""
+      }
+    }
+    strings += "  (* Old heaps *)"
+    val heapLabelLength = obl.s.oldHeaps.keys.map(_.length).max
+    for (h <- obl.s.oldHeaps) {
+      strings += s"  fixes ${padString(safeString(h._1), heapLabelLength)} :: Heap"
+    }
+    strings += ""
 
-    strings += "text \\<open>Define fields and heap\\<close>\n"
-    strings += "record Object ="
-    obl.s.program.fields.foreach(fld => strings += s"  ${fld.name}_' :: \"${translateType(fld.typ)}\"")
-    strings += "\ntype_synonym Heap = \"ref \\<Rightarrow> Object\"\n"
+    // Abbreviate fields
+    if (obl.s.program.fields.nonEmpty) {
+        strings += "context Heaps\nbegin\n"
+        val currentLabel = safeString(currentHeapLabel)
+        for (f <- obl.s.program.fields) {
+          strings += s"abbreviation ${f.name} :: \"ref $FN_ARR ${translateType(f.typ)}\" where"
+          strings += s"  \"${f.name} r \\<equiv> ${f.name}' $currentLabel r\"\n"
+        }
+        strings += "end\n"
+    }
+    strings += ""
   }
 
-  private def translateDomainsAndFunctions(): Unit = {
+  private def translateDomainsFunctionsPredicates(): Unit = {
     strings += "text \\<open>Translated domains and functions\\<close>\n"
     val (independentDomains, dependentDomains) = domains.partition(domDeps => DomainDeps.isSelfContained(domDeps._1))
 
     def functionType(fn: FuncLike, isPrecondition: Boolean = false, isHeapDep: Boolean = false): String = {
       val name = if (isPrecondition) fn.name + "_pre" else fn.name
-      val maybeHeap = if (isHeapDep) "Heap \\<Rightarrow> " else ""
-      val argString = fn.formalArgs.map(a => translateType(a.typ) + " \\<Rightarrow> ").mkString("")
+      val maybeHeap = if (isHeapDep) s"Heap $FN_ARR " else ""
+      val argString = fn.formalArgs.map(a => translateType(a.typ) + s" $FN_ARR ").mkString("")
       val typeString = if (isPrecondition) "bool" else translateType(fn.typ)
       name + " :: \"" + maybeHeap + argString + typeString + "\""
     }
@@ -176,16 +198,16 @@ class Translator(val obl: ProofObligation, val filename: String) {
       strings += "  assumes True (* no predicates to translate *)\n"
     } else {
       for (pred <- obl.s.program.predicates) {
-        val typeString = "Heap \\<Rightarrow> " + pred.formalArgs.map(a => translateType(a.typ) + " \\<Rightarrow> ").mkString("")
+        val typeString = s"Heap $FN_ARR " + pred.formalArgs.map(a => translateType(a.typ) + s" $FN_ARR ").mkString("")
         strings += s"  fixes ${pred.name} :: \"${typeString}bool\""
         val typeTuple = s"Heap \\<times> ${pred.formalArgs.map(a => translateType(a.typ)).mkString(" \\<times> ")}"
-        strings += s"  fixes ${pred.name}_eq :: \"$typeTuple \\<Rightarrow> $typeTuple \\<Rightarrow> bool\""
+        strings += s"  fixes ${pred.name}_eq :: \"$typeTuple $FN_ARR $typeTuple $FN_ARR bool\""
       }
       strings += ""
     }
 
     // Create combined locale
-    strings += "locale All_Functions = Program_Functions + Predicates +"
+    strings += "locale Program = Heaps + Program_Functions + Predicates +"
     independentDomains.foreach(d => strings += s"  ${d._1.name}_Domain +")
     dependentDomains.foreach(d => strings += s"  ${d._1.name}_Functions +")
 
@@ -207,7 +229,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     obl.s.program.functions.foreach(translateFunctionDef)
     strings += "  (* Predicate properties *)"
     obl.s.program.predicates.foreach(translatePredicate)
-    strings += ""
+    strings += "\n"
   }
 
   private def translateFunctionDef(fn: ast.Function): Unit = {
@@ -277,29 +299,10 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case Some(exp) =>
         val argString = "h " + pred.formalArgs.map(_.name).mkString(" ")
         val bodyString = translateExp(exp, parenthesisLevel = 51)
-        strings += s"  assumes unfold_${pred.name}: \"\\<And>$argString. ${pred.name} $argString \\<Longrightarrow>\n$bodyString\""
+        strings += s"  assumes unfold_${pred.name}: \"\\<And>$argString. " +
+          s"${pred.name} $argString \\<Longrightarrow>\n    $bodyString\""
       case None =>
     }
-  }
-
-  private def abbreviateFields(): Unit = {
-    strings += "text \\<open>Simpler field notation for the current heap\\<close>\n"
-    strings += "locale Program = All_Functions +"
-    if (obl.s.program.fields.isEmpty) {
-      strings += "  assumes True (* no functions to translate *)\n"
-      return
-    }
-
-    for (h <- obl.s.oldHeaps) {
-      strings += s"  fixes ${safeString(h._1)} :: Heap"
-    }
-    strings += "\ncontext Program\nbegin\n"
-    val safeLabel = safeString(currentHeapLabel)
-    for (f <- obl.s.program.fields) {
-      strings += s"abbreviation ${f.name} :: \"ref \\<Rightarrow> ${translateType(f.typ)}\" where"
-      strings += s"  \"${f.name} r \\<equiv> ${f.name}_' ($safeLabel r)\"\n"
-    }
-    strings += "end\n"
   }
 
   private def generateLemma(): Unit = {
@@ -334,7 +337,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
   }
 
   private def translateHeap(h: state.Heap, label: String): Unit = {
-    if (label == "curr")
+    if (label == currentHeapLabel)
       strings += "  (* Current heap *)"
     else
       strings += s"  (* Heap $label *)"
@@ -344,20 +347,23 @@ class Translator(val obl: ProofObligation, val filename: String) {
           bc.resourceID match {
             case FieldID =>
               if (bc.args.length == 1) {
-                val ref = translateTerm(bc.args.head)
+                val ref = translateTerm(bc.args.head, parenthesisLevel = 100)
                 val permCondition = permCondSimp(bc.perm)
-                val condString = if (permCondition == terms.True) "" else translateTerm(permCondition) + " \\<Longrightarrow> "
-                val field = if (label == "curr") s"${bc.id.name} $ref" else s"${bc.id.name}_' (${safeString(label)} r)"
+                val condString = if (permCondition == terms.True) "" else translateTerm(permCondition) + s" $META_ARR "
+                val field = if (label == currentHeapLabel) s"${bc.id.name} $ref" else s"${bc.id.name}' ${safeString(label)} $ref"
                 val chunk = s"$condString$field = ${translateTerm(bc.snap)}"
                 strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
               } else {
                 strings += s"  (* Error: $bc has wrong args *)"
               }
             case PredicateID =>
+              val chunk = safeString(bc.id.name) + s" ${safeString(label)} " +
+                bc.args.map(translateTerm(_, parenthesisLevel = 100)).mkString(" ")
+              strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
           }
         case qfc: state.QuantifiedFieldChunk =>
           val permCondition = terms.And(qfc.condition, permCondSimp(qfc.permValue))
-          val condString = translateTerm(permCondition) + " \\<Longrightarrow>"
+          val condString = translateTerm(permCondition) + s" $META_ARR"
           val field = if (label == "curr") s"${qfc.id.name} r" else s"${qfc.id.name}_' (${safeString(label)} r)"
           val chunk = s"\\<And>r. $condString $field = ${qfc.id}_${translateTerm(qfc.fvf)} r"
           strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
@@ -503,7 +509,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.Second(snap) => if (options.collapseSnaps) rec(snap, parenthesisLevel) else "S" + rec(snap, parenthesisLevel)
       // Quantified Permissions
       case terms.Lookup(field, fvf, at) =>
-        if (options.collapseSnaps) wrap(s"$field (${rec(fvf, 100)} ${rec(at, 100)})", 100)
+        if (options.collapseSnaps) wrap(s"$field' ${rec(fvf, 100)} ${rec(at, 100)}", 100)
         else s"${field}_${rec(fvf, 0)} ${rec(at, 100)}"
       case terms.PermLookup(field, pm, at) => "undefined"
       case terms.Domain(field, fvf) => wrap(s"fvf_domain ${field}_${rec(fvf, 0)}", 100)
@@ -609,7 +615,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         wrap(funcname + maybeHeap + args.map(a => " " + rec(a, 100)).mkString(""), 100)
       case ast.DomainFuncApp(funcname, args, _) =>
         wrap(funcname + " " + args.map(rec(_, 100)).mkString(" "), 100)
-      case ast.FieldAccess(rcv, field) => s"(${field.name}_' (h ${rec(rcv, 100)}))"
+      case ast.FieldAccess(rcv, field) => wrap(s"${field.name}' h ${rec(rcv, 100)}", 100)
 
       case ast.CondExp(cond, thn, els) => "(if " + rec(cond, 10) + " then " + rec(thn, 10) +
         " else " + rec(els, 10) + ")"
@@ -677,21 +683,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case (terms.SeqIn(_, _), ast.SeqContains(_, _)) => true
       case _ => false
     }
-  }
-
-  private def termMatchInReplacements(term: terms.Term, reps: Rewrites): Option[ReplacementTriple] = {
-    /*term match {
-      case _: terms.SetIn =>
-        println(term.toString)
-        reps.termReplacements.foreach(x => println(x._1))
-      case _ =>
-    }*/
-    for ((k, v) <- reps.termReplacements) {
-      if (termExpMatch(term, k)) {
-        return Some(v)
-      }
-    }
-    None
   }
 
   // Some custom logic for terms that can be partially filtered
@@ -1036,6 +1027,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
 // Things that will never be dependent on the particular program
 object ExportUtils {
+  val FN_ARR = "\\<Rightarrow>"
+  val META_ARR = "\\<Longrightarrow>"
+
   def permCondSimp(p: Term): Term = {
     booleanSimp(isPosSimp(collapseITE(p)))
   }
@@ -1133,6 +1127,10 @@ object ExportUtils {
       safe = safe.takeWhile(_ != '%')
     }
     safe.split('[')(0)
+  }
+
+  def padString(s: String, n: Int): String = {
+    s + (" " * (n - s.length))
   }
 
   def matches(lVar: ast.AbstractLocalVar, id: state.Identifier): Boolean = {
