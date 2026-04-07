@@ -2,12 +2,13 @@ package viper.silicon.debugger
 
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.ExportUtils._
-import viper.silicon.debugger.Rewrites.{addRename, addRenames}
+import viper.silicon.debugger.Rewrites.{addRename, addRenames, emptyRewrites}
 import viper.silicon.state
 import viper.silicon.state.{Identifier, terms}
-import viper.silicon.state.terms.Term
+import viper.silicon.state.terms.{Sort, Term, sorts}
 import viper.silicon.resources
 import viper.silicon.resources.{FieldID, PredicateID}
+import viper.silicon.state.terms.sorts.Snap
 import viper.silver.ast
 import viper.silver.ast.{Domain, DomainAxiom, FuncLike}
 import viper.silver.utility.Common.Rational
@@ -68,6 +69,8 @@ object Rewrites {
     new Rewrites(varRenames, termReplacements)
   }
 
+  val emptyRewrites: Rewrites = Rewrites(Map(), Map())
+
   def addRename(rewrites: Rewrites, id: Identifier, rep: String): Rewrites = {
     Rewrites(rewrites.varRenames + (id -> rep), rewrites.termReplacements)
   }
@@ -87,8 +90,48 @@ object Rewrites {
  */
 class Translator(val obl: ProofObligation, val filename: String) {
   var strings = ArrayBuffer[String]() // Strings to be written to .thy file
-  private lazy val basicRewrites: Rewrites = Rewrites(renaming2, immutable.Map())
+  private val basicRewrites: Rewrites = { // Rewrites(renaming2, immutable.Map())
+    // Add local vars from the store
+    val varRenames = mutable.Map[state.Identifier, String]()
+    for ((lVar, term) <- obl.s.g.termValues) {
+      term match {
+        case terms.Var(id, _, _) =>
+          if (!(varRenames contains id)) {
+            varRenames += id -> safeString(lVar.toString) // add if non-existent
+          } else if (idHead(id) == lVar.name) {
+            varRenames(id) = safeString(lVar.toString) // update if better match found
+          }
+        case _ => println(s"Store entry is not a Var: $lVar -> $term")
+      }
+    }
+    // Add location variables from the heap
+    val termReps = mutable.Map[Term, String]()
+    val varRewrites = Rewrites(varRenames.toMap, Map())
+    for ((label, heap) <- obl.s.oldHeaps) {
+      for (chunk <- heap.values) {
+        chunk match {
+          case bc: state.BasicChunk =>
+            bc.resourceID match {
+              // If the chunk is a basic field access, add renaming
+              case resources.FieldID =>
+                if (termReps contains bc.snap) {
+                  println(s"Snap already in termReps: reading ${bc.toString}, but ${bc.snap} is ${termReps(bc.snap)}")
+                }
+                else if (permIsPositive(bc.perm)) {
+                  val fieldLabelString = if (label == currentHeapLabel) bc.id.name else s"${bc.id}' ${safeString(label)}"
+                  termReps += bc.snap -> (fieldLabelString + " " + translateTerm(bc.args.head, rewrites = varRewrites))
+                } else ()
+              case _ =>
+            }
+          case _ => // TODO: Can we add snapshot maps to rewrites? Carry around the condition?
+        }
+      }
+    }
+    Rewrites(varRenames.toMap, termReps.toMap)
+  }
+
   // TODO: Not sure if safe, this assumes correct key insertion order???
+  // Maybe check it equals current heap, modulo unfolding?
   private val currentHeapLabel: String = obl.s.oldHeaps.keys.last
 
   def translateObligation(): Unit = {
@@ -243,7 +286,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         strings += s"  assumes ${fn.name}_def: \"\\<And>$argString. ${fn.name} $argString =\n    $fnRHS\""
       } else {
         strings += s"  assumes ${fn.name}_def: \"\\<And>$argString. " +
-          s"${fn.name}_pre $argString \\<Longrightarrow> ${fn.name} $argString =\n    $fnRHS\""
+          s"${fn.name}_pre $argString $META_ARR ${fn.name} $argString =\n    $fnRHS\""
       }
       // Translate internal function calls
       extractPropagation(fn.name) match {
@@ -256,7 +299,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
           def translate: Term => String = translateTerm(_, 50, newRewrites, options = defaultOptions.collapseSnapsOn())
 
           val bodyString = body match {
-            case terms.Implies(p0, p1) => s"${translate(p0)} \\<Longrightarrow> ${translate(p1)}"
+            case terms.Implies(p0, p1) => s"${translate(p0)} $META_ARR ${translate(p1)}"
             case _ => translate(body)
           }
           //val propString = translateTerm(prop, newRewrites, collapseSnaps = true).replace("NO_HEAP", "h")
@@ -266,7 +309,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
     // Postconditions
     if (fn.posts.nonEmpty) {
-      strings += s"  assumes ${fn.name}_posts: \"\\<And>$argStringWTypes. ${fn.name}_pre $argString \\<Longrightarrow>"
+      strings += s"  assumes ${fn.name}_posts: \"\\<And>$argStringWTypes. ${fn.name}_pre $argString $META_ARR"
       val postStrings = fn.posts.map(translateExp(_, parenthesisLevel = 35, resultString = Some(s"${fn.name} $argString")))
       val combined = "    " + postStrings.mkString("\n    \\<and> ")
       strings += combined + "\""
@@ -279,7 +322,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       strings += s"  assumes ${fn.name}_framing: \"\\<And>h1 $argStringH2. " +
         s"${fn.name}_pre $argStringH1 \\<and> ${fn.name}_pre $argStringH2"
       strings += s"    \\<and> $footprint"
-      strings += s"    \\<Longrightarrow> ${fn.name} $argStringH1 = ${fn.name} $argStringH2\""
+      strings += s"    $META_ARR ${fn.name} $argStringH1 = ${fn.name} $argStringH2\""
     }
   }
 
@@ -300,7 +343,17 @@ class Translator(val obl: ProofObligation, val filename: String) {
         val argString = "h " + pred.formalArgs.map(_.name).mkString(" ")
         val bodyString = translateExp(exp, parenthesisLevel = 51)
         strings += s"  assumes unfold_${pred.name}: \"\\<And>$argString. " +
-          s"${pred.name} $argString \\<Longrightarrow>\n    $bodyString\""
+          s"${pred.name} $argString $META_ARR\n    $bodyString\""
+      case None =>
+    }
+    pred.getAccessFragment match {
+      case Some(exp) =>
+        val varsString = "h1 h2 " + pred.formalArgs.map(a => s"${a.name} ${a.name}'").mkString(" ")
+        val argString1 = s"(h1, ${pred.formalArgs.map(_.name).mkString(", ")})"
+        val argString2 = s"(h1, ${pred.formalArgs.map(_.name + "'").mkString(", ")})"
+        val bodyString = translateExp(exp, parenthesisLevel = 51, isFrameAxiom = true)
+        strings += s"  assumes ${pred.name}_eq_def: \"\\<And>$varsString. ${pred.name}_eq $argString1 $argString2 $META_ARR"
+        strings += s"    $bodyString\""
       case None =>
     }
   }
@@ -321,14 +374,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
   private def translateStore(): Unit = {
     strings += "  (* Local variables *)"
-    for ((v, (t, e)) <- obl.s.g.values) {
-      if (e.isDefined) {
-        val typeStr = if (heapMap contains t.toString) {
-          heapMap(t.toString).toString().replace("__Abst","")
-        } else {
-          translateType(e.get.typ) }
-        strings += s"  fixes ${safeString(v.name)} :: \"$typeStr\""
-      }
+    for ((v, (t, _)) <- obl.s.g.values) {
+        strings += s"  fixes ${safeString(v.name)} :: \"${translateSort(t.sort)}\""
     }
   }
 
@@ -399,6 +446,10 @@ class Translator(val obl: ProofObligation, val filename: String) {
     def recOp(left: Term, op: String, right: Term, pLevel: Int): String = {
       wrap(rec(left, pLevel) + s" $op " + rec(right, pLevel), pLevel)
     }
+
+    if (rewrites.termReplacements contains term) {
+      return wrap(rewrites.termReplacements(term), 100)
+    } // else
 
     term match {
       // Functions and Applications
@@ -547,6 +598,28 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
+  private def translateSort(sort: Sort): String = {
+    sort match {
+      case sorts.Snap => "error: Snap sort"
+      case sorts.Int => "int"
+      case sorts.Bool => "bool"
+      case sorts.Ref => "ref"
+      case sorts.Perm => "perm"
+      case sorts.Unit => "unit"
+      case sorts.Seq(elementsSort) => translateSort(elementsSort) + " list"
+      case sorts.Set(elementsSort) => translateSort(elementsSort) + " set"
+      case sorts.Multiset(elementsSort) => translateSort(elementsSort) + " multiset"
+      case sorts.Map(keySort, valueSort) => "TODO: Map" // TODO
+      case sorts.UserSort(id) => safeString(id.name)
+      case sorts.SMTSort(id) => safeString(id.name)
+      case sorts.FieldValueFunction(codomainSort, _) => "" // TODO
+      case sorts.PredicateSnapFunction(codomainSort, _) => "" // TODO
+      case sorts.MagicWandSnapFunction => "" // TODO
+      case sorts.FieldPermFunction() => "" // TODO
+      case sorts.PredicatePermFunction() => "" // TODO
+    }
+  }
+
   def translateFunType(fn: ast.FuncLike): String = {
     "" // TODO
   }
@@ -561,8 +634,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
   private def translateExp(e: ast.Exp,
                            parenthesisLevel: Int = 0,
                            isFrameAxiom: Boolean = false,
+                           variablePrime: Boolean = false,
                            resultString: Option[String] = None): String = {
-    def rec(e2: ast.Exp, pLevel: Int): String = translateExp(e2, pLevel, isFrameAxiom, resultString)
+    def rec(e2: ast.Exp, pLevel: Int): String = translateExp(e2, pLevel, isFrameAxiom, variablePrime, resultString)
     def wrap(s: String, pLevel: Int): String = if (pLevel <= parenthesisLevel) s"($s)" else s
     def recOp(left: ast.Exp, op: String, right: ast.Exp, pLevel: Int): String = {
       wrap(rec(left, pLevel) + s" $op " + rec(right, pLevel), pLevel)
@@ -589,7 +663,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         else if (isFrameAxiom && right.isPure) rec(left, parenthesisLevel)
         else rec(left, 35) + " \\<and> " + rec(right, 35)
       case ast.Implies(left, right) =>
-        val translation = translateExp(left, parenthesisLevel, isFrameAxiom = false, resultString) +
+        val translation = translateExp(left, parenthesisLevel, isFrameAxiom = false, variablePrime, resultString) +
           " \\<longrightarrow> " + rec(right, 25)
         wrap(translation, 25)
       case ast.MagicWand(left, right) => rec(left, 50) + " \\<longrightarrow> " + rec(right, 50) // TODO: remove?
@@ -598,12 +672,19 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.FalseLit() => "False"
       case ast.NullLit() => "Null"
       case ast.FieldAccessPredicate(loc, _) =>
-        if (isFrameAxiom) s"${loc.field.name}_' (h1 ${rec(loc.rcv, 100)}) = ${loc.field.name}_' (h2 ${rec(loc.rcv, 100)})"
+        if (isFrameAxiom) {
+          val loc1 = rec(loc.rcv, 100)
+          val loc2 = translateExp(loc.rcv, 100, isFrameAxiom, variablePrime = true, resultString)
+          s"${loc.field.name}' h1 $loc1 = ${loc.field.name}' h2 $loc2"
+        }
         else "undefined"
       case ast.PredicateAccessPredicate(loc, _) =>
         if (isFrameAxiom){
-          val argString = loc.args.map(rec(_, 100)).mkString(", ")
-          s"${loc.predicateName}_eq (h1, $argString) (h2, $argString)"
+          val argString1 = loc.args.map(rec(_, 100)).mkString(", ")
+          val argString2 = loc.args.map(
+            translateExp(_, parenthesisLevel, isFrameAxiom, variablePrime = true, resultString)
+          ).mkString(", ")
+          s"${loc.predicateName}_eq (h1, $argString1) (h2, $argString2)"
         } else {
           val argString = loc.args.map(rec(_, 100)).mkString(" ")
           wrap(s"${loc.predicateName} h $argString", 100)
@@ -627,9 +708,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
         wrap("\\<forall>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + rec(exp, 10), 10)
       case ast.Exists(variables, _, exp) =>
         wrap("\\<exists>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + rec(exp, 10), 10)
-      case ast.LocalVar(name, _) => safeString(name)
+      case ast.LocalVar(name, _) => if (variablePrime) safeString(name) + "'" else safeString(name)
       case ast.Result(_) => wrap(resultString.getOrElse("result"), 100)
-      case ast.LocalVarWithVersion(name, _) => safeString(name)
+      case ast.LocalVarWithVersion(name, _) => if (variablePrime) safeString(name) + "'" else safeString(name)
 
       case ast.EmptySeq(_) => "[]"
       case ast.ExplicitSeq(elems) => "[" + elems.map(rec(_, 0)).mkString(", ") + "]"
@@ -671,8 +752,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
       case todo => "TODO: " + todo.toString
     }
-
-
   }
 
   // TODO: Can we swap this for the finalExp from de?
@@ -869,63 +948,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
     d => !d.name.endsWith("WellFoundedOrder")).map(
     d => (d, getDomainDeps(d)))
 
-  // Rename variables (only, not Snaps) based on store and heap
-  private val renaming2: immutable.Map[state.Identifier, String] = {
-    val renaming = mutable.Map[state.Identifier, String]()
-    // Add local vars from the store
-    for ((lVar, term) <- obl.s.g.termValues) {
-      term match {
-        case terms.Var(id, _, _) =>
-      if (!(renaming contains id)) {
-      renaming += id -> safeString(lVar.toString) // add if non-existent
-      } else if (idHead(id) == lVar.name) {
-        renaming(id) = safeString(lVar.toString) // update if better match found
-      }
-        case _ => ()
-      }
-    }
-    // Add location variables from the heap
-    for (chunk <- obl.s.h.values) {
-      chunk match {
-        case bc: state.BasicChunk =>
-          bc.resourceID match {
-            // If the chunk is a basic field access, add renaming
-            case resources.FieldID =>
-              (bc.args.head, bc.snap) match {
-                case (v: terms.Var, s: terms.Var) =>
-                  renaming += s.id -> (renaming.getOrElse(v.id, safeId(v.id)) + "_" + bc.id.name)
-                case _ => println("FieldID doesn't match: " + bc.snap + bc.args)
-              }
-            case _ => ()
-          }
-        case _ =>
-      }
-    }
-    renaming.toMap
-  }
-
-  // Map recording all predicates in the heap
-  private val heapMap: immutable.Map[String, ast.Type] = {
-    val tempMap = mutable.Map[String, ast.Type]()
-/*    for (chunk <- obl.s.h.values) {
-      chunk match {
-        case c: state.BasicChunk =>
-          c.resourceID match {
-            case viper.silicon.resources.PredicateID =>
-              if (abstractionMap contains c.id.name) {
-                println("Testings args in processHeap()")
-                c.args.head match {
-                  case terms.Var(id, _, _) => tempMap(id.name) = abstractionMap(c.id.name)._1
-                }
-                // heapMap(c.args.head) = abstractionMap(c.id.name)._1
-              }
-            case _ =>
-          }
-      }
-    }*/
-    tempMap.toMap
-  }
-
   private lazy val freeVars: InsertionOrderedSet[terms.Var] = {
     def deToVars(de: DebugExp): InsertionOrderedSet[terms.Var] = {
       if (de.term.isDefined) {
@@ -999,30 +1021,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
       }
     }
   }
-
-  /*
-      val prefixString = maybePrefix match {
-        case None => ""
-        case Some(t) => filterPure(t) match {
-          case None => ""
-          case Some(t2) => translateTerm(t2)
-        }
-      }
-      de.children.foreach()
-
-    } if (de.term.isDefined) {
-      if (notSnap(de.term.get)) {
-        //val varTerm = filterPure(variablise(de.term.get))
-        val varTerm = filterPure(de.term.get)
-        val pureTerm = filterPure(de.term.get)
-        if (pureTerm.isDefined) {
-          strings += "  assumes " + de.id + ": \"" + translateTerm(varTerm.get) + "\""
-        }
-      }
-    }
-    }
-  } */
-
 }
 
 // Things that will never be dependent on the particular program
@@ -1033,6 +1031,8 @@ object ExportUtils {
   def permCondSimp(p: Term): Term = {
     booleanSimp(isPosSimp(collapseITE(p)))
   }
+
+  def permIsPositive(p: Term): Boolean = permCondSimp(p) == terms.True
 
   def booleanSimp(c: Term): Term = {
     c match {
