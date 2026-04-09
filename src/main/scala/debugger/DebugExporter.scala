@@ -4,11 +4,11 @@ import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.ExportUtils._
 import viper.silicon.debugger.Rewrites.{addRename, addRenames, emptyRewrites}
 import viper.silicon.state
-import viper.silicon.state.{Identifier, terms}
+import viper.silicon.state.{BasicChunk, Identifier, terms}
 import viper.silicon.state.terms.{Sort, Term, sorts}
 import viper.silicon.resources
+import viper.silicon.resources.kinds.Chunk
 import viper.silicon.resources.{FieldID, PredicateID}
-import viper.silicon.state.terms.sorts.Snap
 import viper.silver.ast
 import viper.silver.ast.{Domain, DomainAxiom, FuncLike}
 import viper.silver.utility.Common.Rational
@@ -90,7 +90,10 @@ object Rewrites {
  */
 class Translator(val obl: ProofObligation, val filename: String) {
   var strings = ArrayBuffer[String]() // Strings to be written to .thy file
-  private val basicRewrites: Rewrites = { // Rewrites(renaming2, immutable.Map())
+  private val currentHeapLabel: String = obl.s.oldHeaps.keys.last
+  private val (basicRewrites: Rewrites,
+               fieldChunks: immutable.Map[Term, (BasicChunk, String)],
+               predicateChunks: immutable.Map[Term, (BasicChunk, String)]) = { // Rewrites(renaming2, immutable.Map())
     // Add local vars from the store
     val varRenames = mutable.Map[state.Identifier, String]()
     for ((lVar, term) <- obl.s.g.termValues) {
@@ -106,33 +109,34 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
     // Add location variables from the heap
     val termReps = mutable.Map[Term, String]()
+    val fields = mutable.Map[Term, (BasicChunk, String)]()
+    val predicates = mutable.Map[Term, (BasicChunk, String)]()
     val varRewrites = Rewrites(varRenames.toMap, Map())
-    for ((label, heap) <- obl.s.oldHeaps) {
+    for ((label, heap) <- obl.s.oldHeaps.toList.reverse) {
       for (chunk <- heap.values) {
         chunk match {
           case bc: state.BasicChunk =>
             bc.resourceID match {
-              // If the chunk is a basic field access, add renaming
+              // If the chunk is a basic field access, add rewriting
               case resources.FieldID =>
-                if (termReps contains bc.snap) {
-                  println(s"Snap already in termReps: reading ${bc.toString}, but ${bc.snap} is ${termReps(bc.snap)}")
-                }
-                else if (permIsPositive(bc.perm)) {
+                // TODO: Add condition if we can't decide it's positive
+                if (!(termReps contains bc.snap) && permIsPositive(bc.perm)) {
                   val fieldLabelString = if (label == currentHeapLabel) bc.id.name else s"${bc.id}' ${safeString(label)}"
                   termReps += bc.snap -> (fieldLabelString + " " + translateTerm(bc.args.head, rewrites = varRewrites))
-                } else ()
+                  fields += bc.snap -> (bc, label)
+                }
+              case resources.PredicateID =>
+                if (!(termReps contains bc.snap) && permIsPositive(bc.perm)) {
+                  predicates += bc.snap -> (bc, label)
+                }
               case _ =>
             }
           case _ => // TODO: Can we add snapshot maps to rewrites? Carry around the condition?
         }
       }
     }
-    Rewrites(varRenames.toMap, termReps.toMap)
+    (Rewrites(varRenames.toMap, termReps.toMap), fields.toMap, predicates.toMap)
   }
-
-  // TODO: Not sure if safe, this assumes correct key insertion order???
-  // Maybe check it equals current heap, modulo unfolding?
-  private val currentHeapLabel: String = obl.s.oldHeaps.keys.last
 
   def translateObligation(): Unit = {
     strings += s"theory $filename\n"
@@ -388,30 +392,40 @@ class Translator(val obl: ProofObligation, val filename: String) {
       strings += "  (* Current heap *)"
     else
       strings += s"  (* Heap $label *)"
+    def fieldSnapInOtherHeap(s: Term): Boolean = (fieldChunks contains s) && fieldChunks(s)._2 != label
+    def predSnapInOtherHeap(s: Term): Boolean = (predicateChunks contains s) && predicateChunks(s)._2 != label
     for ((c, idx) <- h.values.zipWithIndex) {
       c match {
         case bc: state.BasicChunk =>
           bc.resourceID match {
             case FieldID =>
               if (bc.args.length == 1) {
-                val ref = translateTerm(bc.args.head, parenthesisLevel = 100)
-                val permCondition = permCondSimp(bc.perm)
-                val condString = if (permCondition == terms.True) "" else translateTerm(permCondition) + s" $META_ARR "
-                val field = if (label == currentHeapLabel) s"${bc.id.name} $ref" else s"${bc.id.name}' ${safeString(label)} $ref"
-                val chunk = s"$condString$field = ${translateTerm(bc.snap)}"
-                strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
+                if (fieldSnapInOtherHeap(bc.snap)) {
+                  val ref = translateTerm(bc.args.head, parenthesisLevel = 100)
+                  val permCondition = permCondSimp(bc.perm)
+                  val condString = if (permCondition == terms.True) "" else translateTerm(permCondition) + s" $META_ARR "
+                  val field = if (label == currentHeapLabel) s"${bc.id.name} $ref" else s"${bc.id.name}' ${safeString(label)} $ref"
+                  val chunk = s"$condString$field = ${translateTerm(bc.snap)}"
+                  strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
+                }
               } else {
                 strings += s"  (* Error: $bc has wrong args *)"
               }
             case PredicateID =>
-              val chunk = safeString(bc.id.name) + s" ${safeString(label)} " +
+              val chunkString = safeString(bc.id.name) + s" ${safeString(label)} " +
                 bc.args.map(translateTerm(_, parenthesisLevel = 100)).mkString(" ")
-              strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
+              val predEq = if (predSnapInOtherHeap(bc.snap)) {
+                val (otherChunk, otherLabel) = predicateChunks(bc.snap)
+                val thisTuple = s"(${safeString(label)}, ${bc.args.map(translateTerm(_)).mkString(", ")})"
+                val otherTuple = s"(${safeString(otherLabel)}, ${otherChunk.args.map(translateTerm(_)).mkString(", ")})"
+                s" \\<and> ${bc.id.name}_eq $thisTuple $otherTuple"
+              } else ""
+              strings += s"  assumes ${safeString(label)}_$idx: \"$chunkString$predEq\""
           }
         case qfc: state.QuantifiedFieldChunk =>
           val permCondition = terms.And(qfc.condition, permCondSimp(qfc.permValue))
           val condString = translateTerm(permCondition) + s" $META_ARR"
-          val field = if (label == "curr") s"${qfc.id.name} r" else s"${qfc.id.name}_' (${safeString(label)} r)"
+          val field = if (label == "curr") s"${qfc.id.name} r" else s"${qfc.id.name}' ${safeString(label)} r"
           val chunk = s"\\<And>r. $condString $field = ${qfc.id}_${translateTerm(qfc.fvf)} r"
           strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
       }
@@ -607,7 +621,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case sorts.Perm => "perm"
       case sorts.Unit => "unit"
       case sorts.Seq(elementsSort) => translateSort(elementsSort) + " list"
-      case sorts.Set(elementsSort) => translateSort(elementsSort) + " set"
+      case sorts.Set(elementsSort) => translateSort(elementsSort) + " finset"
       case sorts.Multiset(elementsSort) => translateSort(elementsSort) + " multiset"
       case sorts.Map(keySort, valueSort) => "TODO: Map" // TODO
       case sorts.UserSort(id) => safeString(id.name)
