@@ -2,15 +2,14 @@ package viper.silicon.debugger
 
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.ExportUtils._
-import viper.silicon.debugger.Rewrites.{addRename, addRenames, emptyRewrites}
+import viper.silicon.debugger.Rewrites.{addRename, addRenames, addTermReplace, emptyRewrites}
 import viper.silicon.state
 import viper.silicon.state.{BasicChunk, Identifier, terms}
 import viper.silicon.state.terms.{Sort, Term, sorts}
 import viper.silicon.resources
-import viper.silicon.resources.kinds.Chunk
 import viper.silicon.resources.{FieldID, PredicateID}
 import viper.silver.ast
-import viper.silver.ast.{Domain, DomainAxiom, FuncLike}
+import viper.silver.ast.{Domain, DomainAxiom, Exp, Program}
 import viper.silver.utility.Common.Rational
 
 import java.nio.charset.StandardCharsets
@@ -33,13 +32,13 @@ object DebugExporter {
         println("File already exists, overwrite? (y/n)")
         val overwrite = readLine()
         if (overwrite.equals("y") || overwrite.equals("Y")) {
-          println("Overwriting file...")
+          print("Overwriting file...")
         } else {
           println("Did not export")
           return
         }
       } else {
-        println("Exporting to file...")
+        print("Exporting to file...")
         Files.createFile(filepath)
       }
 
@@ -50,6 +49,7 @@ object DebugExporter {
       t.translateObligation()
       t.strings.foreach(s => writer.write(s + "\n"))
       writer.close()
+      print(" Success!\n")
 
     } catch {
       case e: Throwable =>
@@ -90,7 +90,7 @@ object Rewrites {
  */
 class Translator(val obl: ProofObligation, val filename: String) {
   var strings = ArrayBuffer[String]() // Strings to be written to .thy file
-  private val currentHeapLabel: String = obl.s.oldHeaps.keys.last
+  private val currentHeapLabel: String = if (obl.s.oldHeaps.nonEmpty) obl.s.oldHeaps.keys.last else ""
   private val (basicRewrites: Rewrites,
                fieldChunks: immutable.Map[Term, (BasicChunk, String)],
                predicateChunks: immutable.Map[Term, (BasicChunk, String)]) = { // Rewrites(renaming2, immutable.Map())
@@ -171,12 +171,16 @@ class Translator(val obl: ProofObligation, val filename: String) {
         strings += s"  fixes $nameString :: \"Heap $FN_ARR ref $FN_ARR ${translateType(fld.typ)}\""
       }
     }
-    strings += "  (* Old heaps *)"
-    val heapLabelLength = obl.s.oldHeaps.keys.map(_.length).max
-    for (h <- obl.s.oldHeaps) {
-      strings += s"  fixes ${padString(safeString(h._1), heapLabelLength)} :: Heap"
+    if (obl.s.oldHeaps.nonEmpty) {
+      strings += "  (* Old heaps *)"
+      val heapLabelLength = obl.s.oldHeaps.keys.map(_.length).max
+      for (h <- obl.s.oldHeaps) {
+        strings += s"  fixes ${padString(safeString(h._1), heapLabelLength)} :: Heap"
+      }
+      strings += ""
+    } else {
+      strings += "  assumes True (* no heaps to translate *)\n"
     }
-    strings += ""
 
     // Abbreviate fields
     if (obl.s.program.fields.nonEmpty) {
@@ -195,7 +199,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     strings += "text \\<open>Translated domains and functions\\<close>\n"
     val (independentDomains, dependentDomains) = domains.partition(domDeps => DomainDeps.isSelfContained(domDeps._1))
 
-    def functionType(fn: FuncLike, isPrecondition: Boolean = false, isHeapDep: Boolean = false): String = {
+    def functionType(fn: ast.FuncLike, isPrecondition: Boolean = false, isHeapDep: Boolean = false): String = {
       val name = if (isPrecondition) fn.name + "_pre" else fn.name
       val maybeHeap = if (isHeapDep) s"Heap $FN_ARR " else ""
       val argString = fn.formalArgs.map(a => translateType(a.typ) + s" $FN_ARR ").mkString("")
@@ -231,10 +235,10 @@ class Translator(val obl: ProofObligation, val filename: String) {
       strings += "  assumes True (* no functions to translate *)\n"
     } else {
       for (fn <- obl.s.program.functions) {
+        strings += s"  fixes " + functionType(fn, isHeapDep = !fn.isPure)
         if (fn.pres.nonEmpty) {
           strings += s"  fixes " + functionType(fn, isPrecondition = true, isHeapDep = !fn.isPure)
         }
-        strings += s"  fixes " + functionType(fn, isHeapDep = !fn.isPure)
       }
       strings += ""
     }
@@ -293,10 +297,11 @@ class Translator(val obl: ProofObligation, val filename: String) {
           s"${fn.name}_pre $argString $META_ARR ${fn.name} $argString =\n    $fnRHS\""
       }
       // Translate internal function calls
-      extractPropagation(fn.name) match {
+      getPrecPropagationExp(fn, obl.s.program) match {
         case None =>
-        case Some((_, terms.True)) =>
-        case Some((vars, body)) =>
+        case Some(exp) =>
+          strings += s"  assumes ${fn.name}_calls: \"\\<And>$argStringWTypes. ${translateExp(exp)}\""
+          /*
           var newRenames = vars.tail.map(v => (v.id, v.id.name.takeWhile(_ != '@'))).toMap
           if (!fn.isPure) newRenames = newRenames + (vars.head.id -> "h")
           val newRewrites = addRenames(basicRewrites, newRenames)
@@ -309,6 +314,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
           //val propString = translateTerm(prop, newRewrites, collapseSnaps = true).replace("NO_HEAP", "h")
           // TODO: use argString and fix variables with unnecessary suffixes
           strings += s"  assumes ${fn.name}_calls: \"\\<And>$argStringWTypes. ${bodyString.replace("NO_HEAP", "h")}\""
+          */
       }
     }
     // Postconditions
@@ -321,23 +327,12 @@ class Translator(val obl: ProofObligation, val filename: String) {
     // Framing axioms
     if (!fn.isPure) {
       val argStringH1 = "h1" + argString.drop(1)
-      val argStringH2 = "h2" + argString.drop(1)
+      val argStringH2 = "h2 " + fn.formalArgs.map(_.name + "'").mkString(" ")
       val footprint = fn.pres.filter(!_.isPure).map(translateExp(_, parenthesisLevel = 35, isFrameAxiom = true)).mkString(" \\<and> ")
       strings += s"  assumes ${fn.name}_framing: \"\\<And>h1 $argStringH2. " +
         s"${fn.name}_pre $argStringH1 \\<and> ${fn.name}_pre $argStringH2"
       strings += s"    \\<and> $footprint"
       strings += s"    $META_ARR ${fn.name} $argStringH1 = ${fn.name} $argStringH2\""
-    }
-  }
-
-  // For an axiom of the form QA vars :: prop, extracts vars and prop
-  private def extractPropagation(fn: String): Option[(Seq[terms.Var], Term)] = {
-    val propAx = obl.s.functionData(fn).bodyPreconditionPropagationAxiom
-    propAx match {
-      case Seq(t) => t match {
-        case q: terms.Quantification => Some((q.vars, q.body))
-      }
-      case _ => None
     }
   }
 
@@ -450,7 +445,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
   val defaultOptions = TranslationOptions(parenthesisLevel = 0, collapseSnaps = false, annotateIntLits = true)
 
   // Main translation function
-  private def translateTerm(term: terms.Term,
+  private def translateTerm(term: Term,
                             parenthesisLevel: Int = 0,
                             rewrites: Rewrites = basicRewrites,
                             options: TranslationOptions = defaultOptions): String = {
@@ -543,15 +538,15 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.SeqInTrigger(_, _) => "error: SeqInTrigger"
       case terms.SeqUpdate(seq, idx, value) => wrap(s"list_update ${rec(seq, 100)} ${rec(idx, 100)} ${rec(value, 100)}", 100)
       // Sets
-      case terms.EmptySet(_) => "{}\\<^sup>+"
-      case terms.SingletonSet(elem) => s"{${rec(elem, 0)}}\\<^sup>+"
-      case terms.SetAdd(left, right) => wrap(s"insert_fin ${rec(right, 100)} ${rec(left, 100)}", 100)
-      case terms.SetUnion(left, right) => recOp(left, "\\<union>\\<^sup>+", right, 65)
-      case terms.SetIntersection(left, right) => recOp(left, "\\<inter>\\<^sup>+", right, 70)
-      case terms.SetSubset(left, right) => recOp(left, "\\<subset>\\<^sup>+", right, 75)
-      case terms.SetDisjoint(left, right) => wrap(s"disjnt_finset ${rec(left, 100)} ${rec(right, 100)}", 100)
+      case terms.EmptySet(_) => "{||}"
+      case terms.SingletonSet(elem) => s"{|${rec(elem, 0)}|}"
+      case terms.SetAdd(left, right) => wrap(s"finsert ${rec(right, 100)} ${rec(left, 100)}", 100)
+      case terms.SetUnion(left, right) => recOp(left, "|\\<union>|", right, 65)
+      case terms.SetIntersection(left, right) => recOp(left, "|\\<inter>|", right, 70)
+      case terms.SetSubset(left, right) => recOp(left, "|\\<subset>|", right, 75)
+      case terms.SetDisjoint(left, right) => wrap(s"fdisjnt ${rec(left, 100)} ${rec(right, 100)}", 100)
       case terms.SetDifference(left, right) => recOp(left, "-", right, 65)
-      case terms.SetIn(elem, set) => recOp(elem, "\\<in>\\<^sup>+", set, 51)
+      case terms.SetIn(elem, set) => recOp(elem, "|\\<in>|", set, 51)
       case terms.SetCardinality(set) => wrap(s"card\\<^sub>Z ${rec(set, 100)}", 100)
       // Multisets
       case terms.EmptyMultiset(_) => "{#}"
@@ -562,12 +557,12 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.MultisetCount(mset, elem) => wrap(s"count\\<^sub>Z ${rec(mset, 100)} ${rec(elem, 100)}", 100)
       // Maps
       // TODO: Use HOL-Finite_Map instead, fix everything
-      case terms.EmptyMap(_, _) => "Map.empty"
+      case terms.EmptyMap(keySort, valueSort) => wrap(s"fmempty::(${translateSort(keySort)}, ${translateSort(valueSort)}) fmap", 1)
       case terms.MapLookup(base, key) => wrap(rec(base, 100) + "@@" + rec(key, 100), 100)
-      case terms.MapCardinality(map) => "card\\<^sub>Z (dom " + rec(map, 100) + ")"
+      case terms.MapCardinality(map) => wrap("fmap_card " + rec(map, 100), 100)
       case terms.MapUpdate(map, key, value) => rec(map, 100) + "(" + rec(key, 100) + "\\<mapsto>" + rec(value, 100) + ")"
-      case terms.MapDomain(map) => wrap(s"dom ${rec(map, 100)}", 100)
-      case terms.MapRange(map) => wrap(s"ran ${rec(map, 100)}", 100)
+      case terms.MapDomain(map) => wrap(s"fmdom ${rec(map, 100)}", 100)
+      case terms.MapRange(map) => wrap(s"fmran ${rec(map, 100)}", 100)
       // Snapshots
       case terms.Combine(_, _) => "undefined"
       case terms.First(snap) => if (options.collapseSnaps) rec(snap, parenthesisLevel) else "F" + rec(snap, parenthesisLevel)
@@ -592,67 +587,25 @@ class Translator(val obl: ProofObligation, val filename: String) {
       // Miscellaneous
       case terms.SortWrapper(t, _) => rec(t, parenthesisLevel)
       case terms.Distinct(_) => "undefined"
-      //case _ => term.getClass.toString + term.toString
+      case _ => "NOT SUPPORTED: " + term.getClass.toString + "; " + term.toString
     }
-    //"error or missing term case"
   }
 
-  def translateType(t: ast.Type): String = {
+  private def setOrMSetOp(s: String, t: ast.Type): String = {
     t match {
-      case ast.Int => "int"
-      case ast.Bool => "bool"
-      case ast.Perm => "perm" // TODO: maybe remove? Or make unit/error
-      case ast.Ref => "ref"
-      case ast.SeqType(elem) => translateType(elem) + " list"
-      case ast.SetType(elem) => translateType(elem) + " finset"
-      case ast.MultisetType(elementType) => translateType(elementType) + " multiset"
-      case ast.DomainType(name, vars) => name
-      case ast.TypeVar(name) => "'" + name.toLowerCase()
-      case _ => "other_type"
+      case _: ast.SetType => s"|$s|"
+      case _: ast.MultisetType => s"$s#"
     }
   }
 
-  private def translateSort(sort: Sort): String = {
-    sort match {
-      case sorts.Snap => "error: Snap sort"
-      case sorts.Int => "int"
-      case sorts.Bool => "bool"
-      case sorts.Ref => "ref"
-      case sorts.Perm => "perm"
-      case sorts.Unit => "unit"
-      case sorts.Seq(elementsSort) => translateSort(elementsSort) + " list"
-      case sorts.Set(elementsSort) => translateSort(elementsSort) + " finset"
-      case sorts.Multiset(elementsSort) => translateSort(elementsSort) + " multiset"
-      case sorts.Map(keySort, valueSort) => "TODO: Map" // TODO
-      case sorts.UserSort(id) => safeString(id.name)
-      case sorts.SMTSort(id) => safeString(id.name)
-      case sorts.FieldValueFunction(codomainSort, _) => "" // TODO
-      case sorts.PredicateSnapFunction(codomainSort, _) => "" // TODO
-      case sorts.MagicWandSnapFunction => "" // TODO
-      case sorts.FieldPermFunction() => "" // TODO
-      case sorts.PredicatePermFunction() => "" // TODO
-    }
-  }
-
-  def translateFunType(fn: ast.FuncLike): String = {
-    "" // TODO
-  }
-
-  private def setPostfix(t: ast.Type): String = {
-    t match {
-      case _: ast.SetType => "\\<^sup>+"
-      case _: ast.MultisetType => "#"
-    }
-  }
-
-  private def translateExp(e: ast.Exp,
+  private def translateExp(e: Exp,
                            parenthesisLevel: Int = 0,
                            isFrameAxiom: Boolean = false,
                            variablePrime: Boolean = false,
                            resultString: Option[String] = None): String = {
-    def rec(e2: ast.Exp, pLevel: Int): String = translateExp(e2, pLevel, isFrameAxiom, variablePrime, resultString)
+    def rec(e2: Exp, pLevel: Int): String = translateExp(e2, pLevel, isFrameAxiom, variablePrime, resultString)
     def wrap(s: String, pLevel: Int): String = if (pLevel <= parenthesisLevel) s"($s)" else s
-    def recOp(left: ast.Exp, op: String, right: ast.Exp, pLevel: Int): String = {
+    def recOp(left: Exp, op: String, right: Exp, pLevel: Int): String = {
       wrap(rec(left, pLevel) + s" $op " + rec(right, pLevel), pLevel)
     }
 
@@ -706,8 +659,12 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
       case ast.FuncApp(funcname, args) =>
         // Add implicit heap argument for heap-dep functions
-        val maybeHeap = if (obl.s.program.findFunction(funcname).isPure) "" else " h"
-        wrap(funcname + maybeHeap + args.map(a => " " + rec(a, 100)).mkString(""), 100)
+        val og_fn = funcname.takeWhile(_ != '%')
+        val maybeHeap = obl.s.program.findFunctionOptionally(og_fn) match {
+          case None => ""
+          case Some(fn) => if (fn.isPure) "" else " h"
+        }
+        wrap(safeString(funcname) + maybeHeap + args.map(a => " " + rec(a, 100)).mkString(""), 100)
       case ast.DomainFuncApp(funcname, args, _) =>
         wrap(funcname + " " + args.map(rec(_, 100)).mkString(" "), 100)
       case ast.FieldAccess(rcv, field) => wrap(s"${field.name}' h ${rec(rcv, 100)}", 100)
@@ -737,39 +694,36 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.SeqUpdate(s, idx, elem) => wrap(s"list_update ${rec(s, 100)} ${rec(idx, 100)} ${rec(elem, 100)}", 100)
       case ast.SeqLength(s) => wrap("length\\<^sub>Z " + rec(s, 100), 100)
 
-      case ast.EmptySet(_) => "{}\\<^sup>+"
-      case ast.ExplicitSet(elems) => "{" + elems.map(rec(_, 0)).mkString(", ") + "}\\<^sup>+"
+      case ast.EmptySet(_) => "{||}"
+      case ast.ExplicitSet(elems) => "{|" + elems.map(rec(_, 0)).mkString(", ") + "|}"
       case ast.EmptyMultiset(_) => "{#}"
       case ast.ExplicitMultiset(elems) => "{#" + elems.map(rec(_, 0)).mkString(", ") + "#}"
-      case ast.AnySetUnion(left, right) =>
-        wrap(rec(left, 65) + s" \\<union>${setPostfix(left.typ)} " + rec(right, 65), 65)
-      case ast.AnySetIntersection(left, right) =>
-        rec(left, 70) + s" \\<inter>${setPostfix(left.typ)} " + rec(right, 70)
-      case ast.AnySetSubset(left, right) =>
-        wrap(rec(left, 75) + s" \\<subset>${setPostfix(left.typ)} " + rec(right, 75), 75)
+      case ast.AnySetUnion(left, right) => recOp(left, setOrMSetOp("\\<union>", left.typ), right, 65)
+      case ast.AnySetIntersection(left, right) => recOp(left, setOrMSetOp("\\<inter>", left.typ), right, 70)
+      case ast.AnySetSubset(left, right) => recOp(left, setOrMSetOp("\\<subset>", left.typ), right, 75)
       case ast.AnySetMinus(left, right) => recOp(left, "-", right, 65)
-      case ast.AnySetContains(elem, s) => recOp(elem, s"\\<in>${setPostfix(s.typ)}", s, 51)
+      case ast.AnySetContains(elem, s) => recOp(elem, setOrMSetOp("\\<in>", s.typ), s, 51)
       case ast.AnySetCardinality(s) =>
         s.typ match {
-          case _: ast.SetType => "card\\<^sub>Z " + rec(s, 100)
-          case _: ast.MultisetType => "size\\<^sub>Z " + rec(s, 100)
+          case _: ast.SetType => wrap("card\\<^sub>Z " + rec(s, 100), 100)
+          case _: ast.MultisetType => wrap("size\\<^sub>Z " + rec(s, 100), 100)
         }
 
-      case ast.EmptyMap(_, _) => "empty_finmap"
+      case ast.EmptyMap(keyType, valueType) => wrap(s"fmempty::(${translateType(keyType)}, ${translateType(valueType)}) fmap", 1)
       case ast.ExplicitMap(elems) => "" //TODO
       case ast.Maplet(key, value) => s"[${rec(key, 0)}\\<mapsto>${rec(value, 0)}]\\<^sup>+"
-      case ast.MapUpdate(base, key, value) => "" // TODO
+      case ast.MapUpdate(base, key, value) => wrap(s"fmupd ${rec(key, 100)} ${rec(value, 100)} ${rec(base, 100)}", 100)
       case ast.MapContains(key, base) => recOp(key, "\\<in>m", base, 46)
-      case ast.MapCardinality(base) => "finmap_card " + rec(base, 100)
-      case ast.MapDomain(base) => "dom_finmap " + rec(base, 100)
-      case ast.MapRange(base) => "ran_finmap " + rec(base, 100)
+      case ast.MapCardinality(base) => wrap("fmap_card " + rec(base, 100), 100)
+      case ast.MapDomain(base) => wrap("fmdom " + rec(base, 100), 100)
+      case ast.MapRange(base) => wrap("fmran " + rec(base, 100), 100)
 
       case todo => "TODO: " + todo.toString
     }
   }
 
   // TODO: Can we swap this for the finalExp from de?
-  private def termExpMatch(term: terms.Term, exp: ast.Exp): Boolean = {
+  private def termExpMatch(term: Term, exp: Exp): Boolean = {
     (term, exp) match {
       case (terms.App(name, argsT, _), ast.FuncApp(funcname, argsE)) => name.id.name == funcname
       case (terms.SetIn(elemT, setT), ast.AnySetContains(elemE, setE)) => true
@@ -901,7 +855,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     DomainDeps.concat(dom.axioms.map(ax => domainDepsIn(ax.exp)))
   }
 
-  private def domainDepsIn(e: ast.Exp): DomainDeps = {
+  private def domainDepsIn(e: Exp): DomainDeps = {
     e match {
       case ast.Add(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
       case ast.Sub(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
@@ -1151,46 +1105,7 @@ object ExportUtils {
     idHead(id) == lVar.name
   }
 
-  // Used to determine if wrapping brackets are needed
-  def isSingleTokenTerm(term: terms.Term): Boolean = {
-    term match {
-      case _: terms.Var => true
-      case _: terms.IntLiteral => true
-      case _: terms.BooleanLiteral => true
-      case _: terms.Not => true
-      case _: terms.SeqNil => true
-      case _: terms.SeqSingleton => true
-      case _: terms.EmptySet => true
-      case _: terms.SingletonSet => true
-      case _: terms.EmptyMultiset => true
-      case _: terms.EmptyMap => true
-      case terms.NoPerm => true
-      case terms.FullPerm => true
-      case _ => false
-    }
-  }
-
-  def isSingleTokenExp(e: ast.Exp): Boolean = {
-    e match {
-      case _: ast.IntLit => true
-      case _: ast.TrueLit => true
-      case _: ast.FalseLit => true
-      case _: ast.NullLit => true
-      case _: ast.LocalVar => true
-      case _: ast.FieldAccess => true
-      case ast.FuncApp(_, args) => args.isEmpty
-      case ast.DomainFuncApp(_, args, _) => args.isEmpty
-      case _: ast.Not => true
-      case _: ast.EmptySeq => true
-      case _: ast.ExplicitSeq => true
-      case _: ast.EmptySet => true
-      case _: ast.EmptyMultiset => true
-      case _: ast.EmptyMap => true
-      case _ => false
-    }
-  }
-
-  def notSnap(term: terms.Term): Boolean = {
+  def notSnap(term: Term): Boolean = {
     term match {
       case terms.BuiltinEquals(_, snap) => snap.sort != terms.sorts.Snap
       case _ => true
@@ -1204,8 +1119,123 @@ object ExportUtils {
     }
   }
 
+  def translateType(t: ast.Type): String = {
+    t match {
+      case ast.Int => "int"
+      case ast.Bool => "bool"
+      case ast.Perm => "perm" // TODO: maybe remove? Or make unit/error
+      case ast.Ref => "ref"
+      case ast.SeqType(elem) => translateType(elem) + " list"
+      case ast.SetType(elem) => translateType(elem) + " fset"
+      case ast.MultisetType(elementType) => translateType(elementType) + " multiset"
+      case ast.MapType(keyType, valueType) => s"(${translateType(keyType)}, ${translateType(valueType)}) fmap"
+      case ast.DomainType(name, vars) => name
+      case ast.TypeVar(name) => "'" + name.toLowerCase()
+      case _ => "other_type"
+    }
+  }
+
+  def translateSort(sort: Sort): String = {
+    sort match {
+      case sorts.Snap => "error: Snap sort"
+      case sorts.Int => "int"
+      case sorts.Bool => "bool"
+      case sorts.Ref => "ref"
+      case sorts.Perm => "perm"
+      case sorts.Unit => "unit"
+      case sorts.Seq(elementsSort) => translateSort(elementsSort) + " list"
+      case sorts.Set(elementsSort) => translateSort(elementsSort) + " fset"
+      case sorts.Multiset(elementsSort) => translateSort(elementsSort) + " multiset"
+      case sorts.Map(keySort, valueSort) => s"(${translateSort(keySort)}, ${translateSort(valueSort)}) fmap"
+      case sorts.UserSort(id) => safeString(id.name)
+      case sorts.SMTSort(id) => safeString(id.name)
+      case sorts.FieldValueFunction(codomainSort, _) => "" // TODO
+      case sorts.PredicateSnapFunction(codomainSort, _) => "" // TODO
+      case sorts.MagicWandSnapFunction => "" // TODO
+      case sorts.FieldPermFunction() => "" // TODO
+      case sorts.PredicatePermFunction() => "" // TODO
+    }
+  }
+
   def validName(name: String): Boolean = {
     val isabelleKeywords = Seq("value")
     !isabelleKeywords.contains(name)
+  }
+
+  def getPrecPropagationExp(fn: ast.Function, p: Program): Option[Exp] = {
+    fn.body match {
+      case None => None
+      case Some(body) =>
+        if (fn.pres.isEmpty) {
+          val argsExps = fn.formalArgs.map(a =>
+            ast.LocalVar(a.name, a.typ)(a.pos, a.info, a.errT)
+          )
+          val fnPre = ast.FuncApp(fn.name+"$precondition", argsExps)(fn.pos, fn.info, ast.Bool, fn.errT)
+          Some(ast.Implies(fnPre, preconditionPropagationExp(body, p))())
+        } else {
+          Some(preconditionPropagationExp(body, p))
+        }
+    }
+  }
+
+  // Expects the expression to be a variable
+  def varToVar(v: ast.LocalVarDecl): ast.LocalVar = {
+    ast.LocalVar(v.name, v.typ)()
+  }
+
+  /** Follows the same logic as silver.FunctionPreconditionTransformer.transform
+    *
+    * This expects to only be called on function bodies, and so e should be pure.
+    */
+  def preconditionPropagationExp(e: Exp, p: Program): Exp = {
+    def rec(e2: Exp): Exp = preconditionPropagationExp(e2, p)
+
+    e match {
+      case e: ast.Literal => ast.TrueLit()(e.pos, e.info, e.errT)
+      case ast.And(left, right) =>
+        val rhs = ast.And(left, rec(right))(right.pos, right.info, right.errT)
+        ast.And(rec(left), rhs)(e.pos, e.info, e.errT)
+      case ast.Or(left, right) =>
+        val rhs = ast.Implies(ast.Not(left)(right.pos, right.info, right.errT), rec(right))(right.pos, right.info, right.errT)
+        ast.And(rec(left), rhs)(e.pos, e.info, e.errT)
+      case ast.Implies(left, right) =>
+        val rhs = ast.Implies(left, rec(right))(right.pos, right.info, right.errT)
+        ast.And(rec(left), rhs)(e.pos, e.info, e.errT)
+      case ast.CondExp(cond, thn, els) =>
+        val cond2 = ast.CondExp(cond, rec(thn), rec(els))(e.pos, e.info, e.errT)
+        ast.And(rec(cond), cond2)(e.pos, e.info, e.errT)
+      case ast.Let(variable, exp, body) =>
+        val body2 = ast.Let(variable, exp, rec(body))(e.pos, e.info, e.errT)
+        ast.And(rec(exp), body2)(e.pos, e.info, e.errT)
+      case ast.Forall(variables, triggers, body) =>
+        val body2 = rec(body)
+        body2 match {
+          case _: ast.TrueLit => body2
+          case _ => ast.Forall(variables, triggers, exp = body2)(e.pos, e.info, e.errT)
+        }
+      case ast.Exists(variables, triggers, body) =>
+        val body2 = rec(body)
+        body2 match {
+          case _: ast.TrueLit => body2
+          case _ => ast.Exists(variables, triggers, exp = body2)(e.pos, e.info, e.errT)
+        }
+
+      case ast.FuncApp(funcname, args) =>
+        val args2 = bigAnd(args.map(rec), e.pos, e.info, e.errT)
+        val fnOpt = p.findFunctionOptionally(funcname)
+        if (fnOpt.isDefined && fnOpt.get.pres.isEmpty) {
+          args2
+        } else {
+          val fnPre = ast.FuncApp(funcname + "%precondition", args)(e.pos, e.info, ast.Bool, e.errT)
+          ast.And(fnPre, args2)(e.pos, e.info, e.errT)
+        }
+      case other => bigAnd(other.subExps.map(rec), other.pos, other.info, other.errT)
+    }
+  }
+
+  private def bigAnd(es: Seq[Exp], pos: ast.Position, info: ast.Info, errT: ast.ErrorTrafo): Exp = {
+    if (es.isEmpty) ast.TrueLit()(pos, info, errT)
+    else if (es.length == 1) es.head
+    else ast.And(es.head, bigAnd(es.tail, pos, info, errT))(pos, info, errT)
   }
 }
