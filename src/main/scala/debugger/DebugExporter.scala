@@ -602,8 +602,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
                            parenthesisLevel: Int = 0,
                            isFrameAxiom: Boolean = false,
                            variablePrime: Boolean = false,
-                           resultString: Option[String] = None): String = {
-    def rec(e2: Exp, pLevel: Int): String = translateExp(e2, pLevel, isFrameAxiom, variablePrime, resultString)
+                           resultString: Option[String] = None,
+                           oldHeapLabel: Option[String] = None): String = {
+    def rec(e2: Exp, pLevel: Int): String = translateExp(e2, pLevel, isFrameAxiom, variablePrime, resultString, oldHeapLabel)
     def wrap(s: String, pLevel: Int): String = if (pLevel <= parenthesisLevel) s"($s)" else s
     def recOp(left: Exp, op: String, right: Exp, pLevel: Int): String = {
       wrap(rec(left, pLevel) + s" $op " + rec(right, pLevel), pLevel)
@@ -667,12 +668,19 @@ class Translator(val obl: ProofObligation, val filename: String) {
         wrap(safeString(funcname) + maybeHeap + args.map(a => " " + rec(a, 100)).mkString(""), 100)
       case ast.DomainFuncApp(funcname, args, _) =>
         wrap(funcname + " " + args.map(rec(_, 100)).mkString(" "), 100)
-      case ast.FieldAccess(rcv, field) => wrap(s"${field.name}' h ${rec(rcv, 100)}", 100)
+      case ast.FieldAccess(rcv, field) =>
+        val heapString = safeString(oldHeapLabel.getOrElse("h").takeWhile(_ != '#'))
+        wrap(s"${field.name}' $heapString ${rec(rcv, 100)}", 100)
 
       case ast.CondExp(cond, thn, els) => "(if " + rec(cond, 10) + " then " + rec(thn, 10) +
         " else " + rec(els, 10) + ")"
       case ast.Unfolding(_, body) => rec(body, parenthesisLevel)
       case ast.Asserting(_, body) => rec(body, parenthesisLevel)
+      case ast.Old(exp) => translateExp(exp, parenthesisLevel, isFrameAxiom, variablePrime, resultString, Some("old"))
+      case ast.LabelledOld(exp, oldLabel) =>
+        translateExp(exp, parenthesisLevel, isFrameAxiom, variablePrime, resultString, Some(oldLabel))
+      case ast.DebugLabelledOld(exp, oldLabel) =>
+        translateExp(exp, parenthesisLevel, isFrameAxiom, variablePrime, resultString, Some(oldLabel))
       case ast.Let(variable, exp, body) =>
         s"let ${safeString(variable.name)} = ${rec(exp, 10)} in ${rec(body, 10)}"
       case ast.Forall(variables, _, exp) =>
@@ -960,6 +968,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
           translateDebugExp(child)
         }
         strings += "  (* End loop invariant *)"
+      case _: SnapshotShape => // Do nothing
       case _ =>
         de match {
           case ide: ImplicationDebugExp =>
@@ -974,7 +983,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
             val qvarString = ""
             qde.children.foreach { translateDebugExp(_, prefix + qvarString, suffix) }
           case _ =>
-            if (de.term.isDefined) {
+            if (de.finalExp.isDefined) {
+              strings += s"  assumes ${de.id}: \"$prefix${translateExp(de.finalExp.get)}$suffix\""
+            } else if (de.term.isDefined) {
               if (notSnap(de.term.get)) {
                 val filtered = filterPure(de.term.get)
                 if (filtered.isDefined)

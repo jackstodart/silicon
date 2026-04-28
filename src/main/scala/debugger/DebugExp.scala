@@ -48,7 +48,7 @@ case class FunctionPrecondition(funcName: String, args: List[ast.Exp]) extends D
 
 case class LoopInvariant() extends DebugExpCategory {
   override lazy val printWithInternal: String = "Loop invariant"
-  override lazy val printWithoutInternal: String = printWithoutInternal
+  override lazy val printWithoutInternal: String = printWithInternal
 }
 
 case class PathCondition(description: String) extends DebugExpCategory {
