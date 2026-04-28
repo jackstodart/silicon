@@ -6,7 +6,7 @@
 
 package viper.silicon.decider
 
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.{DebugExp, OtherCategory, PathCondition, Uncategorised}
 import viper.silicon.Stack
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.state.terms._
@@ -183,7 +183,7 @@ private class PathConditionStackLayer
   def finishDebugSubExp(description: String): Unit = {
     val children = popDebugSubExp()
     if (children.nonEmpty) {
-      val debugExp = DebugExp.createInstance(description = description, children = children)
+      val debugExp = DebugExp.createInstance(category = PathCondition(description), children = children)
       addDebugExp(debugExp)
     }
   }
@@ -302,7 +302,7 @@ private trait LayeredPathConditionStackLike {
       }
 
       if (layer.nonGlobalAssumptionDebugExps.nonEmpty && !implicationLHSExp.equals(TrueLit()())) {
-        conditionalTerms :+= DebugExp.createImplicationInstance(None, Some(implicationLHSExp), Some(implicationLHSExpNew),
+        conditionalTerms :+= DebugExp.createImplicationInstance(Uncategorised(), Some(implicationLHSExp), Some(implicationLHSExpNew),
           Some(implicationLHS), false, layer.nonGlobalAssumptionDebugExps)
       } else {
         conditionalTerms ++= layer.nonGlobalAssumptionDebugExps
@@ -375,15 +375,15 @@ private trait LayeredPathConditionStackLike {
           if (branchConditionExp.get._1.equals(ast.TrueLit()())) {
             quantBody = layer.nonGlobalAssumptionDebugExps
           } else {
-            quantBody = InsertionOrderedSet(DebugExp.createImplicationInstance(description = None, originalExp = Some(branchConditionExp.get._1), finalExp = Some(branchConditionExp.get._2.get), term = layer.branchCondition, isInternal_ = false,
+            quantBody = InsertionOrderedSet(DebugExp.createImplicationInstance(category = Uncategorised(), originalExp = Some(branchConditionExp.get._1), finalExp = Some(branchConditionExp.get._2.get), term = layer.branchCondition, isInternal_ = false,
               children = layer.nonGlobalAssumptionDebugExps))
           }
 
-          val quantDebugExp = DebugExp.createQuantifiedInstance(description=None, isInternal_ = false,
+          val quantDebugExp = DebugExp.createQuantifiedInstance(category = Uncategorised(), isInternal_ = false,
             children = InsertionOrderedSet(quantBody), quantifier = quantifier.toString, qvars = qvars, tQvars = tQvars, triggers = triggers, tTriggers = tTriggers)
           nonGlobals += quantDebugExp
         } else {
-          nonGlobals += DebugExp.createInstance("quantifiedExp", layer.nonGlobalAssumptionDebugExps)
+          nonGlobals += DebugExp.createInstance(OtherCategory("quantifiedExp"), layer.nonGlobalAssumptionDebugExps)
         }
     }
 

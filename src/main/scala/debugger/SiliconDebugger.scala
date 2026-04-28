@@ -161,7 +161,7 @@ case class ProofObligation(s: State,
     if (eAssertion.finalExp.isDefined){
       s"Assertion:\n\t$eAssertion\n\n"
     } else {
-      eAssertion.description.get
+      eAssertion.description(printConfig.printInternalTermRepresentation).get
     }
   }
 

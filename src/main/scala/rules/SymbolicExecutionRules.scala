@@ -6,7 +6,7 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.{DebugExp, OtherCategory}
 import viper.silicon.interfaces.{Failure, SiliconDebuggingFailureContext, SiliconFailureContext, SiliconMappedCounterexample, SiliconNativeCounterexample, SiliconVariableCounterexample}
 import viper.silicon.state.State
 import viper.silicon.state.terms.{False, Term}
@@ -20,19 +20,21 @@ trait SymbolicExecutionRules {
   lazy val withExp = Verifier.config.enableDebugging()
 
   protected def createFailure(ve: VerificationError, v: Verifier, s: State, failedAssert: Term, failedAssertDescription: String, generateNewModel: Boolean): Failure = {
-    createFailure(ve, v, s, failedAssert, Option.when(withExp)(DebugExp.createInstance(failedAssertDescription)), generateNewModel)
+    createFailure(ve, v, s, failedAssert, Option.when(withExp)(DebugExp.createInstance(OtherCategory(failedAssertDescription))), generateNewModel)
   }
 
   protected def createFailure(ve: VerificationError, v: Verifier, s: State, failedAssert: Term, failedAssertDescription: String): Failure = {
-    createFailure(ve, v, s, failedAssert, Option.when(withExp)(DebugExp.createInstance(failedAssertDescription)), false)
+    createFailure(ve, v, s, failedAssert, Option.when(withExp)(DebugExp.createInstance(OtherCategory(failedAssertDescription))), generateNewModel = false)
   }
 
   protected def createFailure(ve: VerificationError, v: Verifier, s: State, missingTermDescription: String): Failure = {
-    createFailure(ve, v, s, False, Option.when(withExp)(DebugExp.createInstance(s"Asserted term for '$missingTermDescription' not available, substituting false.")), false)
+    createFailure(ve, v, s, False, Option.when(withExp)(DebugExp.createInstance(
+      OtherCategory(s"Asserted term for '$missingTermDescription' not available, substituting false."))), generateNewModel = false)
   }
 
   protected def createFailure(ve: VerificationError, v: Verifier, s: State, missingTermDescription: String, generateNewModel: Boolean): Failure = {
-    createFailure(ve, v, s, False, Option.when(withExp)(DebugExp.createInstance(s"Asserted term for '$missingTermDescription' not available, substituting false.")), generateNewModel)
+    createFailure(ve, v, s, False, Option.when(withExp)(DebugExp.createInstance(
+      OtherCategory(s"Asserted term for '$missingTermDescription' not available, substituting false."))), generateNewModel)
   }
 
   protected def createFailure(ve: VerificationError, v: Verifier, s: State, failedAssert: Term, failedAssertExp: Option[ast.Exp]): Failure = {

@@ -6,7 +6,7 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.{DebugExp, OtherCategory}
 import viper.silicon._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.decider.RecordedPathConditions
@@ -118,7 +118,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
       abstractLhs,
       MWSFLookup(mwsf, abstractLhs) === rhsSnapshot,
       Trigger(MWSFLookup(mwsf, abstractLhs))
-    ), Option.when(withExp)(DebugExp.createInstance("Magic wand snapshot definition", true)))
+    ), Option.when(withExp)(DebugExp.createInstance(OtherCategory("Magic wand snapshot definition"), true)))
     magicWandSnapshot
   }
 
@@ -181,7 +181,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
               case (Some(ch1: QuantifiedBasicChunk), Some(ch2: QuantifiedBasicChunk)) => ch1.snapshotMap === ch2.snapshotMap
               case _ => True
             }
-            v.decider.assume(tEq, Option.when(withExp)(DebugExp.createInstance("Snapshots", isInternal_ = true)))
+            v.decider.assume(tEq, Option.when(withExp)(DebugExp.createInstance(OtherCategory("Snapshots"), isInternal_ = true)))
 
             /* In the future it might be worth to recheck whether the permissions needed, in the case of
              * success being an instance of Incomplete, are zero.
@@ -291,7 +291,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
         }
         if (newChildren.nonEmpty || newTerm.isDefined) {
           val newDebugExp = if (newChildren != curChildrenSeq || newTerm != de.term)
-            new DebugExp(de.id, de.description, newOExp, newFExp, newTerm, de.isInternal, InsertionOrderedSet(newChildren))
+            new DebugExp(de.id, de.category, newOExp, newFExp, newTerm, de.isInternal, InsertionOrderedSet(newChildren))
           else
             de
           Some(newDebugExp)
@@ -323,7 +323,8 @@ object magicWandSupporter extends SymbolicExecutionRules {
           val snapshotTerm = Combine(freshSnapRoot, snapRhs)
           val (sm, smValueDef) = quantifiedChunkSupporter.singletonSnapshotMap(s2, wand, tArgs, snapshotTerm, v2)
           v2.decider.prover.comment("Definitional axioms for singleton-SM's value")
-          val debugExp = Option.when(withExp)(DebugExp.createInstance("Definitional axioms for singleton-SM's value", true))
+          val debugExp = Option.when(withExp)(DebugExp.createInstance(
+            OtherCategory("Definitional axioms for singleton-SM's value"), isInternal_ = true))
           v2.decider.assumeDefinition(smValueDef, debugExp)
           val ch = quantifiedChunkSupporter.createSingletonQuantifiedChunk(formalVars, formalVarExps, wand, tArgs,
             eArgsNew, FullPerm, Option.when(withExp)(ast.FullPerm()()), sm, s.program)
@@ -346,7 +347,8 @@ object magicWandSupporter extends SymbolicExecutionRules {
             }),
             Trigger(MWSFLookup(wandSnapshot.mwsf, freshSnapRoot)),
           )
-          (s2, ch, pcsQuantified +: pcsWithoutFreshSnapRoot, Option.when(withExp)(DebugExp.createInstance("MWSF definition path conditions", pcsQuantified, true) +: pcsWithoutExp.get), v2)
+          (s2, ch, pcsQuantified +: pcsWithoutFreshSnapRoot, Option.when(withExp)(DebugExp.createInstance(
+            OtherCategory("MWSF definition path conditions"), pcsQuantified, isInternal_ = true) +: pcsWithoutExp.get), v2)
         }
         appendToResults(s3, ch, v3.decider.pcs.after(preMark), (tPcs, ePcs), v3)
         Success()
@@ -478,7 +480,8 @@ object magicWandSupporter extends SymbolicExecutionRules {
           case SortWrapper(snapshot: MagicWandSnapshot, _) => snapshot.applyToMWSF(snapLhs.get)
           // Fallback solution for quantified magic wands
           case predicateLookup: PredicateLookup =>
-            v2.decider.assume(snapLhs.get === First(snapWand.get), Option.when(withExp)(DebugExp.createInstance("Magic wand snapshot", true)))
+            v2.decider.assume(snapLhs.get === First(snapWand.get), Option.when(withExp)(DebugExp.createInstance(
+              OtherCategory("Magic wand snapshot"), isInternal_ = true)))
             Second(predicateLookup)
           case _ => snapWand.get
         }

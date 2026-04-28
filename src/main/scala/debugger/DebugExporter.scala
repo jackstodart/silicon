@@ -953,40 +953,35 @@ class Translator(val obl: ProofObligation, val filename: String) {
   }
 
   private def translateDebugExp(de: DebugExp, prefix: String = "", suffix: String = ""): Unit = {
-    if (de.description.contains("Loop invariant")) {
-      strings += "  (* Begin loop invariant *)"
-      for (child <- de.children) {
-        translateDebugExp(child)
-      }
-      strings += "  (* End loop invariant *)"
-    } else if (de.description.contains("Joined path conditions")) {
-      for (child <- de.children) {
-        translateDebugExp(child)
-      }
-      // } else if (de.description.contains("precondition of")) {
-      // Do nothing
-    } else {
-      de match {
-        case ide: ImplicationDebugExp =>
-          if (ide.term.isDefined) {
-            val filtered = filterPure(ide.term.get)
-            if (filtered.isDefined) {
-              val LHS = translateTerm(filtered.get)
-              ide.children.foreach { translateDebugExp(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix) }
+    de.category match {
+      case LoopInvariant() =>
+        strings += "  (* Begin loop invariant *)"
+        for (child <- de.children) {
+          translateDebugExp(child)
+        }
+        strings += "  (* End loop invariant *)"
+      case _ =>
+        de match {
+          case ide: ImplicationDebugExp =>
+            if (ide.term.isDefined) {
+              val filtered = filterPure(ide.term.get)
+              if (filtered.isDefined) {
+                val LHS = translateTerm(filtered.get)
+                ide.children.foreach { translateDebugExp(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix) }
+              }
             }
-          }
-        case qde: QuantifiedDebugExp =>
-          val qvarString = ""
-          qde.children.foreach { translateDebugExp(_, prefix + qvarString, suffix) }
-        case _ =>
-          if (de.term.isDefined) {
-            if (notSnap(de.term.get)) {
-              val filtered = filterPure(de.term.get)
-              if (filtered.isDefined)
-                strings += s"  assumes ${de.id}: \"$prefix${translateTerm(filtered.get)}$suffix\""
+          case qde: QuantifiedDebugExp =>
+            val qvarString = ""
+            qde.children.foreach { translateDebugExp(_, prefix + qvarString, suffix) }
+          case _ =>
+            if (de.term.isDefined) {
+              if (notSnap(de.term.get)) {
+                val filtered = filterPure(de.term.get)
+                if (filtered.isDefined)
+                  strings += s"  assumes ${de.id}: \"$prefix${translateTerm(filtered.get)}$suffix\""
+              }
             }
-          }
-      }
+        }
     }
   }
 }

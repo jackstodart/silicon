@@ -8,7 +8,7 @@ package viper.silicon.rules
 
 import viper.silicon
 import viper.silicon.Config.JoinMode
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.{DebugExp, OtherCategory, TriggerTerm}
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.interfaces.VerificationResult
 import viper.silicon.interfaces.state.{ChunkIdentifer, GeneralChunk, NonQuantifiedChunk}
@@ -16,7 +16,7 @@ import viper.silicon.resources.FieldID
 import viper.silicon.state._
 import viper.silicon.state.terms._
 import viper.silicon.state.terms.predef.`?r`
-import viper.silicon.supporters.{PredicateBranchNode, PredicateLeafNode, PredicateContentsTree}
+import viper.silicon.supporters.{PredicateBranchNode, PredicateContentsTree, PredicateLeafNode}
 import viper.silicon.utils.toSf
 import viper.silicon.verifier.Verifier
 import viper.silver.ast
@@ -80,7 +80,8 @@ object predicateSupporter extends PredicateSupportRules {
         val predTrigger = App(s1a.predicateData(predicate.name).triggerFunction,
           snap.get.convert(terms.sorts.Snap) +: tArgs, None)
         val eArgsString = eArgs.mkString(", ")
-        v1.decider.assume(predTrigger, Option.when(withExp)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eArgsString))")))
+        v1.decider.assume(predTrigger, Option.when(withExp)(DebugExp.createInstance(
+          TriggerTerm(s"PredicateTrigger(${predicate.name}($eArgsString))"))))
       }
       val s2 = s1a.copy(g = s.g,
                         smDomainNeeded = s.smDomainNeeded,
@@ -99,7 +100,7 @@ object predicateSupporter extends PredicateSupportRules {
             : VerificationResult = {
     tree match {
       case PredicateLeafNode(h, assumptions) =>
-        val debugExp = Option.when(withExp)(DebugExp.createInstance("Assumption from unfolded predicate body"))
+        val debugExp = Option.when(withExp)(DebugExp.createInstance(OtherCategory("Assumption from unfolded predicate body")))
         v.decider.assume(assumptions.map(a => (a.replace(toReplace), debugExp)).toSeq)
         val substChunks = h.values.map(_.substitute(toReplace).asInstanceOf[GeneralChunk].permScale(s.permissionScalingFactor, s.permissionScalingFactorExp))
 
@@ -210,7 +211,8 @@ object predicateSupporter extends PredicateSupportRules {
               App(s4.predicateData(predicate.name).triggerFunction,
                 snap.get.convert(terms.sorts.Snap) +: tArgs, None)
             val eargs = eArgs.mkString(", ")
-            v4.decider.assume(predicateTrigger, Option.when(withExp)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eargs))")))
+            v4.decider.assume(predicateTrigger, Option.when(withExp)(DebugExp.createInstance(
+              TriggerTerm(s"PredicateTrigger(${predicate.name}($eargs))"))))
           }
           Q(s4.copy(g = s.g,
             permissionScalingFactor = s.permissionScalingFactor,
@@ -225,7 +227,8 @@ object predicateSupporter extends PredicateSupportRules {
               App(s4.predicateData(predicate.name).triggerFunction,
                 snap.get.convert(terms.sorts.Snap) +: tArgs, None)
             val eargs = eArgs.mkString(", ")
-            v2.decider.assume(predicateTrigger, Option.when(withExp)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eargs))")))
+            v2.decider.assume(predicateTrigger, Option.when(withExp)(DebugExp.createInstance(
+              TriggerTerm(s"PredicateTrigger(${predicate.name}($eargs))"))))
           }
           Q(s4.copy(g = s.g,
             permissionScalingFactor = s.permissionScalingFactor,

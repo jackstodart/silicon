@@ -15,64 +15,114 @@ import viper.silver.ast.utility.Simplifier
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable
 
+sealed trait DebugExpCategory {
+  val printWithInternal: String
+  val printWithoutInternal: String
+}
+
+case class UnfoldedPredicate(predicateName: String, args: String) extends DebugExpCategory {
+  override lazy val printWithInternal = s"Unfolded $predicateName($args)"
+  override lazy val printWithoutInternal = s"Unfolded $predicateName($args)"
+}
+
+case class TriggerTerm(description: String) extends DebugExpCategory {
+  override lazy val printWithInternal: String = description
+  override lazy val printWithoutInternal: String = description
+}
+
+case class OtherCategory(description: String) extends DebugExpCategory {
+  override lazy val printWithInternal: String = description
+  override lazy val printWithoutInternal: String = description
+}
+
+case class AuxiliaryTerms(isGlobal: Boolean) extends DebugExpCategory {
+  override lazy val printWithInternal: String = if (isGlobal) "Nested auxiliary terms: globals (aux)"
+    else "Nested auxiliary terms: non-globals (aux)"
+  override lazy val printWithoutInternal: String = printWithInternal
+}
+
+case class FunctionPrecondition(funcName: String, args: List[ast.Exp]) extends DebugExpCategory {
+  override lazy val printWithInternal: String = s"precondition of $funcName(${args.mkString(", ")}) holds"
+  override lazy val printWithoutInternal: String = printWithoutInternal
+}
+
+case class LoopInvariant() extends DebugExpCategory {
+  override lazy val printWithInternal: String = "Loop invariant"
+  override lazy val printWithoutInternal: String = printWithoutInternal
+}
+
+case class PathCondition(description: String) extends DebugExpCategory {
+  override lazy val printWithInternal: String = description
+  override lazy val printWithoutInternal: String = description
+}
+
+case class Uncategorised() extends DebugExpCategory {
+  override lazy val printWithInternal: String = "Uncategorised"
+  override lazy val printWithoutInternal: String = printWithInternal
+}
+
+case class SnapshotShape(empty: Boolean) extends DebugExpCategory {
+  override lazy val printWithInternal: String = if (empty) "Empty snapshot" else "Snapshot pair"
+  override lazy val printWithoutInternal: String = printWithInternal
+}
+
 object DebugExp {
   private var idCounter: AtomicInteger = new AtomicInteger(0)
 
-  def createInstance(description: Option[String],
+  def createInstance(category: DebugExpCategory,
                      originalExp: Option[ast.Exp],
                      finalExp: Option[ast.Exp],
                      term: Option[Term],
                      isInternal_ : Boolean,
                      children: InsertionOrderedSet[DebugExp]
                     ): DebugExp = {
-
     val originalExpSimplified = originalExp.map(Simplifier.simplify(_, true))
     val finalExpSimplified = finalExp.map(Simplifier.simplify(_, true))
-    val debugExp = new DebugExp(idCounter.getAndIncrement(), description, originalExpSimplified, finalExpSimplified, term, isInternal_, children)
+    val debugExp = new DebugExp(idCounter.getAndIncrement(), category, originalExpSimplified, finalExpSimplified, term, isInternal_, children)
     debugExp
   }
 
-  def createInstance(description: Option[String], originalExp: Option[ast.Exp], finalExp: Option[ast.Exp],
+  def createInstance(category: DebugExpCategory, originalExp: Option[ast.Exp], finalExp: Option[ast.Exp],
                      children: InsertionOrderedSet[DebugExp]): DebugExp = {
-    createInstance(description, originalExp, finalExp, None, isInternal_ = false, children)
+    createInstance(category, originalExp, finalExp, None, isInternal_ = false, children)
   }
 
-  def createInstance(description: String, children: InsertionOrderedSet[DebugExp]): DebugExp = {
-    createInstance(Some(description), None, None, children)
+  def createInstance(category: DebugExpCategory, children: InsertionOrderedSet[DebugExp]): DebugExp = {
+    createInstance(category, None, None, children)
   }
 
-  def createInstance(description: String): DebugExp = {
-    createInstance(Some(description), None, None, InsertionOrderedSet.empty)
+  def createInstance(category: DebugExpCategory): DebugExp = {
+    createInstance(category, None, None, InsertionOrderedSet.empty)
   }
 
-  def createInstance(description: String, isInternal_ : Boolean): DebugExp = {
-    createInstance(Some(description), None, None, None, isInternal_, InsertionOrderedSet.empty)
+  def createInstance(category: DebugExpCategory, isInternal_ : Boolean): DebugExp = {
+    createInstance(category, None, None, None, isInternal_, InsertionOrderedSet.empty)
   }
 
-  def createInstance(description: String, term: Term, isInternal_ : Boolean): DebugExp = {
-    createInstance(Some(description), None, None, Some(term), isInternal_, InsertionOrderedSet.empty)
+  def createInstance(category: DebugExpCategory, term: Term, isInternal_ : Boolean): DebugExp = {
+    createInstance(category, None, None, Some(term), isInternal_, InsertionOrderedSet.empty)
   }
 
   def createInstance(originalExp: ast.Exp, finalExp: ast.Exp): DebugExp = {
-    createInstance(None, Some(originalExp), Some(finalExp), InsertionOrderedSet.empty)
+    createInstance(Uncategorised(), Some(originalExp), Some(finalExp), InsertionOrderedSet.empty)
   }
 
   def createInstance(originalExp: Option[ast.Exp], finalExp: Option[ast.Exp]): DebugExp = {
-    createInstance(None, Some(originalExp.get), Some(finalExp.get), InsertionOrderedSet.empty)
+    createInstance(Uncategorised(), Some(originalExp.get), Some(finalExp.get), InsertionOrderedSet.empty)
   }
 
-  def createImplicationInstance(description: Option[String],
+  def createImplicationInstance(category: DebugExpCategory,
                                 originalExp: Option[ast.Exp],
                                 finalExp: Option[ast.Exp],
                                 term: Option[Term],
                                 isInternal_ : Boolean,
                                 children: InsertionOrderedSet[DebugExp]
                                ): ImplicationDebugExp = {
-    val debugExp = new ImplicationDebugExp(idCounter.getAndIncrement(), description, originalExp.map(Simplifier.simplify(_, true)), finalExp.map(Simplifier.simplify(_, true)), term, isInternal_, children)
+    val debugExp = new ImplicationDebugExp(idCounter.getAndIncrement(), category, originalExp.map(Simplifier.simplify(_, true)), finalExp.map(Simplifier.simplify(_, true)), term, isInternal_, children)
     debugExp
   }
 
-  def createQuantifiedInstance(description: Option[String],
+  def createQuantifiedInstance(category: DebugExpCategory,
                                isInternal_ : Boolean,
                                children: InsertionOrderedSet[DebugExp],
                                quantifier: String,
@@ -81,12 +131,13 @@ object DebugExp {
                                triggers: Seq[ast.Trigger],
                                tTriggers: Seq[Trigger]
                               ): QuantifiedDebugExp ={
-    val debugExp = new QuantifiedDebugExp(idCounter.getAndIncrement(), description, isInternal_, children, quantifier, qvars, tQvars, triggers, tTriggers)
+    val debugExp = new QuantifiedDebugExp(idCounter.getAndIncrement(), category, isInternal_, children, quantifier, qvars, tQvars, triggers, tTriggers)
     debugExp
   }
 }
+
 class DebugExp(val id: Int,
-               val description : Option[String],
+               val category : DebugExpCategory,
                val originalExp : Option[ast.Exp],
                val finalExp : Option[ast.Exp],
                val term : Option[Term],
@@ -101,8 +152,13 @@ class DebugExp(val id: Int,
     thisGlobal && children.forall(_.isGlobal)
   }
 
+  def description(internal: Boolean): Option[String] = category match {
+    case Uncategorised() => None
+    case _ => Some(if (internal) category.printWithInternal else category.printWithoutInternal)
+  }
+
   def withTerm(newTerm: Term): DebugExp = {
-    new DebugExp(id, description, originalExp, finalExp, Some(newTerm), isInternal_, children)
+    new DebugExp(id, category, originalExp, finalExp, Some(newTerm), isInternal_, children)
   }
 
   def getAllTerms(visited: mutable.HashSet[DebugExp]): Seq[Term] = {
@@ -116,7 +172,7 @@ class DebugExp(val id: Int,
 
   def removeChildrenById(ids: Seq[Int]): DebugExp ={
     val newChildren = children.filter(i => !ids.contains(i.id)).map(c => c.removeChildrenById(ids))
-    new DebugExp(id, description, originalExp, finalExp, term, isInternal_, newChildren)
+    new DebugExp(id, category, originalExp, finalExp, term, isInternal_, newChildren)
   }
 
   override def toString: String = {
@@ -138,8 +194,8 @@ class DebugExp(val id: Int,
 
   def getTopLevelString(currDepth: Int, config: DebugExpPrintConfiguration): String = {
     val toDisplay = if (config.printInternalTermRepresentation) term else finalExp
-    val delimiter = if (toDisplay.isDefined && description.isDefined) ": " else ""
-    "\n\t" + ("\t"*currDepth) + "[" + id + "] " + description.getOrElse("") + delimiter + toDisplay.getOrElse("")
+    val delimiter = if (toDisplay.isDefined && description(config.printInternalTermRepresentation).isDefined) ": " else ""
+    "\n\t" + ("\t"*currDepth) + "[" + id + "] " + description(config.printInternalTermRepresentation).getOrElse("") + delimiter + toDisplay.getOrElse("")
   }
 
 
@@ -175,12 +231,12 @@ class DebugExp(val id: Int,
 
 
 class ImplicationDebugExp(id: Int,
-                          description : Option[String],
+                          category : DebugExpCategory,
                           originalExp : Option[ast.Exp],
                           finalExp : Option[ast.Exp],
                           term : Option[Term],
                           isInternal_ : Boolean,
-                          children : InsertionOrderedSet[DebugExp]) extends DebugExp(id, description, originalExp, finalExp, term, isInternal_, children) {
+                          children : InsertionOrderedSet[DebugExp]) extends DebugExp(id, category, originalExp, finalExp, term, isInternal_, children) {
 
   override def getAllTerms(visited: mutable.HashSet[DebugExp]): Seq[Term] = {
     if (visited.contains(this))
@@ -203,16 +259,15 @@ class ImplicationDebugExp(id: Int,
   }
 }
 
-
 class QuantifiedDebugExp(id: Int,
-                         description : Option[String],
+                         category : DebugExpCategory,
                          isInternal_ : Boolean,
                          children : InsertionOrderedSet[DebugExp],
                          val quantifier: String,
                          val qvars : Seq[ast.Exp],
                          val tQvars: Seq[Var],
                          val triggers: Seq[ast.Trigger],
-                         val tTriggers: Seq[Trigger]) extends DebugExp(id, description, None, None, None, isInternal_, children) {
+                         val tTriggers: Seq[Trigger]) extends DebugExp(id, category, None, None, None, isInternal_, children) {
   override def getAllTerms(visited: mutable.HashSet[DebugExp]): Seq[Term] = {
     if (visited.contains(this))
       return Seq.empty

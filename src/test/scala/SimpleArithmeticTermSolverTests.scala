@@ -88,10 +88,10 @@ private[tests] object DSL {
   private val f3 = Fun(Identifier("f"), Seq(sorts.Int, sorts.Int, sorts.Int), sorts.Int)
   private val g3 = Fun(Identifier("g"), Seq(sorts.Int, sorts.Int, sorts.Int), sorts.Int)
 
-  def f(t: Term) = App(f1, t)
-  def g(t: Term) = App(g1, t)
-  def f(t1: Term, t2: Term) = App(f2, Seq(t1, t2))
-  def g(t1: Term, t2: Term) = App(g2, Seq(t1, t2))
-  def f(t1: Term, t2: Term, t3: Term) = App(f3, Seq(t1, t2, t3))
-  def g(t1: Term, t2: Term, t3: Term) = App(g3, Seq(t1, t2, t3))
+  def f(t: Term) = App(f1, t, None)
+  def g(t: Term) = App(g1, t, None)
+  def f(t1: Term, t2: Term) = App(f2, Seq(t1, t2), None)
+  def g(t1: Term, t2: Term) = App(g2, Seq(t1, t2), None)
+  def f(t1: Term, t2: Term, t3: Term) = App(f3, Seq(t1, t2, t3), None)
+  def g(t1: Term, t2: Term, t3: Term) = App(g3, Seq(t1, t2, t3), None)
 }
