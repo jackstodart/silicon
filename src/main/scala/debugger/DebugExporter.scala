@@ -60,22 +60,22 @@ object DebugExporter {
 }
 
 // Things to rewrite as you translate terms
-case class Rewrites(varRenames: immutable.Map[state.Identifier, String],
+case class Rewrites(varRenames: immutable.Map[String, String],
                     termReplacements: immutable.Map[Term, String])
 
 object Rewrites {
-  def apply(varRenames: immutable.Map[state.Identifier, String],
+  def apply(varRenames: immutable.Map[String, String],
             termReplacements: immutable.Map[Term, String]): Rewrites = {
     new Rewrites(varRenames, termReplacements)
   }
 
   val emptyRewrites: Rewrites = Rewrites(Map(), Map())
 
-  def addRename(rewrites: Rewrites, id: Identifier, rep: String): Rewrites = {
-    Rewrites(rewrites.varRenames + (id -> rep), rewrites.termReplacements)
+  def addRename(rewrites: Rewrites, name: String, rep: String): Rewrites = {
+    Rewrites(rewrites.varRenames + (name -> rep), rewrites.termReplacements)
   }
 
-  def addRenames(rewrites: Rewrites, toAdd: Map[Identifier, String]): Rewrites = {
+  def addRenames(rewrites: Rewrites, toAdd: Map[String, String]): Rewrites = {
     Rewrites(rewrites.varRenames ++ toAdd, rewrites.termReplacements)
   }
 
@@ -95,14 +95,16 @@ class Translator(val obl: ProofObligation, val filename: String) {
                fieldChunks: immutable.Map[Term, (BasicChunk, String)],
                predicateChunks: immutable.Map[Term, (BasicChunk, String)]) = { // Rewrites(renaming2, immutable.Map())
     // Add local vars from the store
-    val varRenames = mutable.Map[state.Identifier, String]()
+    val varRenames = mutable.Map[String, String]()
     for ((lVar, term) <- obl.s.g.termValues) {
       term match {
         case terms.Var(id, _, _) =>
-          if (!(varRenames contains id)) {
-            varRenames += id -> safeString(lVar.toString) // add if non-existent
+          if (!(varRenames contains id.name)) {
+            varRenames += id.name -> safeString(lVar.name) // add if non-existent
+            varRenames += nameWithoutVersion(id.name) -> safeString(lVar.name)
           } else if (idHead(id) == lVar.name) {
-            varRenames(id) = safeString(lVar.toString) // update if better match found
+            varRenames(id.name) = safeString(lVar.name) // update if better match found
+            varRenames(nameWithoutVersion(id.name)) = safeString(lVar.name)
           }
         case _ => println(s"Store entry is not a Var: $lVar -> $term")
       }
@@ -462,7 +464,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
     term match {
       // Functions and Applications
-      case terms.Var(id, _, _) => rewrites.varRenames getOrElse(id, safeId(id))
+      case terms.Var(id, _, _) => rewrites.varRenames getOrElse(id.name, safeId(id))
       case terms.Let(bindings, body) =>
         val bindString = bindings.transform((bVar, bTerm) => rec(bVar, 10) + " = " + rec(bTerm, 10)).mkString("; ")
         wrap(s"let $bindString in ${rec(body, 10)}", 10)
@@ -483,7 +485,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case b: terms.BooleanLiteral => b.toString
       case terms.Quantification(q, vars, body, _, _, _, _) =>
         val varString = vars.map(v =>
-          if (rewrites.varRenames.contains(v.id)) rewrites.varRenames(v.id)
+          if (rewrites.varRenames.contains(v.id.name)) rewrites.varRenames(v.id.name)
           else safeId(v.id) // TODO: use get or else?
         ).mkString(" ")
         wrap(s"${quantifierToString(q)}$varString. ${rec(body, 10)}", 10)
@@ -687,9 +689,11 @@ class Translator(val obl: ProofObligation, val filename: String) {
         wrap("\\<forall>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + rec(exp, 10), 10)
       case ast.Exists(variables, _, exp) =>
         wrap("\\<exists>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + rec(exp, 10), 10)
-      case ast.LocalVar(name, _) => if (variablePrime) safeString(name) + "'" else safeString(name)
+      case ast.LocalVar(name, _) =>
+        if (variablePrime) safeString(name) + "'" else basicRewrites.varRenames.getOrElse(name, safeString(name))
       case ast.Result(_) => wrap(resultString.getOrElse("result"), 100)
-      case ast.LocalVarWithVersion(name, _) => if (variablePrime) safeString(name) + "'" else safeString(name)
+      case ast.LocalVarWithVersion(name, _) =>
+        if (variablePrime) safeString(name) + "'" else basicRewrites.varRenames.getOrElse(name, safeString(name))
 
       case ast.EmptySeq(_) => "[]"
       case ast.ExplicitSeq(elems) => "[" + elems.map(rec(_, 0)).mkString(", ") + "]"
@@ -1079,8 +1083,10 @@ object ExportUtils {
     }
   }
 
-  def varHead(name: String): String = name.split('@')(0)
-  def idHead(id: state.Identifier): String = varHead(id.name)
+  val varVersionRegex = """([^@]+)@(\d+)@(\d+)""".r
+  def nameHead(name: String): String = name.split('@')(0)
+  def idHead(id: state.Identifier): String = nameHead(id.name)
+  def nameWithoutVersion(name: String) = name.substring(0, name.lastIndexOf("@"))
 
   // Removes special Isabelle chars
   def safeId(id: state.Identifier): String = {
@@ -1168,6 +1174,19 @@ object ExportUtils {
     !isabelleKeywords.contains(name)
   }
 
+  private def containsPrecondition(e: Exp, p: Program): Boolean = {
+    e match {
+      case ast.FuncApp(funcname, args) =>
+        val thisFunHasPres = p.findFunctionOptionally(funcname) match {
+          case None => false
+          case Some(fn) => fn.pres.nonEmpty
+        }
+        val argsHavePres = args.exists(containsPrecondition(_, p))
+        thisFunHasPres || argsHavePres
+      case _ => e.subExps.exists(containsPrecondition(_, p))
+    }
+  }
+
   def getPrecPropagationExp(fn: ast.Function, p: Program): Option[Exp] = {
     fn.body match {
       case None => None
@@ -1192,6 +1211,8 @@ object ExportUtils {
   /** Follows the same logic as silver.FunctionPreconditionTransformer.transform
     *
     * This expects to only be called on function bodies, and so e should be pure.
+    * It also only returns the body of the axiom, it might need to be guarded by the
+    * precondition of the function itself.
     */
   def preconditionPropagationExp(e: Exp, p: Program): Exp = {
     def rec(e2: Exp): Exp = preconditionPropagationExp(e2, p)
@@ -1199,7 +1220,7 @@ object ExportUtils {
     e match {
       case e: ast.Literal => ast.TrueLit()(e.pos, e.info, e.errT)
       case ast.And(left, right) =>
-        val rhs = ast.And(left, rec(right))(right.pos, right.info, right.errT)
+        val rhs = ast.Implies(left, rec(right))(right.pos, right.info, right.errT)
         ast.And(rec(left), rhs)(e.pos, e.info, e.errT)
       case ast.Or(left, right) =>
         val rhs = ast.Implies(ast.Not(left)(right.pos, right.info, right.errT), rec(right))(right.pos, right.info, right.errT)
@@ -1239,9 +1260,13 @@ object ExportUtils {
     }
   }
 
+  // Note, will remove Trues
   private def bigAnd(es: Seq[Exp], pos: ast.Position, info: ast.Info, errT: ast.ErrorTrafo): Exp = {
-    if (es.isEmpty) ast.TrueLit()(pos, info, errT)
-    else if (es.length == 1) es.head
-    else ast.And(es.head, bigAnd(es.tail, pos, info, errT))(pos, info, errT)
+    val filtered = es.collect{ case e: ast.TrueLit => e }
+    if (filtered.isEmpty) ast.TrueLit()(pos, info, errT)
+    else if (filtered.length == 1) es.head
+    else {
+      ast.And(filtered.head, bigAnd(filtered.tail, pos, info, errT))(pos, info, errT)
+    }
   }
 }

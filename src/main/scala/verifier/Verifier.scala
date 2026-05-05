@@ -73,7 +73,7 @@ trait Verifier {
       case Some(heap) => heap
       case None => s.h
     }
-    val equalHeaps = s.oldHeaps.filter(h => h._1.startsWith("debug@") && h._2.equals(heap)).keys
+    val equalHeaps = s.oldHeaps.filter(h => (h._1.startsWith("debug@") || h._1.equals("old")) && h._2.equals(heap)).keys
     if (equalHeaps.nonEmpty){
       equalHeaps.head
     } else {

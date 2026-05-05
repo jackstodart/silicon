@@ -410,7 +410,11 @@ object executor extends ExecutionRules {
         addFieldPerms(s, fields, v)((s0, v0) => {
           val s1 = s0.copy(g = s0.g + (x, (tRcvr, eRcvrNew)))
           val (debugHeapName, _) = v.getDebugOldLabel(s1, stmt.pos, Some(magicWandSupporter.getEvalHeap(s1)))
-          val s2 = if (withExp) s1.copy(oldHeaps = s1.oldHeaps + (debugHeapName -> magicWandSupporter.getEvalHeap(s1))) else s1
+          val parentHeapName = v.getDebugHeapLabel(state)
+          val s2 = if (withExp) s1.copy(
+            oldHeaps = s1.oldHeaps + (debugHeapName -> magicWandSupporter.getEvalHeap(s1)),
+            oldHeapConditions = s1.oldHeapConditions + (debugHeapName -> (parentHeapName, Some(StmtExecution(stmt))))
+          ) else s1
           v0.decider.assume(ts, Option.when(withExp)(DebugExp.createInstance(
             category=OtherCategory("Reference Disjointness"), esNew, esNew, InsertionOrderedSet.empty)), enforceAssumption = false)
           Q(s2, v0)
@@ -423,7 +427,11 @@ object executor extends ExecutionRules {
         case _ =>
           produce(s, freshSnap, a, InhaleFailed(inhale), v)((s1, v1) => {
             v1.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterInhale)
-            Q(s1, v1)})
+            val oldHeapLabel = v1.getDebugHeapLabel(s1)
+            val heapParent = (v1.getDebugHeapLabel(state), Some(StmtExecution(inhale)))
+            val s2 = s1.copy(oldHeaps = s1.oldHeaps + (oldHeapLabel -> s1.h),
+              oldHeapConditions = s1.oldHeapConditions + (oldHeapLabel -> heapParent))
+            Q(s2, v1)})
       }
 
       case exhale @ ast.Exhale(a) =>
@@ -568,7 +576,12 @@ object executor extends ExecutionRules {
               predicateSupporter.unfold(s3, predicate, tArgs, eArgsNew, tPerm, ePermNew, wildcards, pve, v3, pa)(
                 (s4, v4) => {
                   v2.decider.finishDebugSubExp(s"unfolded ${pa.toString}")
-                  Q(s4, v4)
+                  val oldHeapLabel = v4.getDebugHeapLabel(s4)
+                  val branchCond = None
+                  val heapParent = (v4.getDebugHeapLabel(s), Some(StmtExecution(unfold)))
+                  val s5 = s4.copy(oldHeaps = s4.oldHeaps + (oldHeapLabel -> s4.h),
+                    oldHeapConditions = s4.oldHeapConditions + (oldHeapLabel -> heapParent))
+                  Q(s5, v4)
                 })
             })
           }))

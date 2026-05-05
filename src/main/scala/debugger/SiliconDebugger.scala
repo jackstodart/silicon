@@ -61,9 +61,23 @@ case class ProofObligation(s: State,
       s"Store:\n\t\t${s.g.values.map(v => s"${v._1} -> ${v._2._2.get}").mkString("\n\t\t")}\n\n"
 
     def heapToString(h: Heap): String = h.values.map(chunkString).mkString("\n\t\t")
-    val heapString = if (printConfig.printOldHeaps)
-      s"Current Heap:\n\t\t${heapToString(s.h)}\n\n" + s.oldHeaps.map {case (k, v) => s"Heap $k:\n\t\t${heapToString(v)}\n\n"}.mkString("")
-    else
+    val heapString = if (printConfig.printOldHeaps) {
+      def oldHeapDescriptor(label: String): String = {
+        val parent = if (s.oldHeapConditions.contains(label)) {
+          val condString = s.oldHeapConditions(label)._2 match {
+            case Some(cond) => s" by \"${cond.printCondition}\""
+            case None => ""
+          }
+          s", from \"${s.oldHeapConditions(label)._1}\"$condString"
+        }
+        else ""
+        s"Heap $label$parent:"
+      }
+
+      s"Current Heap:\n\t\t${heapToString(s.h)}\n\n" + s.oldHeaps.map {
+        case (k, v) => s"${oldHeapDescriptor(k)}\n\t\t${heapToString(v)}\n\n"
+      }.mkString("")
+    } else
       s"Heap:\n\t\t${s.h.values.map(chunkString).mkString("\n\t\t")}\n\n"
 
     storeString + heapString
