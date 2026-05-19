@@ -1,22 +1,27 @@
 package viper.silicon.debugger
 
+import org.jgrapht.alg.connectivity.GabowStrongConnectivityInspector
+import org.jgrapht.alg.cycle.CycleDetector
+import org.jgrapht.graph.{DefaultDirectedGraph, DefaultEdge}
+import org.jgrapht.traverse.TopologicalOrderIterator
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.ExportUtils._
-import viper.silicon.debugger.Rewrites.{addRename, addRenames, addTermReplace, emptyRewrites}
 import viper.silicon.state
-import viper.silicon.state.{BasicChunk, Identifier, terms}
+import viper.silicon.state.{BasicChunk, terms}
 import viper.silicon.state.terms.{Sort, Term, sorts}
 import viper.silicon.resources
 import viper.silicon.resources.{FieldID, PredicateID}
 import viper.silver.ast
-import viper.silver.ast.{Domain, DomainAxiom, Exp, Program}
+import viper.silver.ast.utility.Functions.{FuncName, allSubexpressions}
+import viper.silver.ast.{DomainAxiom, Exp, Program}
 import viper.silver.utility.Common.Rational
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ArrayBuffer, Set => MSet}
 import scala.collection.{immutable, mutable}
 import scala.io.StdIn.readLine
+import scala.jdk.CollectionConverters._
 
 
 // Main wrapper object
@@ -90,7 +95,11 @@ object Rewrites {
  */
 class Translator(val obl: ProofObligation, val filename: String) {
   var strings = ArrayBuffer[String]() // Strings to be written to .thy file
+  private val program = obl.s.program
+  private val domains = program.domains.filter(d => !d.name.endsWith("WellFoundedOrder"))
+  private val translationOrder: Seq[(MemberSeq, Seq[MemberSeq])] = memberTranslationSequence(program)
   private val currentHeapLabel: String = if (obl.s.oldHeaps.nonEmpty) obl.s.oldHeaps.keys.last else ""
+
   private val (basicRewrites: Rewrites,
                fieldChunks: immutable.Map[Term, (BasicChunk, String)],
                predicateChunks: immutable.Map[Term, (BasicChunk, String)]) = { // Rewrites(renaming2, immutable.Map())
@@ -146,8 +155,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
     strings += "begin\n\n"
 
     declareDomainTypes()
-    defineHeaps()
-    translateDomainsFunctionsPredicates()
+    defineFields()
+    translateMembers()
     generateLemma()
 
     strings += "end"
@@ -157,143 +166,93 @@ class Translator(val obl: ProofObligation, val filename: String) {
     // First declare domain types
     if (domains.nonEmpty) {
       strings += "text \\<open>Declare domain types\\<close>\n"
-      domains.foreach(d => strings += "typedecl " + d._1.name)
+      domains.foreach(d => strings += "typedecl " + d.name)
       strings += "\n"
     }
   }
 
-  private def defineHeaps(): Unit = {
-    strings += "text \\<open>Define fields and heaps\\<close>\n"
-    strings += "locale Heaps ="
-    if (obl.s.program.fields.nonEmpty) {
-      strings += "  (* Fields *)"
-      val fieldLength = obl.s.program.fields.map(_.name.length).max
-      for (fld <- obl.s.program.fields) {
+  private def defineFields(): Unit = {
+    if (program.fields.nonEmpty) {
+      strings += "locale Fields ="
+      val fieldLength = program.fields.map(_.name.length).max
+      for (fld <- program.fields) {
         val nameString = padString(safeString(fld.name) + "'", fieldLength+1)
         strings += s"  fixes $nameString :: \"Heap $FN_ARR ref $FN_ARR ${translateType(fld.typ)}\""
       }
+      strings += "\n"
     }
-    if (obl.s.oldHeaps.nonEmpty) {
-      strings += "  (* Old heaps *)"
-      val heapLabelLength = obl.s.oldHeaps.keys.map(_.length).max
-      for (h <- obl.s.oldHeaps) {
-        strings += s"  fixes ${padString(safeString(h._1), heapLabelLength)} :: Heap"
-      }
-      strings += ""
-    } else {
-      strings += "  assumes True (* no heaps to translate *)\n"
-    }
+  }
 
-    // Abbreviate fields
-    if (obl.s.program.fields.nonEmpty) {
-        strings += "context Heaps\nbegin\n"
-        val currentLabel = safeString(currentHeapLabel)
-        for (f <- obl.s.program.fields) {
-          strings += s"abbreviation ${f.name} :: \"ref $FN_ARR ${translateType(f.typ)}\" where"
-          strings += s"  \"${f.name} r \\<equiv> ${f.name}' $currentLabel r\"\n"
-        }
-        strings += "end\n"
+  private def translateMembers(): Unit = {
+    strings += "text \\<open>Translated domains, functions and predicates\\<close>\n"
+
+    for ((mSeq, deps) <- translationOrder) {
+      val depLocales = (if (heapDepMemSeq(mSeq)) "\n  Fields +" else "") +
+        deps.map(m => s"\n  ${localeName(m)} +").mkString("")
+      strings += s"locale ${localeName(mSeq)} =" + depLocales
+      translateMemberSeq(mSeq)
+      strings += ""
     }
     strings += ""
   }
 
-  private def translateDomainsFunctionsPredicates(): Unit = {
-    strings += "text \\<open>Translated domains and functions\\<close>\n"
-    val (independentDomains, dependentDomains) = domains.partition(domDeps => DomainDeps.isSelfContained(domDeps._1))
-
-    def functionType(fn: ast.FuncLike, isPrecondition: Boolean = false, isHeapDep: Boolean = false): String = {
-      val name = if (isPrecondition) fn.name + "_pre" else fn.name
-      val maybeHeap = if (isHeapDep) s"Heap $FN_ARR " else ""
-      val argString = fn.formalArgs.map(a => translateType(a.typ) + s" $FN_ARR ").mkString("")
-      val typeString = if (isPrecondition) "bool" else translateType(fn.typ)
-      name + " :: \"" + maybeHeap + argString + typeString + "\""
+  private def heapDepMemSeq(seq: MemberSeq): Boolean = {
+    seq.exists {
+      case DomainName(_) => false
+      case FunctionName(name) => !program.findFunction(name).isPure
+      case PredicateName(_) => true
     }
+  }
 
-    def translateAxiom(ax: DomainAxiom): String = {
+  // Translate a single collection of inter-dependent members
+  private def translateMemberSeq(memSeq: MemberSeq): Unit = {
+    for (member <- memSeq) {
+      member match {
+        case DomainName(name) => declareDomain(program.findDomain(name))
+        case FunctionName(name) => declareFunction(program.findFunction(name))
+        case PredicateName(name) => declarePredicate(program.findPredicate(name))
+      }
+    }
+    for (member <- memSeq) {
+      member match {
+        case DomainName(name) => defineDomain(program.findDomain(name))
+        case FunctionName(name) => defineFunction(program.findFunction(name))
+        case PredicateName(name) => definePredicate(program.findPredicate(name))
+      }
+    }
+  }
+
+  private def declareDomain(domain: ast.Domain): Unit = {
+    domain.functions.foreach(fn => strings += s"  fixes " + functionType(fn))
+  }
+
+  private def defineDomain(domain: ast.Domain): Unit = {
+    for (ax <- domain.axioms) {
       val axName = ax match {
         case ast.NamedDomainAxiom(name, _) => name + ": "
         case _ => ""
       }
-      s"  assumes $axName\"${translateExp(ax.exp)}\""
+      strings += s"  assumes $axName\"${translateExp(ax.exp)}\""
     }
-
-    for (d <- independentDomains) {
-      strings += s"locale ${d._1.name}_Domain ="
-      d._1.functions.foreach(fn => strings += s"  fixes " + functionType(fn))
-      //for (ax <- d._1.axioms) { strings += s"  assumes ${axiomName(ax)}: \"${translateExp(ax.exp)}\"" }
-      d._1.axioms.foreach { strings += translateAxiom(_) }
-      strings += ""
-    }
-
-    for (d <- dependentDomains) {
-      strings += s"locale ${d._1.name}_Functions ="
-      d._1.functions.foreach(fn => strings += s"  fixes " + functionType(fn))
-      strings += ""
-    }
-
-    // Program functions
-    strings += "locale Program_Functions ="
-    if (obl.s.program.functions.isEmpty) {
-      strings += "  assumes True (* no functions to translate *)\n"
-    } else {
-      for (fn <- obl.s.program.functions) {
-        strings += s"  fixes " + functionType(fn, isHeapDep = !fn.isPure)
-        if (fn.pres.nonEmpty) {
-          strings += s"  fixes " + functionType(fn, isPrecondition = true, isHeapDep = !fn.isPure)
-        }
-      }
-      strings += ""
-    }
-
-    // Pure part of predicates
-    strings += "locale Predicates ="
-    if (obl.s.program.predicates.isEmpty) {
-      strings += "  assumes True (* no predicates to translate *)\n"
-    } else {
-      for (pred <- obl.s.program.predicates) {
-        val typeString = s"Heap $FN_ARR " + pred.formalArgs.map(a => translateType(a.typ) + s" $FN_ARR ").mkString("")
-        strings += s"  fixes ${pred.name} :: \"${typeString}bool\""
-        val typeTuple = s"Heap \\<times> ${pred.formalArgs.map(a => translateType(a.typ)).mkString(" \\<times> ")}"
-        strings += s"  fixes ${pred.name}_eq :: \"$typeTuple $FN_ARR $typeTuple $FN_ARR bool\""
-      }
-      strings += ""
-    }
-
-    // Create combined locale
-    strings += "locale Program = Heaps + Program_Functions + Predicates +"
-    independentDomains.foreach(d => strings += s"  ${d._1.name}_Domain +")
-    dependentDomains.foreach(d => strings += s"  ${d._1.name}_Functions +")
-
-    val noAxioms = domains.forall(_._1.axioms.isEmpty)
-    if (obl.s.program.functions.isEmpty && noAxioms) {
-      strings += "  assumes True (* No function definitions/axioms *)"
-      // We could return here with a blank line?? But should be no different.
-    }
-
-    // Domain axioms
-    for (d <- dependentDomains) {
-      strings += s"  (* ${d._1.name} domain axioms *)"
-      //for (ax <- d._1.axioms) strings += s"  assumes ${axiomName(ax)}: \"${translateExp(ax.exp)}\""
-      d._1.axioms.foreach { strings += translateAxiom(_) }
-    }
-
-    // Function definitions
-    strings += "  (* Function definitions and posts *)"
-    obl.s.program.functions.foreach(translateFunctionDef)
-    strings += "  (* Predicate properties *)"
-    obl.s.program.predicates.foreach(translatePredicate)
-    strings += "\n"
   }
 
-  private def translateFunctionDef(fn: ast.Function): Unit = {
+  private def declareFunction(fn: ast.Function): Unit = {
+    strings += s"  fixes " + functionType(fn, isHeapDep = !fn.isPure)
+    if (fn.pres.nonEmpty) {
+      strings += s"  fixes " + functionType(fn, isPrecondition = true, isHeapDep = !fn.isPure)
+    }
+  }
+
+  private def defineFunction(fn: ast.Function): Unit = {
     val argString = (if (fn.isPure) "" else "h ") + fn.formalArgs.map(_.name).mkString(" ")
-    val argStringWTypes = (if (fn.isPure) "" else "h ") + fn.formalArgs.map(a => s"(${a.name}::${translateType(a.typ)})").mkString(" ")
+    val argStringWTypes = (if (fn.isPure) "" else "(h::Heap) ") +
+      fn.formalArgs.map(a => s"(${a.name}::${translateType(a.typ)})").mkString(" ")
 
     // Translate function body
     if (fn.body.isDefined) {
-      val fnRHS = "(" + translateExp(fn.body.get) + ")"
+      val fnRHS = translateExp(fn.body.get)
       if (fn.pres.isEmpty) {
-        strings += s"  assumes ${fn.name}_def: \"\\<And>$argString. ${fn.name} $argString =\n    $fnRHS\""
+        strings += s"  assumes ${fn.name}_def: \"\\<And>$argString. ${fn.name} $argString \\<equiv>\n    $fnRHS\""
       } else {
         strings += s"  assumes ${fn.name}_def: \"\\<And>$argString. " +
           s"${fn.name}_pre $argString $META_ARR ${fn.name} $argString =\n    $fnRHS\""
@@ -303,20 +262,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
         case None =>
         case Some(exp) =>
           strings += s"  assumes ${fn.name}_calls: \"\\<And>$argStringWTypes. ${translateExp(exp)}\""
-          /*
-          var newRenames = vars.tail.map(v => (v.id, v.id.name.takeWhile(_ != '@'))).toMap
-          if (!fn.isPure) newRenames = newRenames + (vars.head.id -> "h")
-          val newRewrites = addRenames(basicRewrites, newRenames)
-          def translate: Term => String = translateTerm(_, 50, newRewrites, options = defaultOptions.collapseSnapsOn())
-
-          val bodyString = body match {
-            case terms.Implies(p0, p1) => s"${translate(p0)} $META_ARR ${translate(p1)}"
-            case _ => translate(body)
-          }
-          //val propString = translateTerm(prop, newRewrites, collapseSnaps = true).replace("NO_HEAP", "h")
-          // TODO: use argString and fix variables with unnecessary suffixes
-          strings += s"  assumes ${fn.name}_calls: \"\\<And>$argStringWTypes. ${bodyString.replace("NO_HEAP", "h")}\""
-          */
       }
     }
     // Postconditions
@@ -338,7 +283,14 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
-  private def translatePredicate(pred: ast.Predicate): Unit = {
+  private def declarePredicate(pred: ast.Predicate): Unit = {
+    val typeString = s"Heap $FN_ARR " + pred.formalArgs.map(a => translateType(a.typ) + s" $FN_ARR ").mkString("")
+    strings += s"  fixes ${pred.name} :: \"${typeString}bool\""
+    val typeTuple = s"Heap \\<times> ${pred.formalArgs.map(a => translateType(a.typ)).mkString(" \\<times> ")}"
+    strings += s"  fixes ${pred.name}_eq :: \"$typeTuple $FN_ARR $typeTuple $FN_ARR bool\""
+  }
+
+  private def definePredicate(pred: ast.Predicate): Unit = {
     pred.getPureFragment match {
       case Some(exp) =>
         val argString = "h " + pred.formalArgs.map(_.name).mkString(" ")
@@ -359,15 +311,28 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
+  // returns "fn_name :: args* => result", with optional _pre suffix, and heap argument
+  private def functionType(fn: ast.FuncLike, isPrecondition: Boolean = false, isHeapDep: Boolean = false): String = {
+    val name = if (isPrecondition) fn.name + "_pre" else fn.name
+    val maybeHeap = if (isHeapDep) s"Heap $FN_ARR " else ""
+    val argString = fn.formalArgs.map(a => translateType(a.typ) + s" $FN_ARR ").mkString("")
+    val typeString = if (isPrecondition) "bool" else translateType(fn.typ)
+    name + " :: \"" + maybeHeap + argString + typeString + "\""
+  }
+
   private def generateLemma(): Unit = {
     strings += "text \\<open>Proof obligation\\<close>\n"
-    strings += "context Program\nbegin\n\nlemma"
+    strings += "locale Program ="
+    if (program.fields.nonEmpty) strings += "  Fields +"
+    strings += translationOrder.map { case (mSeq, _) => s"  ${localeName(mSeq)}" }.mkString(" +\n")
+    strings += "\ncontext Program\nbegin\n\nlemma"
     translateStore()
     translateHeaps()
     strings += "  (* Assumptions *)"
     obl.assumptionsExp.foreach(translateDebugExp(_))
 
     // val assertionTerm = obl.eAssertion.term.getOrElse(obl.assertion)
+    strings += "  (* Proof goal *)"
     strings += "  shows \"" + translateTerm(obl.assertion) + "\""
     strings += "  (* Complete proof here *)\n  sorry\n"
     strings += "end\n"
@@ -923,11 +888,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
-  private val pureFunctions: Seq[ast.Function] = obl.s.program.functions.filter(f => f.isPure)
-  val domains: Seq[(Domain, DomainDeps)] = obl.s.program.domains.filter(
-    d => !d.name.endsWith("WellFoundedOrder")).map(
-    d => (d, getDomainDeps(d)))
-
   private lazy val freeVars: InsertionOrderedSet[terms.Var] = {
     def deToVars(de: DebugExp): InsertionOrderedSet[terms.Var] = {
       if (de.term.isDefined) {
@@ -1268,5 +1228,95 @@ object ExportUtils {
     else {
       ast.And(filtered.head, bigAnd(filtered.tail, pos, info, errT))(pos, info, errT)
     }
+  }
+
+  sealed trait MemberName {
+    val name: String
+  }
+  case class DomainName(name: String) extends MemberName
+  case class FunctionName(name: String) extends MemberName
+  case class PredicateName(name: String) extends MemberName
+  type MemberSeq = Seq[MemberName]
+
+  def localeName(m: MemberSeq): String = m.head.name + "_" + m.tail.map(_.name).mkString("_")
+
+  // Dependency graph between functions, domains and predicates
+  def getDependencyGraph(program: Program): DefaultDirectedGraph[MemberName, DefaultEdge] = {
+    val graph = new DefaultDirectedGraph[MemberName, DefaultEdge](classOf[DefaultEdge])
+    val domains = program.domains.filter(d => !d.name.endsWith("WellFoundedOrder"))
+
+    domains.foreach(d => graph.addVertex(DomainName(d.name)))
+    program.functions.foreach(f => graph.addVertex(FunctionName(f.name)))
+    program.predicates.foreach(p => graph.addVertex(PredicateName(p.name)))
+
+    def process(caller: MemberName, e: Exp): Unit = {
+      e visit {
+        case df: ast.DomainFuncApp => graph.addEdge(caller, DomainName(df.domainName))
+        case ast.FuncApp(funcname, _) => graph.addEdge(caller, FunctionName(funcname))
+        case ast.PredicateAccessPredicate(loc, _) => graph.addEdge(caller, PredicateName(loc.predicateName))
+      }
+    }
+
+    for (d <- domains) {
+      d.axioms.foreach(ax => process(DomainName(d.name), ax.exp))
+    }
+    for (f <- program.functions) {
+      allSubexpressions(f).foreach(process(FunctionName(f.name), _))
+    }
+    for (p <- program.predicates) {
+      p.body.foreach(process(PredicateName(p.name), _))
+    }
+
+    graph
+  }
+
+  // Returns ordered list of MemberSeq and any other MemberSeqs it depends on
+  // Based on Functions.heights and DefaultFunctionVerificationUnitProvider.analyze
+  // This could use the chopper to slice a relevant subprogram
+  def memberTranslationSequence(program: Program): Seq[(MemberSeq, Seq[MemberSeq])] = {
+    // This could use the position of each member to create a unified ordering,
+    // Map[MemberName, Position]
+    val functionIndices = program.functions.map(_.name).zipWithIndex.toMap
+    val domainIndices = program.domains.filter(d => !d.name.endsWith("WellFoundedOrder")).map(_.name).zipWithIndex.toMap
+    val predicateIndices = program.predicates.map(_.name).zipWithIndex.toMap
+
+    implicit val memberNameOrdering: Ordering[MemberName] =
+      Ordering.by[MemberName, (Int, Int)] {
+        case DomainName(name) => (0, domainIndices(name))
+        case PredicateName(name) => (1, predicateIndices(name))
+        case FunctionName(name) => (2, functionIndices(name))
+      }
+
+    implicit val memberNameSetOrdering: Ordering[MSet[MemberName]] =
+      Ordering.by[MSet[MemberName], (Int, MemberName)] {
+        s => (s.toList.length, s.toList.min)
+      }
+
+    val depGraph = getDependencyGraph(program)
+    val stronglyConnectedSets = new GabowStrongConnectivityInspector(depGraph).stronglyConnectedSets().asScala
+    val condensedCallGraph = new DefaultDirectedGraph[MSet[MemberName], DefaultEdge](classOf[DefaultEdge])
+    stronglyConnectedSets.foreach(v => condensedCallGraph.addVertex(v.asScala))
+
+    def condensationOf(func: MemberName): MSet[MemberName] =
+      stronglyConnectedSets.find(_ contains func).get.asScala
+
+    for (e <- depGraph.edgeSet().asScala) {
+      val sourceSet = condensationOf(depGraph.getEdgeSource(e))
+      val targetSet = condensationOf(depGraph.getEdgeTarget(e))
+
+      if (sourceSet != targetSet)
+        condensedCallGraph.addEdge(sourceSet, targetSet)
+    }
+
+    assert(!new CycleDetector(condensedCallGraph).detectCycles(),
+      "Expected acyclic graph, but found at least one cycle")
+
+    val result = mutable.Buffer[(MemberSeq, Seq[MemberSeq])]()
+    for (condensation <- new TopologicalOrderIterator(condensedCallGraph, memberNameSetOrdering).asScala) {
+      val deps = condensedCallGraph.outgoingEdgesOf(condensation).asScala.toList.map(
+        condensedCallGraph.getEdgeTarget(_).toList.sorted)
+      result.prepend((condensation.toList.sorted, deps))
+    }
+    result.toList
   }
 }
