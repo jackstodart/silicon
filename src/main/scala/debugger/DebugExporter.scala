@@ -7,7 +7,7 @@ import org.jgrapht.traverse.TopologicalOrderIterator
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.ExportUtils._
 import viper.silicon.state
-import viper.silicon.state.{BasicChunk, terms}
+import viper.silicon.state.{BasicChunk, QuantifiedFieldChunk, QuantifiedPredicateChunk, terms}
 import viper.silicon.state.terms.{Sort, Term, sorts}
 import viper.silicon.resources
 import viper.silicon.resources.{FieldID, PredicateID}
@@ -100,9 +100,16 @@ class Translator(val obl: ProofObligation, val filename: String) {
   private val translationOrder: Seq[(MemberSeq, Seq[MemberSeq])] = memberTranslationSequence(program)
   private val currentHeapLabel: String = if (obl.s.oldHeaps.nonEmpty) obl.s.oldHeaps.keys.last else ""
 
+  // Maps each debug heap label to an ancestor label it's unified with, and any extra conditions on the child heap
+  private val heapMap: immutable.Map[String, (String, Set[ast.Exp])] = {
+    Map()
+  }
+
   private val (basicRewrites: Rewrites,
                fieldChunks: immutable.Map[Term, (BasicChunk, String)],
-               predicateChunks: immutable.Map[Term, (BasicChunk, String)]) = { // Rewrites(renaming2, immutable.Map())
+               predicateChunks: immutable.Map[Term, (BasicChunk, String)],
+               quantFieldChunks: immutable.Map[Term, (QuantifiedFieldChunk, String)],
+               quantPredChunks: immutable.Map[Term, (QuantifiedPredicateChunk, String)]) = {
     // Add local vars from the store
     val varRenames = mutable.Map[String, String]()
     for ((lVar, term) <- obl.s.g.termValues) {
@@ -122,11 +129,13 @@ class Translator(val obl: ProofObligation, val filename: String) {
     val termReps = mutable.Map[Term, String]()
     val fields = mutable.Map[Term, (BasicChunk, String)]()
     val predicates = mutable.Map[Term, (BasicChunk, String)]()
+    val quantFields = mutable.Map[Term, (QuantifiedFieldChunk, String)]()
+    val quantPreds = mutable.Map[Term, (QuantifiedPredicateChunk, String)]()
     val varRewrites = Rewrites(varRenames.toMap, Map())
     for ((label, heap) <- obl.s.oldHeaps.toList.reverse) {
       for (chunk <- heap.values) {
         chunk match {
-          case bc: state.BasicChunk =>
+          case bc: BasicChunk =>
             bc.resourceID match {
               // If the chunk is a basic field access, add rewriting
               case resources.FieldID =>
@@ -140,13 +149,19 @@ class Translator(val obl: ProofObligation, val filename: String) {
                 if (!(termReps contains bc.snap) && permIsPositive(bc.perm)) {
                   predicates += bc.snap -> (bc, label)
                 }
-              case _ =>
             }
-          case _ => // TODO: Can we add snapshot maps to rewrites? Carry around the condition?
+          case qfc: QuantifiedFieldChunk =>
+            if (!(quantFields contains qfc.snapshotMap))
+              quantFields += (qfc.snapshotMap -> (qfc, label))
+          case qpc: QuantifiedPredicateChunk =>
+            if (!(quantPreds contains qpc.snapshotMap))
+              quantPreds += (qpc.snapshotMap -> (qpc, label))
+          case _ =>
+            println("Other chunk: " + chunk.toString)
         }
       }
     }
-    (Rewrites(varRenames.toMap, termReps.toMap), fields.toMap, predicates.toMap)
+    (Rewrites(varRenames.toMap, termReps.toMap), fields.toMap, predicates.toMap, quantFields.toMap, quantPreds.toMap)
   }
 
   def translateObligation(): Unit = {
@@ -173,6 +188,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
   private def defineFields(): Unit = {
     if (program.fields.nonEmpty) {
+      strings += "text \\<open>Declare field functions\\<close>\n"
       strings += "locale Fields ="
       val fieldLength = program.fields.map(_.name.length).max
       for (fld <- program.fields) {
@@ -184,7 +200,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
   }
 
   private def translateMembers(): Unit = {
-    strings += "text \\<open>Translated domains, functions and predicates\\<close>\n"
+    strings += "text \\<open>Translate domains, functions and predicates\\<close>\n"
 
     for ((mSeq, deps) <- translationOrder) {
       val depLocales = (if (heapDepMemSeq(mSeq)) "\n  Fields +" else "") +
@@ -390,6 +406,19 @@ class Translator(val obl: ProofObligation, val filename: String) {
           val field = if (label == "curr") s"${qfc.id.name} r" else s"${qfc.id.name}' ${safeString(label)} r"
           val chunk = s"\\<And>r. $condString $field = ${qfc.id}_${translateTerm(qfc.fvf)} r"
           strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
+        case qpc: state.QuantifiedPredicateChunk =>
+          val condString = translateTerm(terms.And(qpc.condition, permCondSimp(qpc.permValue)))
+          val argList = qpc.quantifiedVars.map(_.id.name)
+          val quantifyString = "\\<And>" + argList.mkString(" ")
+          val predString = s"$quantifyString. $condString $META_ARR ${qpc.id.name} ${safeString(label)} ${argList.mkString(" ")}"
+          strings += s"  assumes ${safeString(label)}_${idx}a: \"$predString\""
+          if (predSnapInOtherHeap(qpc.snapshotMap)) {
+            val (otherChunk, otherLabel) = predicateChunks(qpc.snapshotMap)
+            val thisTuple = s"($label, ${argList.mkString(", ")})"
+            val otherTuple = s"($otherLabel, ARGS???)"
+            val eqString = s"${qpc.id.name}(args) \\<and> ${qpc.id.name}_eq $thisTuple $otherTuple"
+            strings += s"  assumes ${safeString(label)}_${idx}b: \"$condString $META_ARR $eqString\""
+          }
       }
     }
   }
@@ -699,16 +728,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
-  // TODO: Can we swap this for the finalExp from de?
-  private def termExpMatch(term: Term, exp: Exp): Boolean = {
-    (term, exp) match {
-      case (terms.App(name, argsT, _), ast.FuncApp(funcname, argsE)) => name.id.name == funcname
-      case (terms.SetIn(elemT, setT), ast.AnySetContains(elemE, setE)) => true
-      case (terms.SeqIn(_, _), ast.SeqContains(_, _)) => true
-      case _ => false
-    }
-  }
-
   // Some custom logic for terms that can be partially filtered
   private def filterPure(term: Term): Option[Term] = {
     term match {
@@ -812,79 +831,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case _: terms.SortWrapper => true
 
       case _ => false
-    }
-  }
-
-  // Set of domain names and program function names that a domain refers to
-  case class DomainDeps(domains: Set[String], functions: Set[String]) {
-    def ++(more: DomainDeps): DomainDeps = DomainDeps(domains ++ more.domains, functions ++ more.functions)
-  }
-
-  object DomainDeps {
-    def empty = DomainDeps(Set(), Set())
-    def singleD(domName: String): DomainDeps = DomainDeps(Set(domName), Set())
-    def singleF(funName: String): DomainDeps = DomainDeps(Set(), Set(funName))
-    def concat(dds: Seq[DomainDeps]): DomainDeps = dds.foldLeft(DomainDeps.empty)(_ ++ _)
-    def isSelfContained(dom: ast.Domain): Boolean = getDomainDeps(dom) == DomainDeps(Set(dom.name), Set())
-  }
-
-  def getDomainDeps(dom: ast.Domain): DomainDeps = {
-    DomainDeps.concat(dom.axioms.map(ax => domainDepsIn(ax.exp)))
-  }
-
-  private def domainDepsIn(e: Exp): DomainDeps = {
-    e match {
-      case ast.Add(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.Sub(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.Mul(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.Div(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.Mod(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.LtCmp(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.LeCmp(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.GtCmp(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.GeCmp(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.EqCmp(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.NeCmp(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-
-      case ast.IntLit(_) => DomainDeps.empty
-      case ast.Minus(exp) => domainDepsIn(exp)
-      case ast.Or(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.And(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.Implies(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.MagicWand(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.Not(exp) => domainDepsIn(exp)
-      case ast.TrueLit() => DomainDeps.empty
-      case ast.FalseLit() => DomainDeps.empty
-      case ast.NullLit() => DomainDeps.empty
-
-      case ast.FuncApp(funcname, args) => DomainDeps.singleF(funcname) ++ DomainDeps.concat(args.map(domainDepsIn))
-      case ast.DomainFuncApp(funcname, args, _) =>
-        val domName = obl.s.program.findDomainFunction(funcname).domainName
-        DomainDeps.singleD(domName) ++ DomainDeps.concat(args.map(domainDepsIn))
-      case ast.FieldAccess(rcv, _) => domainDepsIn(rcv)
-
-      case ast.CondExp(cond, thn, els) => domainDepsIn(cond) ++ domainDepsIn(thn) ++ domainDepsIn(els)
-      case ast.Let(_, exp, body) => domainDepsIn(exp) ++ domainDepsIn(body)
-
-      case ast.Forall(_, _, exp) => domainDepsIn(exp)
-      case ast.Exists(_, _, exp) => domainDepsIn(exp)
-      case _: ast.LocalVar => DomainDeps.empty
-      case _: ast.Result => DomainDeps.empty
-      case _: ast.LocalVarWithVersion => DomainDeps.empty
-
-      case _: ast.EmptySeq => DomainDeps.empty
-      case _: ast.ExplicitSeq => DomainDeps.empty
-      case _: ast.RangeSeq => DomainDeps.empty
-      case ast.SeqAppend(left, right) => domainDepsIn(left) ++ domainDepsIn(right)
-      case ast.SeqIndex(s, idx) => domainDepsIn(s) ++ domainDepsIn(idx)
-      case ast.SeqTake(s, n) => domainDepsIn(s) ++ domainDepsIn(n)
-      case ast.SeqDrop(s, n) => domainDepsIn(s) ++ domainDepsIn(n)
-      case ast.SeqContains(elem, s) => domainDepsIn(elem) ++ domainDepsIn(s)
-      case ast.SeqUpdate(s, idx, elem) => domainDepsIn(s) ++ domainDepsIn(idx) ++ domainDepsIn(elem)
-      case ast.SeqLength(s) => domainDepsIn(s)
-
-      case _: ast.EmptySet => DomainDeps.empty
-      case ast.AnySetContains(elem, s) => domainDepsIn(elem) ++ domainDepsIn(s)
     }
   }
 
