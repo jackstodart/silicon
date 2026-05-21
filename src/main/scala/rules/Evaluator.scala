@@ -7,7 +7,8 @@
 package viper.silicon.rules
 
 import viper.silicon
-import viper.silicon.debugger.{AuxiliaryTerms, DebugExp, FunctionPrecondition, OtherCategory, TriggerTerm}
+import viper.silicon.debugger
+import viper.silicon.debugger.DebugExp
 import viper.silicon.Config.JoinMode
 import viper.silver.ast
 import viper.silver.verifier.{CounterexampleTransformer, PartialVerificationError, VerifierWarning}
@@ -182,7 +183,7 @@ object evaluator extends EvaluationRules {
       case _: ast.WildcardPerm =>
         val (tVar, tConstraints, eVar) = v.decider.freshARP()
         val constraintExp = Option.when(withExp)(DebugExp.createInstance(
-          category=OtherCategory(s"${eVar.get.toString} > none"),
+          category=debugger.OtherCategory(s"${eVar.get.toString} > none"),
           isInternal_ = true))
         v.decider.assumeDefinition(tConstraints, constraintExp)
         /* TODO: Only record wildcards in State.constrainableARPs that are used in exhale
@@ -255,7 +256,7 @@ object evaluator extends EvaluationRules {
         eval(s, e0, pve, v)((s1, t0, e0New, v1) => {
           val t = v1.decider.appliedFresh("letvar", v1.symbolConverter.toSort(x.typ), s1.relevantQuantifiedVariables.map(_._1))
           val debugExp = Option.when(withExp)(DebugExp.createInstance(
-            category=OtherCategory("letvar assignment"),
+            category=debugger.OtherCategory("letvar assignment"),
             children=InsertionOrderedSet(DebugExp.createInstance(ast.EqCmp(x.localVar, e0)(), ast.EqCmp(x.localVar, e0New.get)()))))
           v1.decider.assumeDefinition(BuiltinEquals(t, t0), debugExp)
           val newFuncRec = s1.functionRecorder.recordFreshSnapshot(t.applicable.asInstanceOf[Function]).enterLet(l)
@@ -540,11 +541,11 @@ object evaluator extends EvaluationRules {
             val commentGlobal = "Nested auxiliary terms: globals (aux)"
             v1.decider.prover.comment(commentGlobal)
             v1.decider.assume(tAuxGlobal, Option.when(withExp)(DebugExp.createInstance(
-              category=AuxiliaryTerms(true), children=auxGlobalsExp.get)), enforceAssumption = false)
+              category=debugger.AuxiliaryTerms(true), children=auxGlobalsExp.get)), enforceAssumption = false)
             val commentNonGlobals = "Nested auxiliary terms: non-globals (aux)"
             v1.decider.prover.comment(commentNonGlobals)
             v1.decider.assume(tAuxHeapIndep/*tAux*/, Option.when(withExp)(DebugExp.createInstance(
-              category=AuxiliaryTerms(false), children=auxNonGlobalsExp.get)), enforceAssumption = false)
+              category=debugger.AuxiliaryTerms(false), children=auxNonGlobalsExp.get)), enforceAssumption = false)
 
             if (qantOp == Exists) {
               // For universal quantification, the non-global auxiliary assumptions will contain the information that
@@ -661,7 +662,7 @@ object evaluator extends EvaluationRules {
               // val heapLabel = v3.getDebugHeapLabel(s4)
               val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func)), snap1 :: tArgs, Some(debugHeapName))
               val preExp = Option.when(withExp)({DebugExp.createInstance(
-                category=FunctionPrecondition(func.name, eArgsNew.get),
+                category=debugger.FunctionPrecondition(func.name, eArgsNew.get),
                 None, None, InsertionOrderedSet.empty)
               })
               v3.decider.assume(preFApp, preExp)
@@ -744,7 +745,7 @@ object evaluator extends EvaluationRules {
                       if (!Verifier.config.disableFunctionUnfoldTrigger()) {
                         val eArgsString = eArgsNew.mkString(", ")
                         val debugExp = Option.when(withExp)(DebugExp.createInstance(
-                          category = TriggerTerm(s"PredicateTrigger(${predicate.name}($eArgsString))"), isInternal_ = true))
+                          category = debugger.TriggerTerm(s"PredicateTrigger(${predicate.name}($eArgsString))"), isInternal_ = true))
                         v4.decider.assume(App(s.predicateData(predicate.name).triggerFunction, snap.get.convert(terms.sorts.Snap) +: tArgs, None), debugExp)
                       }
                       val body = predicate.body.get /* Only non-abstract predicates can be unfolded */
@@ -1348,6 +1349,7 @@ object evaluator extends EvaluationRules {
     val preMark = v.decider.setPathConditionMark()
     var pcDelta = InsertionOrderedSet.empty[Term]
     var pcDeltaExp = InsertionOrderedSet.empty[DebugExp]
+    var functionRecorder = s.functionRecorder
 
     /* TODO: Evaluate as many remaining expressions as possible, i.e. don't
      *       stop if evaluating one fails
@@ -1382,10 +1384,11 @@ object evaluator extends EvaluationRules {
      */
 
     val r =
-      evals(s.copy(triggerExp = true), remainingTriggerExpressions, _ => pve, v)((_, remainingTriggerTerms, _, v1) => {
+      evals(s.copy(triggerExp = true), remainingTriggerExpressions, _ => pve, v)((s1, remainingTriggerTerms, _, v1) => {
         optRemainingTriggerTerms = Some(remainingTriggerTerms)
         pcDelta = v1.decider.pcs.after(preMark).assumptions //decider.π -- πPre
         pcDeltaExp = v1.decider.pcs.after(preMark).assumptionExps
+        functionRecorder = s1.functionRecorder
         Success()})
 
     // Remove all assumptions resulting from evaluating the trigger.
@@ -1398,8 +1401,8 @@ object evaluator extends EvaluationRules {
     (r, optRemainingTriggerTerms) match {
       case (Success(), Some(remainingTriggerTerms)) =>
         v.decider.assume(pcDelta, Option.when(withExp)(DebugExp.createInstance(
-          category=OtherCategory("pcDeltaExp"), children = pcDeltaExp)), enforceAssumption = false)
-        Q(s, cachedTriggerTerms ++ remainingTriggerTerms, v)
+          category=debugger.OtherCategory("pcDeltaExp"), children = pcDeltaExp)), enforceAssumption = false)
+        Q(s.copy(functionRecorder = functionRecorder), cachedTriggerTerms ++ remainingTriggerTerms, v)
       case _ =>
         for (e <- remainingTriggerExpressions)
           v.reporter.report(WarningsDuringVerification(Seq(
@@ -1465,7 +1468,7 @@ object evaluator extends EvaluationRules {
 
     val triggerString = exps.mkString(", ")
     v.decider.assume(triggerAxioms, Option.when(withExp)(DebugExp.createInstance(
-      category=OtherCategory("Heap Triggers ($triggerString)"))), enforceAssumption = false)
+      category=debugger.OtherCategory("Heap Triggers ($triggerString)"))), enforceAssumption = false)
     var fr = s.functionRecorder
     for (smDef <- smDefs){
       fr = fr.recordFvfAndDomain(smDef)
