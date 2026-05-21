@@ -227,7 +227,7 @@ object producer extends ProductionRules {
                 QB(s3, null, v3)
               }),
               (s2, v2) => {
-                v2.decider.assume(sf(sorts.Snap, v2) === Unit, Option.when(withExp)(DebugExp.createInstance(
+                v2.decider.assume(sf(sorts.Snap, v2) === Unit, Option.when(debugOn)(DebugExp.createInstance(
                   SnapshotShape(empty = true), isInternal_ = true)))
                 /* TODO: Avoid creating a fresh var (by invoking) `sf` that is not used
                  * otherwise. In order words, only make this assumption if `sf` has
@@ -259,7 +259,7 @@ object producer extends ProductionRules {
               Q(s3, v3)
             }),
             (s2, v2) => {
-                v2.decider.assume(sf(sorts.Snap, v2) === Unit, Option.when(withExp)(DebugExp.createInstance(
+                v2.decider.assume(sf(sorts.Snap, v2) === Unit, Option.when(debugOn)(DebugExp.createInstance(
                   SnapshotShape(empty = true), isInternal_ = true)))
                   /* TODO: Avoid creating a fresh var (by invoking) `sf` that is not used
                    * otherwise. In order words, only make this assumption if `sf` has
@@ -332,7 +332,8 @@ object producer extends ProductionRules {
               else
                 WildcardSimplifyingPermTimes(tPerm, s2.permissionScalingFactor)
               val gainExp = ePermNew.map(p => ast.PermMul(p, s2.permissionScalingFactorExp.get)(p.pos, p.info, p.errT))
-              v2.heapSupporter.produceSingle(s2, resource, tArgs, eArgsNew, snap, None, gain, gainExp, pve, true, v2)(Q)
+              v2.heapSupporter.produceSingle(s2, resource, tArgs, eArgsNew, snap, None, gain, gainExp, pve, true, v2)((s3, v3) =>
+                Q(s3, v3))
             })))
 
 
@@ -341,7 +342,7 @@ object producer extends ProductionRules {
         val resAcc = accPred.loc
         val eArgs = resAcc.args(s.program)
         val tFormalArgs = s.getFormalArgVars(resource, v)
-        val eFormalArgs = Option.when(withExp)(s.getFormalArgDecls(resource))
+        val eFormalArgs = Option.when(debugOn)(s.getFormalArgDecls(resource))
         val ePerm = accPred.perm
         val qid =
           accPred match {
@@ -361,10 +362,11 @@ object producer extends ProductionRules {
             val s1a = s1.copy(constrainableARPs = s.constrainableARPs)
             v1.heapSupporter.produceQuantified(s1a, sf, forall, resource, qvars, qvarExps, tFormalArgs, eFormalArgs, qid, optTrigger, tTriggers, auxGlobals, auxNonGlobals,
               auxExps.map(_._1), auxExps.map(_._2), tCond, eCondNew.map(_.head), tArgs, permArgs.map(_.tail), tPerm, permArgs.map(_.head), pve, NegativePermission(ePerm),
-              QPAssertionNotInjective(resAcc), v1)((s2, v2) => {
+              QPAssertionNotInjective(resAcc), v1)((s2, v2) =>
               Q(s2.copy(functionRecorder = s2.functionRecorder.leaveQuantifiedExp(qpa)), v2)
-            })
-          case (s1, _, _, _, _, None, v1) => Q(s1.copy(constrainableARPs = s.constrainableARPs), v1)
+            )
+          case (s1, _, _, _, _, None, v1) =>
+            Q(s1.copy(constrainableARPs = s.constrainableARPs), v1)
         }
 
       case _: ast.InhaleExhaleExp =>
@@ -373,9 +375,9 @@ object producer extends ProductionRules {
       /* Any regular expressions, i.e. boolean and arithmetic. */
       case _ =>
         v.decider.assume(sf(sorts.Snap, v) === Unit,
-          Option.when(withExp)(DebugExp.createInstance(SnapshotShape(empty = true), isInternal_ = true))) /* TODO: See comment for case ast.Implies above */
+          Option.when(debugOn)(DebugExp.createInstance(SnapshotShape(empty = true), isInternal_ = true))) /* TODO: See comment for case ast.Implies above */
         eval(s, a, pve, v)((s1, t, aNew, v1) => {
-          v1.decider.assume(t, Option.when(withExp)(a), aNew)
+          v1.decider.assume(t, Option.when(debugOn)(a), aNew)
           Q(s1, v1)})
     }
 

@@ -229,7 +229,6 @@ class DebugExp(val id: Int,
 
 }
 
-
 class ImplicationDebugExp(id: Int,
                           category : DebugExpCategory,
                           originalExp : Option[ast.Exp],
@@ -289,7 +288,6 @@ class QuantifiedDebugExp(id: Int,
   }
 }
 
-
 class DebugExpPrintConfiguration {
   var isPrintInternalEnabled: Boolean = false
   var nChildrenToShow: Int = 5
@@ -339,7 +337,6 @@ class DebugExpPrintConfiguration {
 }
 
 class DebugAxiom(val description: String, val terms: InsertionOrderedSet[Term]){
-
   override def toString: String = {
     s"$description:\n\t\t${terms.mkString("\n\t\t")}\n"
   }
