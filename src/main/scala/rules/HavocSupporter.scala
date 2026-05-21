@@ -144,7 +144,7 @@ object havocSupporter extends SymbolicExecutionRules {
             val comment = "Definitional axioms for havocall inverse functions"
             v.decider.prover.comment(comment)
             v.decider.assume(inverseFunctions.definitionalAxioms, Option.when(debugOn)(DebugExp.createInstance(
-              OtherCategory(comment), isInternal_ = true)), enforceAssumption = false)
+              debugger.OtherCategory(comment), isInternal_ = true)), enforceAssumption = false)
 
             // Call the havoc helper function, which returns a new heap, which is
             // partially havocked. Since we are executing a Havocall statement, we wrap

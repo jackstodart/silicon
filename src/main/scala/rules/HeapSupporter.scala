@@ -208,7 +208,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
           val (sm, smValueDef) = quantifiedChunkSupporter.singletonSnapshotMap(s3, field, Seq(tRcvr), tRhs, v)
           v.decider.prover.comment("Definitional axioms for singleton-FVF's value")
           val debugExp = Option.when(debugOn)(DebugExp.createInstance(
-            OtherCategory("Definitional axioms for singleton-FVF's value"), isInternal_ = true))
+            debugger.OtherCategory("Definitional axioms for singleton-FVF's value"), isInternal_ = true))
           v.decider.assumeDefinition(smValueDef, debugExp)
           val ch = quantifiedChunkSupporter.createSingletonQuantifiedChunk(Seq(`?r`),
             Option.when(debugOn)(Seq(ast.LocalVarDecl("r", ast.Ref)(ass.pos, ass.info, ass.errT))),
@@ -216,7 +216,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
             FullPerm, Option.when(debugOn)(ast.FullPerm()(ass.pos, ass.info, ass.errT)), sm, s.program)
           if (s3.heapDependentTriggers.contains(field)) {
             val debugExp2 = Option.when(debugOn)(DebugExp.createInstance(
-              TriggerTerm(s"FieldTrigger(${eRcvrNew.toString()}.${field.name})")))
+              debugger.TriggerTerm(s"FieldTrigger(${eRcvrNew.toString()}.${field.name})")))
             v.decider.assume(FieldTrigger(field.name, sm, tRcvr), debugExp2)
           }
           val s4 = s3.copy(h = h3 + ch)
@@ -274,7 +274,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
                 case p: ast.Predicate => p.name
                 case w: ast.MagicWand => MagicWandIdentifier(w, s2.program).toString
               }
-              DebugExp.createInstance(TriggerTerm(s"Resource trigger(${name}($argsString))"), isInternal_ = true)
+              DebugExp.createInstance(debugger.TriggerTerm(s"Resource trigger(${name}($argsString))"), isInternal_ = true)
             }))
           }
 
@@ -374,7 +374,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
           }
           if (s2.heapDependentTriggers.contains(fa.field)) {
             val trigger = FieldTrigger(fa.field.name, sm, tRcvr)
-            val triggerExp = Option.when(withExp)(DebugExp.createInstance(
+            val triggerExp = Option.when(debugOn)(DebugExp.createInstance(
               debugger.TriggerTerm(s"FieldTrigger(${eRcvr.toString()}.${fa.field.name})")))
             v.decider.assume(trigger, triggerExp)
           }

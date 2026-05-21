@@ -666,7 +666,7 @@ object evaluator extends EvaluationRules {
                                s2.assertReadAccessOnly /* should currently always be false */ else true)
             consumes(s3, pres, true, _ => pvePre, v2)((s4, snap, v3) => {
               val snap1 = snap.get.convert(sorts.Snap)
-              // val heapLabel = v3.getDebugHeapLabel(s4)
+              val debugHeapName = v3.getDebugHeapLabel(s4)
               val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func)), snap1 :: tArgs, Some(debugHeapName))
               val preExp = Option.when(debugOn)({DebugExp.createInstance(
                 category=debugger.FunctionPrecondition(func.name, eArgsNew.get),

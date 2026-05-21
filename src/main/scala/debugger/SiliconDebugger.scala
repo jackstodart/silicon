@@ -60,25 +60,9 @@ case class ProofObligation(s: State,
       s"Store:\n\t\t${s.g.values.map(v => s"${v._1} -> ${v._2._2.get}").mkString("\n\t\t")}\n\n"
   }
 
-    def heapToString(h: Heap): String = h.values.map(chunkString).mkString("\n\t\t")
-    val heapString = if (printConfig.printOldHeaps) {
-      def oldHeapDescriptor(label: String): String = {
-        val parent = if (s.oldHeapConditions.contains(label)) {
-          val condString = s.oldHeapConditions(label)._2 match {
-            case Some(cond) => s" by \"${cond.printCondition}\""
-            case None => ""
-          }
-          s", from \"${s.oldHeapConditions(label)._1}\"$condString"
-        }
-        else ""
-        s"Heap $label$parent:"
-      }
-
-      s"Current Heap:\n\t\t${heapToString(s.h)}\n\n" + s.oldHeaps.map {
-        case (k, v) => s"${oldHeapDescriptor(k)}\n\t\t${heapToString(v)}\n\n"
-      }.mkString("")
-    } else
-      s"Heap:\n\t\t${s.h.values.map(chunkString).mkString("\n\t\t")}\n\n"
+  private def heapToString(h: Heap): String =
+    if (h.values.nonEmpty) h.values.map(c => s"\t\t${chunkString(c)}\n").mkString("")
+    else "\t\t(Empty heap)\n"
 
   private def debugHeapString(label: String, debugHeap: DebugHeap): String = {
     val condString = if (debugHeap.branchConds.nonEmpty)

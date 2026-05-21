@@ -712,7 +712,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             // TODO: Avoid cast to Quantification
             v.decider.assume(smDef.domainDefinitions.map(_.asInstanceOf[Quantification].instantiate(instantiations)),
               Option.when(debugOn)(DebugExp.createInstance(
-                OtherCategory(comment), isInternal_ = true)), enforceAssumption = false)
+                debugger.OtherCategory(comment), isInternal_ = true)), enforceAssumption = false)
         }
       }
 
@@ -2021,7 +2021,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
               val result = v.decider.check(And(equalityCond, equalityTerm), Verifier.config.checkTimeout())
               if (result) {
                 // Learn the equality
-                val debugExp = Option.when(debugOn)(DebugExp.createInstance(OtherCategory("Chunks alias"), true))
+                val debugExp = Option.when(debugOn)(DebugExp.createInstance(debugger.OtherCategory("Chunks alias"), true))
                 v.decider.assume(equalityTerm, debugExp)
               }
               result

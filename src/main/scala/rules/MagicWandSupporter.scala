@@ -324,7 +324,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
           val (sm, smValueDef) = quantifiedChunkSupporter.singletonSnapshotMap(s2, wand, tArgs, snapshotTerm, v2)
           v2.decider.prover.comment("Definitional axioms for singleton-SM's value")
           val debugExp = Option.when(debugOn)(DebugExp.createInstance(
-            OtherCategory("Definitional axioms for singleton-SM's value"), isInternal_ = true))
+            debugger.OtherCategory("Definitional axioms for singleton-SM's value"), isInternal_ = true))
           v2.decider.assumeDefinition(smValueDef, debugExp)
           val ch = quantifiedChunkSupporter.createSingletonQuantifiedChunk(formalVars, formalVarExps, wand, tArgs,
             eArgsNew, FullPerm, Option.when(debugOn)(ast.FullPerm()()), sm, s.program)
@@ -347,7 +347,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
             }),
             Trigger(MWSFLookup(wandSnapshot.mwsf, freshSnapRoot)),
           )
-          (s2, ch, pcsQuantified +: pcsWithoutFreshSnapRoot, Option.when(withExp)(DebugExp.createInstance(
+          (s2, ch, pcsQuantified +: pcsWithoutFreshSnapRoot, Option.when(debugOn)(DebugExp.createInstance(
             debugger.OtherCategory("MWSF definition path conditions"), pcsQuantified, isInternal_ = true) +: pcsWithoutExp.get), v2)
         }
         appendToResults(s3, ch, v3.decider.pcs.after(preMark), (tPcs, ePcs), v3)

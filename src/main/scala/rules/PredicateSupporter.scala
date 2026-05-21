@@ -83,7 +83,7 @@ object predicateSupporter extends PredicateSupportRules {
           snap.get.convert(terms.sorts.Snap) +: tArgs, None)
         val eArgsString = eArgs.mkString(", ")
         v1.decider.assume(predTrigger, Option.when(debugOn)(DebugExp.createInstance(
-          TriggerTerm(s"PredicateTrigger(${predicate.name}($eArgsString))"))))
+          debugger.TriggerTerm(s"PredicateTrigger(${predicate.name}($eArgsString))"))))
       }
       val s2 = s1a.copy(g = s.g,
                         smDomainNeeded = s.smDomainNeeded,
