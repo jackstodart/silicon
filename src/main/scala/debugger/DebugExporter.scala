@@ -6,8 +6,9 @@ import org.jgrapht.graph.{DefaultDirectedGraph, DefaultEdge}
 import org.jgrapht.traverse.TopologicalOrderIterator
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.ExportUtils._
+import viper.silicon.interfaces.state.Chunk
 import viper.silicon.state
-import viper.silicon.state.{BasicChunk, QuantifiedFieldChunk, QuantifiedPredicateChunk, terms}
+import viper.silicon.state.{BasicChunk, DebugHeap, EvalExp, ExecStmt, ExhalePost, HeapCause, InhalePre, QuantifiedFieldChunk, QuantifiedPredicateChunk, terms}
 import viper.silicon.state.terms.{Sort, Term, sorts}
 import viper.silicon.resources
 import viper.silicon.resources.{FieldID, PredicateID}
@@ -101,8 +102,37 @@ class Translator(val obl: ProofObligation, val filename: String) {
   private val currentHeapLabel: String = if (obl.s.oldHeaps.nonEmpty) obl.s.oldHeaps.keys.last else ""
 
   // Maps each debug heap label to an ancestor label it's unified with, and any extra conditions on the child heap
-  private val heapMap: immutable.Map[String, (String, Set[ast.Exp])] = {
-    Map()
+  private val heapSourceMap: immutable.Map[String, (String, Set[ast.Exp])] = {
+    def erasable(cause: HeapCause): Boolean = {
+      cause match {
+        case InhalePre() | ExhalePost() | EvalExp(_) => true
+        case ExecStmt(stmt) => stmt match {
+          case _: ast.Unfold
+          | _: ast.Fold
+          | _: ast.NewStmt
+          | _: ast.Package
+          | _: ast.Apply => true
+          case _ => false
+        }
+      }
+    }
+
+    def sourceHeap(debugHeap: DebugHeap, currentLabel: String, currentBCs: Set[ast.Exp]): (String, Set[ast.Exp]) = {
+      if (debugHeap.parentLabel == "nil")
+        (currentLabel, currentBCs)
+      else if (erasable(debugHeap.cause)) {
+        val parentHeap = obl.s.debugOldHeaps(debugHeap.parentLabel)
+        val newBCs = currentBCs ++ debugHeap.branchConds.map(_._1)
+        sourceHeap(parentHeap, debugHeap.parentLabel, newBCs)
+      } else (currentLabel, currentBCs)
+    }
+
+    val tempMap: mutable.Map[String, (String, Set[Exp])] = mutable.Map()
+    obl.s.debugOldHeaps.foreach { case (label, debugHeap) =>
+      val (source, conds) = sourceHeap(debugHeap, label, debugHeap.branchConds.map(_._1).toSet)
+      tempMap += (label -> (source, conds))
+    }
+    tempMap.toMap
   }
 
   private val (basicRewrites: Rewrites,
@@ -362,65 +392,72 @@ class Translator(val obl: ProofObligation, val filename: String) {
   }
 
   private def translateHeaps(): Unit = {
-    obl.s.oldHeaps.foreach { case (label, heap) => translateHeap(heap, label) }
-  }
+    val groupedHeaps = heapSourceMap.groupMap(_._2._1) {
+      case (childLabel, (_, conds)) => (childLabel, conds)
+    }
+    for ((parentHeap, children) <- groupedHeaps) {
+      val chunkList = children.flatMap {
+        case (childLabel, cond) => obl.s.debugOldHeaps(childLabel).heap.values.map((_, cond))
+      }.toList.distinct.zipWithIndex
 
-  private def translateHeap(h: state.Heap, label: String): Unit = {
-    if (label == currentHeapLabel)
-      strings += "  (* Current heap *)"
-    else
-      strings += s"  (* Heap $label *)"
-    def fieldSnapInOtherHeap(s: Term): Boolean = (fieldChunks contains s) && fieldChunks(s)._2 != label
-    def predSnapInOtherHeap(s: Term): Boolean = (predicateChunks contains s) && predicateChunks(s)._2 != label
-    for ((c, idx) <- h.values.zipWithIndex) {
-      c match {
-        case bc: state.BasicChunk =>
-          bc.resourceID match {
-            case FieldID =>
-              if (bc.args.length == 1) {
-                if (fieldSnapInOtherHeap(bc.snap)) {
-                  val ref = translateTerm(bc.args.head, parenthesisLevel = 100)
-                  val permCondition = permCondSimp(bc.perm)
-                  val condString = if (permCondition == terms.True) "" else translateTerm(permCondition) + s" $META_ARR "
-                  val field = if (label == currentHeapLabel) s"${bc.id.name} $ref" else s"${bc.id.name}' ${safeString(label)} $ref"
-                  val chunk = s"$condString$field = ${translateTerm(bc.snap)}"
-                  strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
-                }
-              } else {
-                strings += s"  (* Error: $bc has wrong args *)"
-              }
-            case PredicateID =>
-              val chunkString = safeString(bc.id.name) + s" ${safeString(label)} " +
-                bc.args.map(translateTerm(_, parenthesisLevel = 100)).mkString(" ")
-              val predEq = if (predSnapInOtherHeap(bc.snap)) {
-                val (otherChunk, otherLabel) = predicateChunks(bc.snap)
-                val thisTuple = s"(${safeString(label)}, ${bc.args.map(translateTerm(_)).mkString(", ")})"
-                val otherTuple = s"(${safeString(otherLabel)}, ${otherChunk.args.map(translateTerm(_)).mkString(", ")})"
-                s" \\<and> ${bc.id.name}_eq $thisTuple $otherTuple"
-              } else ""
-              strings += s"  assumes ${safeString(label)}_$idx: \"$chunkString$predEq\""
-          }
-        case qfc: state.QuantifiedFieldChunk =>
-          val permCondition = terms.And(qfc.condition, permCondSimp(qfc.permValue))
-          val condString = translateTerm(permCondition) + s" $META_ARR"
-          val field = if (label == "curr") s"${qfc.id.name} r" else s"${qfc.id.name}' ${safeString(label)} r"
-          val chunk = s"\\<And>r. $condString $field = ${qfc.id}_${translateTerm(qfc.fvf)} r"
-          strings += s"  assumes ${safeString(label)}_$idx: \"$chunk\""
-        case qpc: state.QuantifiedPredicateChunk =>
-          val condString = translateTerm(terms.And(qpc.condition, permCondSimp(qpc.permValue)))
-          val argList = qpc.quantifiedVars.map(_.id.name)
-          val quantifyString = "\\<And>" + argList.mkString(" ")
-          val predString = s"$quantifyString. $condString $META_ARR ${qpc.id.name} ${safeString(label)} ${argList.mkString(" ")}"
-          strings += s"  assumes ${safeString(label)}_${idx}a: \"$predString\""
-          if (predSnapInOtherHeap(qpc.snapshotMap)) {
-            val (otherChunk, otherLabel) = predicateChunks(qpc.snapshotMap)
-            val thisTuple = s"($label, ${argList.mkString(", ")})"
-            val otherTuple = s"($otherLabel, ARGS???)"
-            val eqString = s"${qpc.id.name}(args) \\<and> ${qpc.id.name}_eq $thisTuple $otherTuple"
-            strings += s"  assumes ${safeString(label)}_${idx}b: \"$condString $META_ARR $eqString\""
-          }
+      // TODO: Maybe explicitly identify current heap?
+      strings += s"  (* Heap $parentHeap *)"
+      for (((chunk, conds), idx) <- chunkList) {
+        translateChunk(chunk, conds, parentHeap, idx)
       }
     }
+  }
+
+  private def translateChunk(c: Chunk, conditions: Set[ast.Exp], heapLabel: String, idx: Int): Unit = {
+    def fieldSnapInOtherHeap(s: Term): Boolean = (fieldChunks contains s) && fieldChunks(s)._2 != heapLabel
+    def predSnapInOtherHeap(s: Term): Boolean = (predicateChunks contains s) && predicateChunks(s)._2 != heapLabel
+    val condString = conditions.map(translateExp(_)).mkString(" \\<and> ")
+
+    c match {
+      case bc: state.BasicChunk =>
+        bc.resourceID match {
+          case FieldID =>
+            assert(bc.args.length == 1, "Method translateChunk expected FieldChunk to have exactly one arg.")
+            if (fieldSnapInOtherHeap(bc.snap)) {
+              val ref = translateTerm(bc.args.head, parenthesisLevel = 100)
+              val permCondition = permCondSimp(bc.perm)
+              val condString = if (permCondition == terms.True) "" else translateTerm(permCondition) + s" $META_ARR "
+              val field = s"${bc.id.name}' ${safeString(heapLabel)} $ref"
+              val chunk = s"$condString$field = ${translateTerm(bc.snap)}"
+              strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunk\""
+            } // TODO: Should we add something here if only
+          case PredicateID =>
+            val chunkString = safeString(bc.id.name) + s" ${safeString(heapLabel)} " +
+              bc.args.map(translateTerm(_, parenthesisLevel = 100)).mkString(" ")
+            val predEq = if (predSnapInOtherHeap(bc.snap)) {
+              val (otherChunk, otherLabel) = predicateChunks(bc.snap)
+              val thisTuple = s"(${safeString(heapLabel)}, ${bc.args.map(translateTerm(_)).mkString(", ")})"
+              val otherTuple = s"(${safeString(otherLabel)}, ${otherChunk.args.map(translateTerm(_)).mkString(", ")})"
+              s" \\<and> ${bc.id.name}_eq $thisTuple $otherTuple"
+            } else ""
+            strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunkString$predEq\""
+        }
+      case qfc: state.QuantifiedFieldChunk =>
+        val permCondition = terms.And(qfc.condition, permCondSimp(qfc.permValue))
+        val condString = translateTerm(permCondition) + s" $META_ARR"
+        val field = s"${qfc.id.name}' ${safeString(heapLabel)} r"
+        val chunk = s"\\<And>r. $condString $field = ${qfc.id}_${translateTerm(qfc.fvf)} r"
+        strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunk\""
+      case qpc: state.QuantifiedPredicateChunk =>
+        val condString = translateTerm(terms.And(qpc.condition, permCondSimp(qpc.permValue)))
+        val argList = qpc.quantifiedVars.map(_.id.name)
+        val quantifyString = "\\<And>" + argList.mkString(" ")
+        val predString = s"$quantifyString. $condString $META_ARR ${qpc.id.name} ${safeString(heapLabel)} ${argList.mkString(" ")}"
+        strings += s"  assumes ${safeString(heapLabel)}_${idx}a: \"$predString\""
+        if (predSnapInOtherHeap(qpc.snapshotMap)) {
+          val (otherChunk, otherLabel) = predicateChunks(qpc.snapshotMap)
+          val thisTuple = s"($heapLabel, ${argList.mkString(", ")})"
+          val otherTuple = s"($otherLabel, ARGS???)"
+          val eqString = s"${qpc.id.name}(args) \\<and> ${qpc.id.name}_eq $thisTuple $otherTuple"
+          strings += s"  assumes ${safeString(heapLabel)}_${idx}b: \"$condString $META_ARR $eqString\""
+        }
+    }
+
   }
 
   case class TranslationOptions(parenthesisLevel: Int,
