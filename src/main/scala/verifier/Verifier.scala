@@ -15,6 +15,7 @@ import viper.silicon.state.{DebugHeap, EvalExp, ExecStmt, Heap, HeapCause, Ident
 import viper.silicon.supporters.{QuantifierSupporter, SnapshotSupporter}
 import viper.silicon.utils.Counter
 import viper.silicon.Config
+import viper.silicon.interfaces.state.Chunk
 import viper.silicon.logger.MemberSymbExLogger
 import viper.silver.ast
 import viper.silver.reporter.Reporter
@@ -59,51 +60,52 @@ trait Verifier {
     * @param h the heap to consider, if not the heap from state s
     * @return a pair containing the label of the given heap, and the label of the current expression in the given heap
     */
-  def getDebugOldLabel(s: State, pos: ast.Position, h: Option[Heap] = None): (String, String) = {
+  def getDebugOldLabel(s: State, pos: ast.Position, h: Option[Heap] = None): String = {
     val posString = pos match {
       case column: ast.HasLineColumn => s"l:${column.line}.${column.column}"
       case _ => s"l:unknown"
     }
-    val heapLabel = getDebugHeapLabel(s, h)
-    (heapLabel, s"$heapLabel#$posString")
+    val heapLabel = getDebugHeapLabel(s, h).getOrElse("unrecordedHeap")
+    s"$heapLabel#$posString"
   }
 
-  def getDebugHeapLabel(s: State, h: Option[Heap] = None): String = {
+  def getDebugHeapLabel(s: State, h: Option[Heap] = None): Option[String] = {
     val heap = h match {
       case Some(heap) => heap
       case None => magicWandSupporter.getEvalHeap(s)
     }
-    val equalHeaps = s.debugOldHeaps.filter(dh => dh._2.heap.equals(heap)).keys
-    if (equalHeaps.nonEmpty){
-      equalHeaps.head
-    } else {
-      val counter = debugHeapCounter.getAndIncrement()
-      s"debug@$counter"
+
+    def equalChunks(h1: Heap, h2: Heap): Boolean = {
+      implicit def chunkOrd: Ordering[Chunk] = Ordering.by(_.toString)
+      h1.values.toList.sorted == h2.values.toList.sorted
+    }
+
+    val equalHeaps = s.debugOldHeaps.filter(dh => equalChunks(dh._2.heap, heap)).keys
+    equalHeaps.headOption
+  }
+
+  private def getOrMakeHeapLabel(s: State, h: Option[Heap] = None): String = {
+    getDebugHeapLabel(s, h) match {
+      case Some(label) => label
+      case None =>
+        val counter = debugHeapCounter.getAndIncrement()
+        s"debug@$counter"
     }
   }
 
-  def recordDebugHeap(s: State, parent: Heap, cause: HeapCause): State = {
-    recordDebugHeap(s, magicWandSupporter.getEvalHeap(s), getDebugHeapLabel(s, Some(parent)), cause, None, None)
-  }
-
-  def recordDebugHeap(s: State, parent: Heap, cause: HeapCause, oldPCS: PathConditionStack): State = {
-    recordDebugHeap(s, magicWandSupporter.getEvalHeap(s), getDebugHeapLabel(s, Some(parent)), cause, None, Some(oldPCS))
+  def recordDebugHeap(s: State, parentLabel: String, cause: HeapCause): State = {
+    recordDebugHeap(s, magicWandSupporter.getEvalHeap(s), parentLabel, cause, None, None)
   }
 
   def recordDebugHeap(s: State, parentLabel: String, cause: HeapCause, oldPCS: PathConditionStack): State = {
     recordDebugHeap(s, magicWandSupporter.getEvalHeap(s), parentLabel, cause, None, Some(oldPCS))
   }
 
-  def recordDebugHeap(s: State, parentLabel: String, cause: HeapCause,
-                      intermediateCause: ast.Exp, oldPCS: PathConditionStack): State = {
-    recordDebugHeap(s, magicWandSupporter.getEvalHeap(s), parentLabel, cause, Some(intermediateCause), Some(oldPCS))
-  }
-
   def recordDebugHeap(s: State, heap: Heap, parentLabel: String,
                       cause: HeapCause,
                       intermediateCause: Option[ast.Exp],
                       oldPCS: Option[PathConditionStack]): State = {
-    val heapLabel = getDebugHeapLabel(s, Some(heap))
+    val heapLabel = getOrMakeHeapLabel(s, Some(heap))
     if (s.debugOldHeaps.contains(heapLabel))
       s // Don't overwrite parents if we return to a heap
     else {
@@ -119,6 +121,21 @@ trait Verifier {
       val debugHeap = DebugHeap(heap, parentLabel, cause, intermediateCause, newBranchConds)
       s.copy(debugOldHeaps = s.debugOldHeaps + (heapLabel -> debugHeap))
     }
+  }
+
+  def recordIntermediateHeap(s: State): State = recordIntermediateHeap(s, None)
+
+  def recordIntermediateHeap(s: State, intermediateCause: ast.Exp): State =
+    recordIntermediateHeap(s, Some(intermediateCause))
+
+  // Expects intermediateHeapCause to be defined
+  def recordIntermediateHeap(s: State, intermediateCause: Option[ast.Exp]): State = {
+    assert(s.recordIntermediateHeaps, "recordIntermediateHeap requires s.intermediateHeapCause to be defined.")
+    val (parentLabel, originalCause, oldPCS) = s.intermediateHeapCause.get
+    val s2 = recordDebugHeap(s, magicWandSupporter.getEvalHeap(s), parentLabel,
+      originalCause, intermediateCause, Some(oldPCS))
+    val currentLabel = getOrMakeHeapLabel(s2)
+    s2.copy(intermediateHeapCause = Some(currentLabel, originalCause, decider.pcs.duplicate()))
   }
 }
 

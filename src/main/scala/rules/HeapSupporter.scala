@@ -220,8 +220,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
             v.decider.assume(FieldTrigger(field.name, sm, tRcvr), debugExp2)
           }
           val s4 = s3.copy(h = h3 + ch)
-          val debugHeapName = v.getDebugHeapLabel(s4, Some(magicWandSupporter.getEvalHeap(s4)))
-          val s5 = if (debugOn) s4.copy(oldHeaps = s4.oldHeaps + (debugHeapName -> magicWandSupporter.getEvalHeap(s4))) else s4
+          val s5 = if (debugOn && s4.recordIntermediateHeaps) v.recordIntermediateHeap(s4) else s4
           Q(s5, v)
         case (Incomplete(_, _), s3, _) =>
           createFailure(ve, v, s3, "sufficient permission")
@@ -233,8 +232,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
         val newChunk = BasicChunk(FieldID, id, Seq(tRcvr), eRcvrNew.map(Seq(_)), tRhs, eRhsNew, FullPerm, Option.when(debugOn)(ast.FullPerm()(ass.pos, ass.info, ass.errT)))
         chunkSupporter.produce(s3, h3, newChunk, v3)((s4, h4, v4) => {
           val s5 = s4.copy(h = h4)
-          val debugHeapName = v4.getDebugHeapLabel(s5, Some(magicWandSupporter.getEvalHeap(s5)))
-          val s6 = if (debugOn) s5.copy(oldHeaps = s5.oldHeaps + (debugHeapName -> magicWandSupporter.getEvalHeap(s5))) else s5
+          val s6 = if (debugOn && s5.recordIntermediateHeaps) v.recordIntermediateHeap(s5) else s5
           Q(s6, v4)
         })
       })
@@ -280,18 +278,16 @@ class DefaultHeapSupportRules extends HeapSupportRules {
 
           val currentPermAmount = ResourcePermissionLookup(res, pmDef.pm, tArgs, s2.program)
 
-          val s3 = res match {
+          res match {
             case _: ast.Field =>
               v.decider.prover.comment(s"perm($resAcc)  ~~>  assume upper permission bound")
-              val (debugHeapName, debugLabel) = v.getDebugOldLabel(s2, resAcc.pos, Some(h))
+              val debugLabel = v.getDebugOldLabel(s2, resAcc.pos, Some(h))
               val exp = Option.when(debugOn)(ast.PermLeCmp(ast.DebugLabelledOld(ast.CurrentPerm(resAcc)(), debugLabel)(), ast.FullPerm()())())
               v.decider.assume(PermAtMost(currentPermAmount, FullPerm), exp, exp.map(s2.substituteVarsInExp(_)))
-              val s3 = if (Verifier.config.enableDebugging()) s2.copy(oldHeaps = s2.oldHeaps + (debugHeapName -> h)) else s2
-              s3
-            case _ => s2
+            case _ =>
           }
 
-          (s3, currentPermAmount)
+          (s2, currentPermAmount)
         } else {
           val chs = chunkSupporter.findChunksWithID[NonQuantifiedChunk](h.values, identifier)
           val currentPermAmount =
