@@ -43,7 +43,7 @@ case class AuxiliaryTerms(isGlobal: Boolean) extends DebugExpCategory {
 
 case class FunctionPrecondition(funcName: String, args: List[ast.Exp]) extends DebugExpCategory {
   override lazy val printWithInternal: String = s"precondition of $funcName(${args.mkString(", ")}) holds"
-  override lazy val printWithoutInternal: String = printWithoutInternal
+  override lazy val printWithoutInternal: String = printWithInternal
 }
 
 case class LoopInvariant() extends DebugExpCategory {
