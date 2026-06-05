@@ -757,8 +757,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.DomainFuncApp(funcname, args, _) =>
         wrap(funcname + " " + args.map(rec(_, 100)).mkString(" "), 100)
       case ast.FieldAccess(rcv, field) =>
-        val heapString = safeString(oldHeapLabel.getOrElse("h").takeWhile(_ != '#'))
-        wrap(s"${field.name} $heapString ${rec(rcv, 100)}", 100)
+        val heapString = (for (oldLabel <- oldHeapLabel; keyLabel <- heapSourceMap.get(oldLabel.takeWhile(_ != '#')))
+          yield safeString(keyLabel._1)).getOrElse("h")
+          wrap(s"${field.name} $heapString ${rec(rcv, 100)}", 100)
 
       case ast.CondExp(cond, thn, els) => "(if " + rec(cond, 10) + " then " + rec(thn, 10) +
         " else " + rec(els, 10) + ")"
@@ -988,7 +989,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
             val qvarString = ""
             qde.children.foreach { translateDebugExp(_, prefix + qvarString, suffix) }
           case _ =>
-            if (de.isInternal_) {
+            if (!de.isInternal_) {
               if (de.finalExp.isDefined && notPermExp(de.finalExp.get)) {
                 strings += s"  assumes ${de.id}: \"$prefix${translateExp(de.finalExp.get)}$suffix\""
               } else if (de.term.isDefined) {
