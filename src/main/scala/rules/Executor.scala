@@ -90,13 +90,10 @@ object executor extends ExecutionRules {
   def handleOutEdge(s: State, edge: SilverEdge, v: Verifier): State = {
     edge.kind match {
       case cfg.Kind.Out =>
-        val (fr1, h1) = v.stateConsolidator(s).merge(s.functionRecorder, s, s.h, s.invariantContexts.head, v)
-        val s1 = s.copy(functionRecorder = fr1, h = h1,
-          invariantContexts = s.invariantContexts.tail)
-        if (debugOn && s.recordIntermediateHeaps)
-          v.recordIntermediateHeap(s1).copy(intermediateHeapCause = None)
-        else
-          s1
+        val s1 = if (debugOn) v.startKeyHeap(s, "nil", MergeContext) else s
+        val (fr1, h1) = v.stateConsolidator(s1).merge(s1.functionRecorder, s1, s1.h, s1.invariantContexts.head, v)
+        val s2 = s1.copy(functionRecorder = fr1, h = h1, invariantContexts = s1.invariantContexts.tail)
+        if (debugOn) v.finishKeyHeap(s2) else s2
       case _ =>
         /* No need to do anything special. See also the handling of loop heads in exec below. */
         s
@@ -248,8 +245,8 @@ object executor extends ExecutionRules {
             val gBody = Store(wvs.foldLeft(s.g.values)((map, x) => {
               val xNew = v.decider.fresh(x)
               map.updated(x, xNew)}))
-            val sBody = s.copy(g = gBody, h = v.heapSupporter.getEmptyHeap(s.program),
-              intermediateHeapCause = if (debugOn) Some("nil", InhaleInv(), v.decider.pcs.duplicate()) else None)
+            val sBody0 = s.copy(g = gBody, h = v.heapSupporter.getEmptyHeap(s.program))
+            val sBody = if (debugOn) v.startKeyHeap(sBody0, "nil", InhaleInv) else sBody0
 
             val edges = s.methodCfg.outEdges(block)
             val (outEdges, otherEdges) = edges partition(_.kind == cfg.Kind.Out)
@@ -272,10 +269,8 @@ object executor extends ExecutionRules {
                 })})
             combine executionFlowController.locally(s, v)((s0, v0) => {
                 v0.decider.prover.comment("Loop head block: Establish invariant")
-                val s0a = if (debugOn) {
-                  val currentLabel = v0.getDebugHeapLabel(s0).getOrElse("missingHeap")
-                  s0.copy(intermediateHeapCause = Some(currentLabel, ExhaleInv(), v.decider.pcs.duplicate()))
-                } else s0
+                val s0a = if (debugOn)
+                  v0.startKeyHeap(s0, v0.getDebugHeapLabel(s0).getOrElse("missingHeap"), ExhaleInv) else s0
                 consumes(s0a, invs, false, LoopInvariantNotEstablished, v0)((sLeftover, _, v1) => {
                   v1.decider.prover.comment("Loop head block: Execute statements of loop head block (in invariant state)")
                   phase1data.foldLeft(Success(): VerificationResult) {
@@ -291,7 +286,7 @@ object executor extends ExecutionRules {
                         if (v2.decider.checkSmoke())
                           Success()
                         else {
-                          val s3a = if (debugOn) v2.recordDebugHeap(s3, "nil", InhaleInv()) else s3
+                          val s3a = if (debugOn) v2.finishKeyHeap(s3) else s3
                           execs(s3a, stmts, v2)((s4, v3) => {
                             val edgeCondWelldefinedness = {
                               v1.decider.prover.comment("Loop head block: Check well-definedness of edge conditions")
@@ -305,11 +300,8 @@ object executor extends ExecutionRules {
                               }
                             }
                             v3.decider.prover.comment("Loop head block: Follow loop-internal edges")
-                            val s4a = if (debugOn) {
-                              val currentLabel = v3.getDebugHeapLabel(s4).getOrElse("nil")
-                              s4.copy(intermediateHeapCause = Some(currentLabel, MergeContext(), v3.decider.pcs.duplicate()))
-                            } else s4
-                            edgeCondWelldefinedness combine follows(s4a, sortedEdges, WhileFailed, v3, joinPoint)(Q)})}})}})}))
+                            edgeCondWelldefinedness combine follows(s4, sortedEdges, WhileFailed, v3, joinPoint)(Q)})
+                        }})}})}))
 
           case _ =>
             /* We've reached a loop head block via an edge other than an in-edge: a normal edge or
@@ -370,7 +362,7 @@ object executor extends ExecutionRules {
 
       case ast.Label(name, _) =>
         val s1 = s.copy(oldHeaps = s.oldHeaps + (name -> magicWandSupporter.getEvalHeap(s)))
-        val s2 = if (debugOn) v.recordDebugHeap(s, oldLabel, CreateLabel()) else s1
+        val s2 = if (debugOn) v.recordHeap(s, name, oldLabel, CreateLabel, oldPCS) else s1
         Q(s2, v)
 
       case ast.LocalVarDeclStmt(decl) =>
@@ -379,9 +371,11 @@ object executor extends ExecutionRules {
         Q(s.copy(g = s.g + (x -> (t, newExp))), v)
 
       case ass @ ast.LocalVarAssign(x, rhs) =>
-        eval(s, rhs, AssignmentFailed(ass), v)((s1, tRhs, rhsNew, v1) => {
+        val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(ass)) else s
+        eval(s0, rhs, AssignmentFailed(ass), v)((s1, tRhs, rhsNew, v1) => {
           val (t, e) = ssaifyRhs(tRhs, rhs, rhsNew, x.name, x.typ, v, s1)
-          Q(s1.copy(g = s1.g + (x, (t, e))), v1)})
+          val s1a = if (debugOn) v.finishKeyHeap(s1) else s1
+          Q(s1a.copy(g = s1a.g + (x, (t, e))), v1)})
 
       /* TODO: Encode assignments e1.f := e2 as
        *         exhale acc(e1.f)
@@ -393,12 +387,12 @@ object executor extends ExecutionRules {
         assert(!s.exhaleExt)
         val pve = AssignmentFailed(ass)
         eval(s, eRcvr, pve, v)((s1, tRcvr, eRcvrNew, v1) => {
-          val s1a = if (debugOn) s1.copy(intermediateHeapCause = Some(oldLabel, ExecStmt(ass), oldPCS)) else s1
+          val s1a = if (debugOn) v1.startKeyHeap(s1, oldLabel, ExecStmt(ass)) else s1
           eval(s1a, rhs, pve, v1)((s2, tRhs, eRhsNew, v2) => {
             val (tSnap, _) = ssaifyRhs(tRhs, rhs, eRhsNew, field.name, field.typ, v2, s2)
-            v2.heapSupporter.execFieldAssign(s2, ass, tRcvr, eRcvrNew, tSnap, eRhsNew, pve, v2)((s1, v1) => {
-              val s2 = if (debugOn) v1.recordDebugHeap(s1, oldLabel, ExecStmt(ass)).copy(intermediateHeapCause = None) else s1
-              Q(s2, v1)})
+            v2.heapSupporter.execFieldAssign(s2, ass, tRcvr, eRcvrNew, tSnap, eRhsNew, pve, v2)((s3, v3) => {
+              val s3a = if (debugOn) v3.finishKeyHeap(s3) else s3
+              Q(s3a, v3)})
           })
         })
 
@@ -429,7 +423,7 @@ object executor extends ExecutionRules {
         val esNew = eRcvrNew.map(rcvr => BigAnd(viper.silicon.state.utils.computeReferenceDisjointnessesExp(s, rcvr)))
         addFieldPerms(s, fields, v)((s0, v0) => {
           val s1 = s0.copy(g = s0.g + (x, (tRcvr, eRcvrNew)))
-          val s2 = if (debugOn) v0.recordDebugHeap(s1, oldLabel, ExecStmt(stmt)) else s1
+          val s2 = if (debugOn) v0.recordHeap(s1, oldLabel, ExecStmt(stmt), oldPCS) else s1
           v0.decider.assume(ts, Option.when(debugOn)(DebugExp.createInstance(debugger.OtherCategory("Reference Disjointness"), esNew, esNew, InsertionOrderedSet.empty)), enforceAssumption = false)
           Q(s2, v0)
         })
@@ -439,20 +433,18 @@ object executor extends ExecutionRules {
           /* We're done */
           Success()
         case _ =>
-          val s0 = if (debugOn) s.copy(intermediateHeapCause = Some(oldLabel, ExecStmt(inhale), oldPCS)) else s
+          val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(inhale)) else s
           produce(s0, freshSnap, a, InhaleFailed(inhale), v)((s1, v1) => {
             v1.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterInhale)
-            val s1a = if (debugOn) v1.recordDebugHeap(s1, oldLabel, ExecStmt(inhale), oldPCS).copy(intermediateHeapCause = None)
-            else s1
+            val s1a = if (debugOn) v.finishKeyHeap(s1) else s1
             Q(s1a, v1)})
       }
 
       case exhale @ ast.Exhale(a) =>
         val pve = ExhaleFailed(exhale)
-        val s0 = if (debugOn) s.copy(intermediateHeapCause = Some(oldLabel, ExecStmt(exhale), oldPCS)) else s
+        val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(exhale)) else s
         consume(s0, a, false, pve, v)((s1, _, v1) => {
-          val s1a = if (debugOn) v1.recordDebugHeap(s1, oldLabel, ExecStmt(exhale), oldPCS).copy(intermediateHeapCause = None)
-          else s1
+          val s1a = if (debugOn) v1.finishKeyHeap(s) else s1
           Q(s1a, v1)})
 
       case assert @ ast.Assert(a: ast.FalseLit) if !s.isInPackage =>
@@ -473,6 +465,7 @@ object executor extends ExecutionRules {
 
       case assert @ ast.Assert(a) =>
         val pve = AssertFailed(assert)
+        val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(assert)) else s
 
         if (s.exhaleExt) {
           Predef.assert(s.h.values.isEmpty)
@@ -482,13 +475,16 @@ object executor extends ExecutionRules {
            * hUsed (reserveHeaps.head) instead of consuming them. hUsed is later discarded and replaced
            * by s.h. By copying hUsed to s.h the contained permissions remain available inside the wand.
            */
-          consume(s, a, false, pve, v)((s2, _, v1) => {
-            Q(s2.copy(h = s2.reserveHeaps.head), v1)
+          consume(s0, a, false, pve, v)((s1, _, v1) => {
+            val s1a = s1.copy(h = s1.reserveHeaps.head)
+            val s1b = if (debugOn) v1.finishKeyHeap(s1a) else s1a
+            Q(s1b, v1)
           })
         } else
-          consume(s, a, false, pve, v)((s1, _, v1) => {
-            val s2 = s1.copy(h = s.h, reserveHeaps = s.reserveHeaps)
-            Q(s2, v1)})
+          consume(s0, a, false, pve, v)((s1, _, v1) => {
+            val s1a = s1.copy(h = s.h, reserveHeaps = s.reserveHeaps)
+            val s1b = if (debugOn) v1.finishKeyHeap(s1a) else s1a
+            Q(s1b, v1)})
 
       // Calling hack407_R() results in Silicon efficiently havocking all instances of resource R.
       // See also Silicon issue #407.
@@ -529,9 +525,7 @@ object executor extends ExecutionRules {
         val sepIdentifier = v.symbExLog.openScope(mcLog)
         val paramLog = new CommentRecord("Parameters", s, v.decider.pcs)
         val paramId = v.symbExLog.openScope(paramLog)
-        val s0 = if (debugOn)
-          s.copy(intermediateHeapCause = Some(oldLabel, ExecStmt(call), oldPCS))
-        else s
+        val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(call)) else s
 
         evals(s0, eArgs, _ => pveCall, v)((s1, tArgs, eArgsNew, v1) => {
           v1.symbExLog.closeScope(paramId)
@@ -565,9 +559,7 @@ object executor extends ExecutionRules {
                                oldHeaps = s1.oldHeaps,
                                recordVisited = s1.recordVisited)
               v3.symbExLog.closeScope(sepIdentifier)
-              val s3b = if (debugOn)
-                v3.recordDebugHeap(s3a, s3a.intermediateHeapCause.get._1, ExecStmt(call), s3a.intermediateHeapCause.get._3).copy(intermediateHeapCause = None)
-              else s3a
+              val s3b = if (debugOn) v3.finishKeyHeap(s3a) else s3a
               Q(s3b, v3)})})})
 
       case fold @ ast.Fold(pap @ ast.PredicateAccessPredicate(predAcc @ ast.PredicateAccess(eArgs, predicateName), _)) =>
@@ -575,15 +567,14 @@ object executor extends ExecutionRules {
         v.decider.startDebugSubExp()
         val ePerm = pap.perm
         val pve = FoldFailed(fold)
-        val s0 = if (debugOn) s.copy(intermediateHeapCause = Some(oldLabel, ExecStmt(fold), oldPCS)) else s
+        val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(fold)) else s
         evals(s0, eArgs, _ => pve, v)((s1, tArgs, eArgsNew, v1) =>
           eval(s1, ePerm, pve, v1)((s2, tPerm, ePermNew, v2) =>
             permissionSupporter.assertPositive(s2, tPerm, if (debugOn) ePermNew.get else ePerm, pve, v2)((s3, v3) => {
               val wildcards = s3.constrainableARPs -- s1.constrainableARPs
               predicateSupporter.fold(s3, predAcc, tArgs, eArgsNew, tPerm, ePermNew, wildcards, pve, v3)((s4, v4) => {
                 v3.decider.finishDebugSubExp(s"folded ${predAcc.toString}")
-                val s4a = if (debugOn) v4.recordDebugHeap(s4, oldLabel, ExecStmt(fold), oldPCS).copy(intermediateHeapCause = None)
-                else s4
+                val s4a = if (debugOn) v4.finishKeyHeap(s4) else s4
                 Q(s4a, v4)
               })
             })))
@@ -594,7 +585,7 @@ object executor extends ExecutionRules {
         val ePerm = pap.perm
         val predicate = s.program.findPredicate(predicateName)
         val pve = UnfoldFailed(unfold)
-        val s0 = if (debugOn) s.copy(intermediateHeapCause = Some(oldLabel, ExecStmt(unfold), oldPCS)) else s
+        val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(unfold)) else s
         evals(s0, eArgs, _ => pve, v)((s1, tArgs, eArgsNew, v1) =>
           eval(s1, ePerm, pve, v1)((s2, tPerm, ePermNew, v2) => {
             val s2a = v2.heapSupporter.triggerResourceIfNeeded(s2, pa, tArgs, eArgsNew, v2)
@@ -604,9 +595,7 @@ object executor extends ExecutionRules {
               predicateSupporter.unfold(s3, predicate, tArgs, eArgsNew, tPerm, ePermNew, wildcards, pve, v3, pa)(
                 (s4, v4) => {
                   v2.decider.finishDebugSubExp(s"unfolded ${pa.toString}")
-                  val s4a = if (debugOn)
-                    v2.recordDebugHeap(s4, oldLabel, ExecStmt(unfold), oldPCS).copy(intermediateHeapCause = None)
-                  else s4
+                  val s4a = if (debugOn) v4.finishKeyHeap(s4) else s4
                   Q(s4a, v4)
                 })
             })
@@ -614,11 +603,9 @@ object executor extends ExecutionRules {
 
       case pckg @ ast.Package(wand, proofScript) =>
         val pve = PackageFailed(pckg)
-        val s0 = if (debugOn)
-          s.copy(isInPackage = true, intermediateHeapCause = Some(oldLabel, ExecStmt(pckg), oldPCS))
-        else s.copy(isInPackage = true)
+        val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(pckg)) else s
 
-        magicWandSupporter.packageWand(s0, wand, proofScript, pve, v)((s1, chWand, v1) => {
+        magicWandSupporter.packageWand(s0.copy(isInPackage = true), wand, proofScript, pve, v)((s1, chWand, v1) => {
           val hOps = s1.reserveHeaps.head + chWand
           assert(s.exhaleExt || s1.reserveHeaps.length == 1)
           val s2 =
@@ -646,17 +633,15 @@ object executor extends ExecutionRules {
             case _ => s2
           }
 
-          val s4 = if (debugOn) v1.recordDebugHeap(s3, oldLabel, ExecStmt(pckg), oldPCS).copy(intermediateHeapCause = None)
-          else s3
+          val s4 = if (debugOn) v1.finishKeyHeap(s3) else s3
           continuation(s4.copy(isInPackage = s.isInPackage), v1)
         })
 
       case apply @ ast.Apply(e) =>
         val pve = ApplyFailed(apply)
-        val s0 = if (debugOn) s.copy(intermediateHeapCause = Some(oldLabel, ExecStmt(apply), oldPCS)) else s
+        val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(apply)) else s
         magicWandSupporter.applyWand(s0, e, pve, v)((s1, v1) => {
-          val s1a = if (debugOn) v1.recordDebugHeap(s1, oldLabel, ExecStmt(apply), oldPCS).copy(intermediateHeapCause = None)
-          else s1
+          val s1a = if (debugOn) v1.finishKeyHeap(s1) else s1
           Q(s1a, v1)})
 
       case havoc: ast.Quasihavoc =>
