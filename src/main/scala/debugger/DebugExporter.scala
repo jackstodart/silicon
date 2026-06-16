@@ -11,6 +11,8 @@ import viper.silicon.state._
 import viper.silicon.state.terms.{Sort, Term, sorts}
 import viper.silicon.resources
 import viper.silicon.resources.{FieldID, PredicateID}
+import viper.silicon.verifier.Verifier
+import viper.silicon.Map
 import viper.silver.ast
 import viper.silver.ast.utility.Functions.{FuncName, allSubexpressions}
 import viper.silver.ast.utility.Simplifier
@@ -98,54 +100,39 @@ object Rewrites {
 class Translator(val obl: ProofObligation, val filename: String) {
   var strings = ArrayBuffer[String]() // Strings to be written to .thy file
   private val program = obl.s.program
+  private val state = obl.s
   private val domains = program.domains.filter(d => !d.name.endsWith("WellFoundedOrder"))
   private val translationOrder: Seq[(MemberSeq, Seq[MemberSeq])] = memberTranslationSequence(program)
   private val currentHeapLabel: String = obl.v.getDebugHeapLabel(obl.s).getOrElse("currentHeapMissing")
 
   // Maps each debug heap label to an ancestor label it's unified with, and any extra conditions on the child heap
-  private val heapSourceMap: immutable.Map[String, (String, Set[ast.Exp])] = {
-    def erasable(cause: HeapCause): Boolean = {
-      cause match {
-        case InhalePre() | ExhalePost() | EvalExp(_) | StateConsolidation() => true
-        case ExecStmt(stmt) => stmt match {
-          case _: ast.Unfold
-          | _: ast.Fold
-          | _: ast.Package
-          | _: ast.Apply => true
-          case _ => false
-        }
-        case MergeContext() | CreateLabel() => false
-      }
-    }
-
+  private val keyHeapMap: Map[String, String] = {
     val oldConds = obl.s.debugOldHeaps("old").branchConds.map(_._1).toSet
-    @tailrec
-    def sourceHeap(debugHeap: DebugHeap, currentLabel: String, currentBCs: Set[ast.Exp]): (String, Set[ast.Exp]) = {
-      if (debugHeap.cause == InhalePre()) {
-        val theseConds = debugHeap.branchConds.map(_._1).toSet
-        ("old", theseConds -- oldConds)
-      } else if (debugHeap.parentLabel == "nil")
-        (currentLabel, currentBCs)
-      else if (debugHeap.intermediateCause.isDefined) {
-        val parentHeap = obl.s.debugOldHeaps(debugHeap.parentLabel)
-        if (parentHeap.cause == debugHeap.cause) {
-          val newBCs = currentBCs ++ debugHeap.branchConds.map(_._1)
-          sourceHeap(parentHeap, debugHeap.parentLabel, newBCs)
-        } else (currentLabel, currentBCs)
-      }
-      else if (erasable(debugHeap.cause)) {
-        val parentHeap = obl.s.debugOldHeaps(debugHeap.parentLabel)
-        val newBCs = currentBCs ++ debugHeap.branchConds.map(_._1)
-        sourceHeap(parentHeap, debugHeap.parentLabel, newBCs)
-      } else (currentLabel, currentBCs)
+
+    // Whenever a label is created, use that instead of the parent debug label.
+    val labelledHeaps = state.debugOldHeaps.collect {
+      case (label, record) if label.contains("debug@") && record.cause == CreateLabel =>
+        (record.parentLabel, label)
+    } ++ state.debugOldHeaps.collect {
+      case (label, record) if record.cause == InhalePre =>
+        (label, Verifier.PRE_STATE_LABEL)
     }
 
-    val tempMap: mutable.Map[String, (String, Set[Exp])] = mutable.Map()
-    obl.s.debugOldHeaps.foreach { case (label, debugHeap) =>
-      val (source, conds) = sourceHeap(debugHeap, label, debugHeap.branchConds.map(_._1).toSet)
-      tempMap += (label -> (source, conds))
+    val intermediateHeapParents =
+      state.debugOldHeaps.flatMap { case (label, record) =>
+        Iterator.single(label -> label) ++
+          record.intermediateHeaps.map { case (interLabel, _) =>
+            (interLabel, labelledHeaps.getOrElse(label, label))
+          }
+      }
+
+    val tempIntermediates = state.temporaryHeapRecord match {
+      case Some((_, _, _, heaps)) => heaps.map(kv => (kv._1, kv._1))
+      case None => Map.empty[String, String]
     }
-    tempMap.toMap
+
+    val result = tempIntermediates ++ intermediateHeapParents ++ labelledHeaps
+    result
   }
 
   private val (basicRewrites: Rewrites,
@@ -169,29 +156,27 @@ class Translator(val obl: ProofObligation, val filename: String) {
       }
     }
     // Add location variables from the heap
-    val termReps = mutable.Map[Term, String]()
+    val termReps = mutable.Map[Term, String]() // TODO: Remove? I think we never translate the terms
     val fields = mutable.Map[Term, (BasicChunk, String)]()
     val predicates = mutable.Map[Term, (BasicChunk, String)]()
     val quantFields = mutable.Map[Term, (QuantifiedFieldChunk, String)]()
     val qfcCounter: mutable.Map[String, Int] = mutable.Map(program.fields.map(_.name).map((_, 0)): _*)
     val quantPreds = mutable.Map[Term, (QuantifiedPredicateChunk, String)]()
     val varRewrites = Rewrites(varRenames.toMap, Map())
-    for ((label, heap) <- obl.s.oldHeaps.toList.reverse) {
-      for (chunk <- heap.values) {
+    for ((label, record) <- state.debugOldHeaps.toList.reverse) {
+      for (chunk <- record.heap.values) {
         chunk match {
-          case bc: BasicChunk =>
-            bc.resourceID match {
+          case basic: BasicChunk =>
+            basic.resourceID match {
               // If the chunk is a basic field access, add rewriting
               case resources.FieldID =>
                 // TODO: Add condition if we can't decide it's positive
-                if (!(termReps contains bc.snap) && permIsPositive(bc.perm)) {
-                  val fieldLabelString = if (label == currentHeapLabel) bc.id.name else s"${bc.id} ${safeString(label)}"
-                  termReps += bc.snap -> (fieldLabelString + " " + translateTerm(bc.args.head, rewrites = varRewrites))
-                  fields += bc.snap -> (bc, label)
+                if (!(fields contains basic.snap) && permIsPositive(basic.perm)) {
+                  fields += basic.snap -> (basic, label)
                 }
               case resources.PredicateID =>
-                if (!(termReps contains bc.snap) && permIsPositive(bc.perm)) {
-                  predicates += bc.snap -> (bc, label)
+                if (!(predicates contains basic.snap) && permIsPositive(basic.perm)) {
+                  predicates += basic.snap -> (basic, label)
                 }
             }
           case qfc: QuantifiedFieldChunk =>
@@ -413,31 +398,29 @@ class Translator(val obl: ProofObligation, val filename: String) {
   }
 
   private def translateHeaps(): Unit = {
-    val keyLabels = heapSourceMap.values.map(_._1).toSet
-    val keyHeaps = obl.s.debugOldHeaps.filter(keyLabels contains _._1)
-
-    /*
-    val groupedHeaps = heapSourceMap.groupMap(_._2._1) {
-      case (childLabel, (_, conds)) => (childLabel, conds)
-    }
-    for ((parentHeap, children) <- groupedHeaps) {
-      val chunkList = children.flatMap {
-        case (childLabel, cond) => obl.s.debugOldHeaps(childLabel).heap.values.map((_, cond))
-      }.toList.distinct.zipWithIndex
-
-      // TODO: Maybe explicitly identify current heap?
-      strings += s"  (* Heap $parentHeap *)"
-      for (((chunk, conds), idx) <- chunkList) {
-        translateChunk(chunk, conds, parentHeap, idx)
-      }
-    }
-    */
-    for ((label, dh) <- keyHeaps) {
+    // TODO: Maybe explicitly identify current heap?
+    // Ignore any heaps (probably just debug@0) from the precondition that are not "old"
+    val heapsExclPreOld = state.debugOldHeaps.filter { case (label, record) =>
+      record.cause != InhalePre || label == Verifier.PRE_STATE_LABEL }
+    for ((label, record) <- heapsExclPreOld) {
       strings += s"  (* Heap $label *)"
-      for ((chunk, idx) <- dh.heap.values.zipWithIndex) {
+      if (label == "debug@65")
+        println("something")
+      for ((chunk, idx) <- record.heap.values.zipWithIndex) {
         translateChunk(chunk, Set(), label, idx)
       }
     }
+  }
+
+  // NOTE: assumes permission is positive
+  private def translateBasicFieldChunk(chunk: BasicChunk, heapLabel: String): String = {
+    assert(chunk.resourceID == FieldID, "translateBasicFieldChunk got the wrong chunk...")
+    val ref = chunk.argsExp match {
+      // I think it should always have an argsExp ???
+      case Some(args) => translateExp(args.head, parenthesisLevel = 100)
+      case None => translateTerm(chunk.args.head, parenthesisLevel = 100)
+    }
+    s"${chunk.id.name} ${safeString(heapLabel)} $ref"
   }
 
   private def translateChunk(c: Chunk, conditions: Set[ast.Exp], heapLabel: String, idx: Int): Unit = {
@@ -446,26 +429,26 @@ class Translator(val obl: ProofObligation, val filename: String) {
     val condString = conditions.map(translateExp(_)).mkString(" \\<and> ")
 
     c match {
-      case bc: BasicChunk =>
-        bc.resourceID match {
+      case basic: BasicChunk =>
+        basic.resourceID match {
           case FieldID =>
-            assert(bc.args.length == 1, "Method translateChunk expected FieldChunk to have exactly one arg.")
-            if (fieldSnapInOtherHeap(bc.snap)) {
-              val ref = translateTerm(bc.args.head, parenthesisLevel = 100)
-              val permCondition = permCondSimp(bc.perm)
+            assert(basic.args.length == 1, "Method translateChunk expected FieldChunk to have exactly one arg.")
+            if (fieldSnapInOtherHeap(basic.snap)) {
+              val permCondition = permCondSimp(basic.perm)
               val condString = if (permCondition == terms.True) "" else translateTerm(permCondition) + s" $META_ARR "
-              val field = s"${bc.id.name}' ${safeString(heapLabel)} $ref"
-              val chunk = s"$condString$field = ${translateTerm(bc.snap)}"
+              val thisChunk = translateBasicFieldChunk(basic, heapLabel)
+              val defaultChunk = (translateBasicFieldChunk _).tupled(fieldChunks(basic.snap))
+              val chunk = s"$condString$thisChunk = $defaultChunk"
               strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunk\""
-            } // TODO: Should we add something here if only
+            }
           case PredicateID =>
-            val chunkString = safeString(bc.id.name) + s" ${safeString(heapLabel)} " +
-              bc.args.map(translateTerm(_, parenthesisLevel = 100)).mkString(" ")
-            val predEq = if (predSnapInOtherHeap(bc.snap)) {
-              val (otherChunk, otherLabel) = predicateChunks(bc.snap)
-              val thisTuple = s"(${safeString(heapLabel)}, ${bc.args.map(translateTerm(_)).mkString(", ")})"
+            val chunkString = safeString(basic.id.name) + s" ${safeString(heapLabel)} " +
+              basic.args.map(translateTerm(_, parenthesisLevel = 100)).mkString(" ")
+            val predEq = if (predSnapInOtherHeap(basic.snap)) {
+              val (otherChunk, otherLabel) = predicateChunks(basic.snap)
+              val thisTuple = s"(${safeString(heapLabel)}, ${basic.args.map(translateTerm(_)).mkString(", ")})"
               val otherTuple = s"(${safeString(otherLabel)}, ${otherChunk.args.map(translateTerm(_)).mkString(", ")})"
-              s" \\<and> ${bc.id.name}_eq $thisTuple $otherTuple"
+              s" \\<and> ${basic.id.name}_eq $thisTuple $otherTuple"
             } else ""
             strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunkString$predEq\""
         }
@@ -715,15 +698,24 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.Minus(exp) => wrap("-" + rec(exp, 80), 80)
       case ast.Or(left, right) => recOp(left, "\\<or>", right, 30)
       case ast.And(left, right) =>
+        // TODO: Why do we get nested parens?
         if (isFrameAxiom && left.isPure) rec(right, parenthesisLevel)
         else if (isFrameAxiom && right.isPure) rec(left, parenthesisLevel)
-        else rec(left, 35) + " \\<and> " + rec(right, 35)
+        else recOp(left, "\\<and>", right, 35)
       case ast.Implies(left, right) =>
         val translation = translateExp(left, parenthesisLevel, isFrameAxiom = false, variablePrime, resultString) +
           " \\<longrightarrow> " + rec(right, 25)
         wrap(translation, 25)
       case ast.MagicWand(left, right) => rec(left, 50) + " \\<longrightarrow> " + rec(right, 50) // TODO: remove?
-      case ast.Not(exp) => wrap("\\<not>" + rec(exp, 40), 40)
+      case ast.Not(exp) =>
+        exp match {
+          case ast.EqCmp(left, right) => recOp(left, "\\<noteq>", right, 50)
+          case ast.SeqContains(elem, s) => recOp(elem, "\\<notin>:", s, 51)
+          case ast.AnySetContains(elem, s) =>
+            // TODO: fix for multisets?? Also below
+            recOp(elem, setOrMSetOp("\\<in>", s.typ), s, 51)
+          case _ => wrap("\\<not>" + wrap(rec(exp, 40), 40), 40)
+        }
       case ast.TrueLit() => "True"
       case ast.FalseLit() => "False"
       case ast.NullLit() => "Null"
@@ -753,12 +745,12 @@ class Translator(val obl: ProofObligation, val filename: String) {
           case None => ""
           case Some(fn) => if (fn.isPure) "" else " " + safeString(oldHeapLabel.getOrElse("h"))
         }
-        wrap(safeString(funcname) + maybeHeap + args.map(a => " " + rec(a, 100)).mkString(""), 100)
+        wrap(safeString(funcname) + maybeHeap + args.map(a => " " + wrap(rec(a, 100), 100)).mkString(""), 100)
       case ast.DomainFuncApp(funcname, args, _) =>
         wrap(funcname + " " + args.map(rec(_, 100)).mkString(" "), 100)
       case ast.FieldAccess(rcv, field) =>
-        val heapString = (for (oldLabel <- oldHeapLabel; keyLabel <- heapSourceMap.get(oldLabel.takeWhile(_ != '#')))
-          yield safeString(keyLabel._1)).getOrElse("h")
+        val heapString = (for (oldLabel <- oldHeapLabel; keyLabel <- keyHeapMap.get(oldLabel.takeWhile(_ != '#')))
+          yield safeString(keyLabel)).getOrElse("h")
           wrap(s"${field.name} $heapString ${rec(rcv, 100)}", 100)
 
       case ast.CondExp(cond, thn, els) => "(if " + rec(cond, 10) + " then " + rec(thn, 10) +
@@ -781,6 +773,17 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.Result(_) => wrap(resultString.getOrElse("result"), 100)
       case ast.LocalVarWithVersion(name, _) =>
         if (variablePrime) safeString(name) + "'" else basicRewrites.varRenames.getOrElse(name, safeString(name))
+
+      case ast.FullPerm() => "1"
+      case ast.NoPerm() => "0"
+      case ast.PermAdd(left, right) => recOp(left, "+", right, 65)
+      case ast.PermSub(left, right) => recOp(left, "-", right, 65)
+      case ast.PermMul(left, right) => recOp(left, "*", right, 70)
+      case ast.PermLtCmp(left, right) => recOp(left, "<", right, 51)
+      case ast.PermLeCmp(left, right) => recOp(left, "\\<le>", right, 51)
+      case ast.PermGtCmp(left, right) => recOp(left, ">", right, 51)
+      case ast.PermGeCmp(left, right) => recOp(left, "\\<ge>", right, 51)
+      case ast.DebugPermMin(left, right) => wrap(s"min ${rec(left, 100)} ${rec(right, 100)}", 100)
 
       case ast.EmptySeq(_) => "[]"
       case ast.ExplicitSeq(elems) => "[" + elems.map(rec(_, 0)).mkString(", ") + "]"
@@ -992,13 +995,19 @@ class Translator(val obl: ProofObligation, val filename: String) {
             if (!de.isInternal_) {
               if (de.finalExp.isDefined && notPermExp(de.finalExp.get)) {
                 strings += s"  assumes ${de.id}: \"$prefix${translateExp(de.finalExp.get)}$suffix\""
-              } else if (de.term.isDefined) {
+              } else if (de.description(false).isDefined && de.description(false).get.contains("precondition")) {
+                strings += s"  assumes ${de.id}: \"$prefix${translateTerm(de.term.get)}$suffix\""
+              } else if (de.description(false).isDefined && de.description(false).get.contains("Joined")) {
+                strings = strings
+                de.children.foreach { translateDebugExp(_, prefix, suffix) }
+              }
+              /*else if (de.term.isDefined) {
                 if (notSnap(de.term.get)) {
                   val filtered = filterPure(de.term.get)
                   if (filtered.isDefined)
                     strings += s"  assumes ${de.id}: \"$prefix${translateTerm(filtered.get)}$suffix\""
                 }
-              }
+              } */
             }
         }
     }
@@ -1089,7 +1098,8 @@ object ExportUtils {
 
   def permCondSimpExp(e: Exp): Exp = {
     assert(e.typ == ast.Perm, s"permCondSimpExp expects a perm type but recieved ${e.typ}")
-    Simplifier.simplify(posExpCond(collapseCondExp(e)))
+    val eSimp = Simplifier.simplify(e)
+    Simplifier.simplify(posExpCond(collapseCondExp(eSimp)))
   }
 
   def permIsPositive(e: Exp): Boolean = {
@@ -1168,7 +1178,7 @@ object ExportUtils {
       case ast.CondExp(p0, p1, ast.FullPerm()) => ast.And(p0, notFullExpCond(p1))()
       case ast.CondExp(p0, p1, ast.NoPerm()) => ast.Implies(p0, notFullExpCond(p1))()
       case ast.CondExp(p0, p1, p2) => ast.CondExp(p0, notFullExpCond(p1), notFullExpCond(p2))()
-      case _ => ast.PermLtCmp(p, ast.FullPerm()())()
+      case _ => Simplifier.simplify(ast.PermLtCmp(p, ast.FullPerm()())())
     }
   }
 
