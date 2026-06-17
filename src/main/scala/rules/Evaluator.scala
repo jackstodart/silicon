@@ -1122,11 +1122,10 @@ object evaluator extends EvaluationRules {
       })
     }){
       case (s2, ts1, es1New1, Some((ts2, es2New1, tTriggers, (tAuxGlobal, tAux), eAuxExps, additionalPossibleTriggers))) =>
-        val s3 = s.copy(possibleTriggers = s.possibleTriggers ++ additionalPossibleTriggers)
-                .preserveAfterLocalEvaluation(s2)
+        val s3 = s.preserveAfterLocalEvaluation(s2).copy(possibleTriggers = s.possibleTriggers ++ additionalPossibleTriggers)
         Q(s3, tVars, Option.when(debugOn)(varPairs map (e => ast.LocalVarDecl(e._2.get.name, e._2.get.typ)(e._2.get.pos, e._2.get.info, e._2.get.errT))), ts1, es1New1, Some((ts2, es2New1, tTriggers, (tAuxGlobal, tAux), Option.when(debugOn)((eAuxExps.get._1, eAuxExps.get._2)))), v)
       case (s2, ts1, es1New1, None) =>
-        val s3 = s.preserveAfterLocalEvaluation(s2)
+        val s3 = s.preserveAfterLocalEvaluation(s2).copy(possibleTriggers = s.possibleTriggers)
         Q(s3, tVars, Option.when(debugOn)(varPairs map (e => ast.LocalVarDecl(e._2.get.name, e._2.get.typ)(e._2.get.pos, e._2.get.info, e._2.get.errT))), ts1, es1New1, None, v)
     }
   }
@@ -1166,17 +1165,15 @@ object evaluator extends EvaluationRules {
                             : VerificationResult = {
 
     val h = s.oldHeaps(label)
-    val s1 = s.copy(h = h, partiallyConsumedHeap = None, isEvalInOld = true)
+    val s1 = s.copy(h = h, partiallyConsumedHeap = None, isEvalInOld = true, possibleTriggers = Map.empty)
     val s2 = v.stateConsolidator(s1).consolidateOptionally(s1, v)
-    val possibleTriggersBefore: Map[ast.Exp, Term] = if (s.recordPossibleTriggers) s.possibleTriggers else Map.empty
 
     eval(s2, e, pve, v)((s3, t, eNew, v1) => {
       val newPossibleTriggers = if (s.recordPossibleTriggers) {
         // For all new possible trigger expressions e and translated term t,
         // make sure we remember t as the term for old[label](e) instead.
         // If e is not heap-dependent, we also remember t as the term for e.
-        val addedOrChangedPairs = s3.possibleTriggers.filter(t =>
-          !possibleTriggersBefore.contains(t._1) || possibleTriggersBefore(t._1) != t._2)
+        val newTriggers = s3.possibleTriggers
 
         def wrapInOld(e: ast.Exp) = {
           if (label == Verifier.PRE_STATE_LABEL) {
@@ -1186,8 +1183,8 @@ object evaluator extends EvaluationRules {
           }
         }
 
-        val oldPairs = addedOrChangedPairs.map(t => wrapInOld(t._1) -> t._2) ++
-          addedOrChangedPairs.filter(t => !t._1.isHeapDependent(s.program))
+        val oldPairs = newTriggers.map(t => wrapInOld(t._1) -> t._2) ++
+          newTriggers.filter(t => !t._1.isHeapDependent(s.program))
         s.possibleTriggers ++ oldPairs
       } else {
         s.possibleTriggers
