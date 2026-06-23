@@ -404,8 +404,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
       record.cause != InhalePre || label == Verifier.PRE_STATE_LABEL }
     for ((label, record) <- heapsExclPreOld) {
       strings += s"  (* Heap $label *)"
-      if (label == "debug@65")
-        println("something")
       for ((chunk, idx) <- record.heap.values.zipWithIndex) {
         translateChunk(chunk, Set(), label, idx)
       }
@@ -969,7 +967,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     varMap.toMap
   }
 
-  private def translateDebugExp(de: DebugExp, prefix: String = "", suffix: String = ""): Unit = {
+  private def translateDebugExp(de: DebugExp, prefix: String = "", suffix: String = "", inAux: Boolean = false): Unit = {
     de.category match {
       case LoopInvariant() =>
         strings += "  (* Begin loop invariant *)"
@@ -977,7 +975,11 @@ class Translator(val obl: ProofObligation, val filename: String) {
           translateDebugExp(child)
         }
         strings += "  (* End loop invariant *)"
-      case _: SnapshotShape => // Do nothing
+      case FunctionPrecondition(name, _) =>
+        if (program.findFunction(name).pres.nonEmpty)
+          strings += s"  assumes ${de.id}: \"$prefix${translateTerm(de.term.get)}$suffix\""
+      case _: SnapshotShape
+           | _: UnfoldedPredicate => () // Do nothing
       case _ =>
         de match {
           case ide: ImplicationDebugExp =>
@@ -985,21 +987,26 @@ class Translator(val obl: ProofObligation, val filename: String) {
               val filtered = filterPure(ide.term.get)
               if (filtered.isDefined) {
                 val LHS = translateTerm(filtered.get)
-                ide.children.foreach { translateDebugExp(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix) }
+                ide.children.foreach { translateDebugExp(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix, inAux = inAux) }
               }
             }
           case qde: QuantifiedDebugExp =>
-            val qvarString = ""
-            qde.children.foreach { translateDebugExp(_, prefix + qvarString, suffix) }
+            val qvarString = "\\<forall>" + qde.qvars.map(translateExp(_)).mkString(" ") + ". "
+            qde.children.foreach { translateDebugExp(_, prefix + qvarString, suffix, inAux = inAux) }
           case _ =>
             if (!de.isInternal_) {
-              if (de.finalExp.isDefined && notPermExp(de.finalExp.get)) {
+              if (de.description(false).getOrElse("").contains("unfolding")) {
+                // do nothing
+              } else if (de.description(false).getOrElse("").contains("folded")) {
+                // do nothing
+              } else if (de.finalExp.isDefined && notPermExp(de.finalExp.get) && !inAux) {
                 strings += s"  assumes ${de.id}: \"$prefix${translateExp(de.finalExp.get)}$suffix\""
-              } else if (de.description(false).isDefined && de.description(false).get.contains("precondition")) {
-                strings += s"  assumes ${de.id}: \"$prefix${translateTerm(de.term.get)}$suffix\""
               } else if (de.description(false).isDefined && de.description(false).get.contains("Joined")) {
-                strings = strings
-                de.children.foreach { translateDebugExp(_, prefix, suffix) }
+                de.children.foreach { translateDebugExp(_, prefix, suffix, inAux = inAux) }
+              } else if (de.description(false).getOrElse("").contains("auxiliary")) {
+                de.children.foreach { translateDebugExp(_, prefix, suffix, inAux = true) }
+              } else {
+                de.children.foreach { translateDebugExp(_, prefix, suffix, inAux = inAux) }
               }
               /*else if (de.term.isDefined) {
                 if (notSnap(de.term.get)) {
@@ -1008,6 +1015,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
                     strings += s"  assumes ${de.id}: \"$prefix${translateTerm(filtered.get)}$suffix\""
                 }
               } */
+            } else {
+              de.children.foreach { translateDebugExp(_, prefix, suffix) }
             }
         }
     }
