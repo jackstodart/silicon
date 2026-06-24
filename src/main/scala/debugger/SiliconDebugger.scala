@@ -163,8 +163,8 @@ case class ProofObligation(s: State,
         } else {
           val varsString = qfc.quantifiedVarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
           val qvarsString = "forall " + qfc.invs.get.qvarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
-          val varsEqualString = qfc.quantifiedVarExps.get.zip(qfc.invs.get.invertibleExps.get).map(v => s"${v._1.name} == ${simplify(v._2)}").mkString(" && ")
-          s"forall $varsString :: $qvarsString :: $varsEqualString ==> acc(${qfc.quantifiedVarExps.get.head.name}.${qfc.id}, ${simplify(qfc.permExp.get)})"
+          val letInString = qfc.quantifiedVarExps.get.zip(qfc.invs.get.invertibleExps.get).map(v => s"let ${v._1.name} == (${simplify(v._2)}) in").mkString(" ")
+          s"$qvarsString :: ${qfc.conditionExp.get} ==> $letInString acc(${qfc.quantifiedVarExps.get.head.name}.${qfc.id}, ${simplify(qfc.permValueExp.get)})"
         }
       case qpc: QuantifiedPredicateChunk =>
         if (qpc.singletonArgExps.isDefined) {
