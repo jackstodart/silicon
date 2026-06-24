@@ -26,6 +26,7 @@ import viper.silicon.utils.notNothing.NotNothing
 import viper.silicon.utils.freshSnap
 import viper.silicon.verifier.Verifier
 import viper.silver.ast
+import viper.silver.ast.utility.Simplifier
 import viper.silver.parser.PUnknown
 import viper.silver.reporter.InternalWarningMessage
 import viper.silver.verifier.reasons.{InsufficientPermission, MagicWandChunkNotFound}
@@ -1584,7 +1585,11 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
       val declareMacro = s.functionRecorder == NoopFunctionRecorder // && !Verifier.config.useFlyweight
 
       val permsProvided = ch.perm
-      val permsProvidedExp = ch.permExp
+      val permsProvidedExp = ch match {
+        case qfc: QuantifiedFieldChunk => qfc.permValueExp
+        case qpc: QuantifiedPredicateChunk => qpc.permValueExp
+        case qwc: QuantifiedMagicWandChunk => qwc.permExp
+      }
       val permsTaken = if (declareMacro) {
         val permsTakenBody = Ite(condition, PermMin(permsProvided, permsNeeded), NoPerm)
         val permsTakenArgs = codomainQVars ++ additionalArgs
@@ -1597,7 +1602,8 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
       } else {
         Ite(condition, PermMin(permsProvided, permsNeeded), NoPerm)
       }
-      val permsTakenExp = conditionExp.map(c => ast.CondExp(c, buildMinExp(Seq(permsProvidedExp.get, permsNeededExp.get), ast.Perm), ast.NoPerm()())())
+      val permTakenValue = Simplifier.simplify(buildMinExp(Seq(permsProvidedExp.get, permsNeededExp.get), ast.Perm))
+      val permsTakenExp = conditionExp.map(c => ast.CondExp(c, permTakenValue, ast.NoPerm()())())
 
       permsNeeded = PermMinus(permsNeeded, permsTaken)
       permsNeededExp = permsNeededExp.map(pn => ast.PermSub(pn, permsTakenExp.get)())
