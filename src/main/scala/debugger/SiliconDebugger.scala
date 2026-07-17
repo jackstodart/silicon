@@ -14,6 +14,7 @@ import viper.silicon.verifier.{MainVerifier, Verifier, WorkerVerifier}
 import viper.silver.ast
 import viper.silver.ast._
 import viper.silver.ast.utility.Simplifier
+import viper.silver.frontend.FrontendStateCache
 import viper.silver.parser._
 import viper.silver.reporter.{NoopReporter, Reporter}
 import viper.silver.verifier.errors.ContractNotWellformed
@@ -161,7 +162,6 @@ case class ProofObligation(s: State,
           val perm = simplify(qfc.permExp.get.replace(qfc.quantifiedVarExps.get.head.localVar, receiver))
           s"acc($receiver.${qfc.id}, $perm)"
         } else {
-          val varsString = qfc.quantifiedVarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
           val qvarsString = "forall " + qfc.invs.get.qvarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
           val letInString = qfc.quantifiedVarExps.get.zip(qfc.invs.get.invertibleExps.get).map(v => s"let ${v._1.name} == (${simplify(v._2)}) in").mkString(" ")
           s"$qvarsString :: ${qfc.conditionExp.get} ==> $letInString acc(${qfc.quantifiedVarExps.get.head.name}.${qfc.id}, ${simplify(qfc.permValueExp.get)})"
@@ -230,6 +230,15 @@ case class ProofObligation(s: State,
     "\n" + originalErrorInfo + branchConditionString + storeString + heapString +
       axiomsString + declarationsString + assumptionString + assertionString
   }
+}
+
+object ProofObligation {
+  def apply(s: State, v: Verifier, assertion: Term, eAssertion: DebugExp, reason: ErrorReason): ProofObligation =
+    new ProofObligation(s, v, v.decider.prover.getAllEmits(), v.decider.prover.preambleAssumptions,
+      v.decider.pcs.branchConditions, v.decider.pcs.branchConditionExps.map(bce => bce._1 -> bce._2.get),
+      v.decider.pcs.assumptionExps, assertion, eAssertion, None, new DebugExpPrintConfiguration, reason,
+      new DebugResolver(FrontendStateCache.pprogram, FrontendStateCache.resolver.names),
+      new DebugTranslator(FrontendStateCache.pprogram, FrontendStateCache.translator.getMembers()))
 }
 
 class SiliconDebugger(verificationResults: List[VerificationResult],

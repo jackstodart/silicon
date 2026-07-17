@@ -78,6 +78,7 @@ case class Rewrites(varRenames: immutable.Map[String, String],
  */
 class Translator(val obl: ProofObligation, val filename: String) {
   var strings = ArrayBuffer[String]() // Strings to be written to .thy file
+  private var printedAssumptions = Set[String]()
   private val program = obl.s.program
   private val state = obl.s
   private val domains = program.domains.filter(d => !d.name.endsWith("WellFoundedOrder"))
@@ -151,7 +152,10 @@ class Translator(val obl: ProofObligation, val filename: String) {
             varRenames(id.name) = safeString(lVar.name) // update if better match found
             varRenames(nameWithoutVersion(id.name)) = safeString(lVar.name)
           }
-        case _ => println(s"Store entry is not a Var: $lVar -> $term")
+        case _ =>
+          // TODO: If the store var is a constant, there is no term to rewrite, but I should check this information
+          //  occurs in the assumptions, or we need to add it to the lemma
+          // println(s"Store entry is not a Var: $lVar -> $term, ${lVar.getClass}")
       }
     }
     // Add location variables from the heap
@@ -995,8 +999,13 @@ class Translator(val obl: ProofObligation, val filename: String) {
         }
         strings += "  (* End loop invariant *)"
       case FunctionPrecondition(name, _) =>
-        if (program.findFunction(name).pres.nonEmpty)
-          strings += s"  assumes ${de.id}: \"$prefix${translateTerm(de.term.get)}$suffix\""
+        if (program.findFunction(name).pres.nonEmpty) {
+          val assmString = s"$prefix${translateTerm(de.term.get)}$suffix"
+          if (!printedAssumptions.contains(assmString)) {
+            printedAssumptions += assmString
+            strings += s"  assumes ${de.id}: \"$assmString\""
+          }
+        }
       case _: SnapshotShape
            | _: UnfoldedPredicate => () // Do nothing
       case _ =>
@@ -1019,7 +1028,11 @@ class Translator(val obl: ProofObligation, val filename: String) {
               } else if (de.description(false).getOrElse("").contains("folded")) {
                 // do nothing
               } else if (de.finalExp.isDefined && notPermExp(de.finalExp.get) && !inAux) {
-                strings += s"  assumes ${de.id}: \"$prefix${translateExp(de.finalExp.get)}$suffix\""
+                val assmString = s"$prefix${translateExp(de.finalExp.get)}$suffix"
+                if (!printedAssumptions.contains(assmString)) {
+                  printedAssumptions += assmString
+                  strings += s"  assumes ${de.id}: \"$assmString\""
+                }
               } else if (de.description(false).isDefined && de.description(false).get.contains("Joined")) {
                 de.children.foreach { translateDebugExp(_, prefix, suffix, inAux = inAux) }
               } else if (de.description(false).getOrElse("").contains("auxiliary")) {

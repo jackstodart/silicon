@@ -9,7 +9,7 @@ package viper.silicon.rules
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.Config.JoinMode
 import viper.silicon.debugger
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.{DebugExp, DebugExporter, ProofObligation}
 
 import scala.annotation.unused
 import viper.silver.cfg.silver.SilverCfg
@@ -23,9 +23,11 @@ import viper.silicon.interfaces._
 import viper.silicon.logger.records.data.{CommentRecord, ConditionalEdgeRecord, ExecuteRecord, MethodCallRecord}
 import viper.silicon.state._
 import viper.silicon.state.terms._
+import viper.silicon.supporters.AnnotationSupporter.isabelleAnnotation
 import viper.silicon.utils.ast.{BigAnd, extractPTypeFromExp, simplifyVariableName}
 import viper.silicon.utils.freshSnap
 import viper.silicon.verifier.Verifier
+import viper.silver.ast.AnnotationInfo
 import viper.silver.cfg.{ConditionalEdge, StatementBlock}
 
 trait ExecutionRules extends SymbolicExecutionRules {
@@ -462,6 +464,15 @@ object executor extends ExecutionRules {
             Success())
 
         r combine Q(s, v)
+
+      case assert @ ast.Assert(a) if assert.info.hasAnnotation(isabelleAnnotation) =>
+        // TODO: Run quick check for a
+        val de = DebugExp.createInstance(Some(a), Some(a))
+        val obl = ProofObligation(state, v, False, de, AssertionInIsabelle(assert))
+        DebugExporter.exportIsabelle(obl)
+        // Generate Isabelle file
+        // TODO: report warning, or check Isabelle script
+        exec2(state, ast.Inhale(a)(assert.pos, assert.info, assert.errT), v)(Q)
 
       case assert @ ast.Assert(a) =>
         val pve = AssertFailed(assert)

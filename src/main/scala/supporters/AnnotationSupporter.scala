@@ -11,6 +11,7 @@ import viper.silicon.Config.StateConsolidationMode._
 import viper.silicon.Config.{ExhaleMode, JoinMode, StateConsolidationMode}
 import viper.silicon.{Map, toMap}
 import viper.silver.ast
+import viper.silver.ast.{AnnotationInfo, Infoed, Program}
 import viper.silver.reporter.{AnnotationWarning, Reporter}
 
 object AnnotationSupporter {
@@ -18,6 +19,7 @@ object AnnotationSupporter {
   val exhaleModeAnnotation = "exhaleMode"
   val joinModeAnnotation = "moreJoins"
   val stateConsolidationModeAnnotation = "stateConsolidationMode"
+  val isabelleAnnotation = "isabelle"
 
   def getProverConfigArgs(member: ast.Member, reporter: Reporter): Map[String, String] = {
     member.info.getUniqueInfo[ast.AnnotationInfo] match {
@@ -101,6 +103,23 @@ object AnnotationSupporter {
             None
         }
       case _ => None
+    }
+  }
+
+  def checkIsabelleAnnotations(p: Program, reporter: Reporter): Unit = {
+    p visit {
+      case node: Infoed =>
+        node.info.getUniqueInfo[AnnotationInfo] match {
+          case Some(annInfo) =>
+            if (annInfo.values.contains(isabelleAnnotation))
+              node match {
+                case _: ast.Assert
+                     | _: ast.Asserting => // do nothing, valid annotation
+                case _ => // any other node is invalid
+                  reporter report AnnotationWarning(s"Invalid $isabelleAnnotation will be ignored.")
+              }
+          case None =>
+        }
     }
   }
 }

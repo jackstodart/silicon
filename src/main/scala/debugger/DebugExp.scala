@@ -108,7 +108,7 @@ object DebugExp {
   }
 
   def createInstance(originalExp: Option[ast.Exp], finalExp: Option[ast.Exp]): DebugExp = {
-    createInstance(Uncategorised(), Some(originalExp.get), Some(finalExp.get), InsertionOrderedSet.empty)
+    createInstance(Uncategorised(), originalExp, finalExp, InsertionOrderedSet.empty)
   }
 
   def createImplicationInstance(category: DebugExpCategory,

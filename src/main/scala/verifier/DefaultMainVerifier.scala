@@ -211,6 +211,7 @@ class DefaultMainVerifier(config: Config,
     allProvers.comment("/" * 10 + " Static preamble")
     emitStaticPreamble(allProvers)
 
+    AnnotationSupporter.checkIsabelleAnnotations(program, reporter)
     val (functionData, predicateData) = analyzeProgramAndEmitPreambleContributions(program, allProvers) // TODO: Add support for cfgs.
 
     allProvers.comment("End preamble")
