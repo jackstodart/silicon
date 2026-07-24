@@ -446,7 +446,7 @@ object executor extends ExecutionRules {
         val pve = ExhaleFailed(exhale)
         val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(exhale)) else s
         consume(s0, a, false, pve, v)((s1, _, v1) => {
-          val s1a = if (debugOn) v1.finishKeyHeap(s) else s1
+          val s1a = if (debugOn) v1.finishKeyHeap(s1) else s1
           Q(s1a, v1)})
 
       case assert @ ast.Assert(a: ast.FalseLit) if !s.isInPackage =>
