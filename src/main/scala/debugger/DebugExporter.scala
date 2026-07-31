@@ -7,21 +7,19 @@ import org.jgrapht.traverse.TopologicalOrderIterator
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.ExportUtils._
 import viper.silicon.interfaces.state.Chunk
+import viper.silicon.{Map, resources}
+import viper.silicon.resources.{FieldID, PredicateID}
 import viper.silicon.state._
 import viper.silicon.state.terms.{Sort, Term, sorts}
-import viper.silicon.resources
-import viper.silicon.resources.{FieldID, PredicateID}
 import viper.silicon.verifier.Verifier
-import viper.silicon.Map
 import viper.silver.ast
-import viper.silver.ast.utility.Functions.{FuncName, allSubexpressions}
+import viper.silver.ast.utility.Functions.allSubexpressions
 import viper.silver.ast.utility.Simplifier
-import viper.silver.ast.{DomainAxiom, Exp, PermExp, Program}
+import viper.silver.ast.{Exp, PermExp, Program}
 import viper.silver.utility.Common.Rational
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
-import scala.annotation.tailrec
 import scala.collection.mutable.{ArrayBuffer, Set => MSet}
 import scala.collection.{immutable, mutable}
 import scala.io.StdIn.readLine
@@ -70,7 +68,11 @@ object DebugExporter {
 
 // Things to rewrite as you translate terms
 case class Rewrites(varRenames: immutable.Map[String, String],
-                    termReplacements: immutable.Map[Term, String])
+                    termReplacements: immutable.Map[Term, String]) {
+  def addRename(s1: String, s2: String): Rewrites = {
+    Rewrites(this.varRenames + (s1 -> s2), this.termReplacements)
+  }
+}
 
 /**
  * Translates Silver expressions and Silicon terms into Isabelle syntax.
@@ -568,7 +570,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.Quantification(q, vars, body, _, _, _, _) =>
         val varString = vars.map(v =>
           if (rewrites.varRenames.contains(v.id.name)) rewrites.varRenames(v.id.name)
-          else safeId(v.id) // TODO: use get or else?
+          else safeId(v.id) // TODO: never rewrite, but add to rewrties for new vars
         ).mkString(" ")
         wrap(s"${quantifierToString(q)}$varString. ${rec(body, 10)}", 10)
       // Arithmetic

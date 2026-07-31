@@ -466,7 +466,7 @@ object executor extends ExecutionRules {
         r combine Q(s, v)
 
       case assert @ ast.Assert(a) if assert.info.hasAnnotation(isabelleAnnotation) =>
-        // TODO: Run quick check for a
+        // TODO: Run quick check for provability
         val de = DebugExp.createInstance(Some(a), Some(a))
         val obl = ProofObligation(state, v, False, de, AssertionInIsabelle(assert))
         DebugExporter.exportIsabelle(obl)
