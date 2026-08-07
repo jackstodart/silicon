@@ -69,8 +69,11 @@ object DebugExporter {
 // Things to rewrite as you translate terms
 case class Rewrites(varRenames: immutable.Map[String, String],
                     termReplacements: immutable.Map[Term, String]) {
-  def addRename(s1: String, s2: String): Rewrites = {
+  def addRename(s1: String, s2: String): Rewrites =
     Rewrites(this.varRenames + (s1 -> s2), this.termReplacements)
+
+  def addRenames(rs: Seq[(String, String)]): Rewrites = {
+    Rewrites(this.varRenames ++ rs.toMap, this.termReplacements)
   }
 }
 
@@ -514,15 +517,15 @@ class Translator(val obl: ProofObligation, val filename: String) {
     def annotateIntLitsOff(): TranslationOptions = this.copy(annotateIntLits = false)
   }
 
-  object TranslationOptions {
+  private object TranslationOptions {
     def apply(parenthesisLevel: Int,
               collapseSnaps: Boolean,
               annotateIntLits: Boolean): TranslationOptions = new TranslationOptions(parenthesisLevel,
-      collapseSnaps,
-      annotateIntLits)
+                collapseSnaps,
+                annotateIntLits)
   }
 
-  val defaultOptions = TranslationOptions(parenthesisLevel = 0, collapseSnaps = false, annotateIntLits = true)
+  private val defaultOptions = TranslationOptions(parenthesisLevel = 0, collapseSnaps = false, annotateIntLits = true)
 
   // Main translation function
   private def translateTerm(term: Term,
@@ -542,7 +545,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
     term match {
       // Functions and Applications
-      case terms.Var(id, _, _) => rewrites.varRenames getOrElse(id.name, safeId(id))
+      case terms.Var(id, _, _) => rewrites.varRenames.getOrElse(id.name, safeId(id))
       case terms.Let(bindings, body) =>
         val bindString = bindings.transform((bVar, bTerm) => rec(bVar, 10) + " = " + rec(bTerm, 10)).mkString("; ")
         wrap(s"let $bindString in ${rec(body, 10)}", 10)
@@ -568,11 +571,10 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.IntLiteral(i) => if (options.annotateIntLits) s"($i::int)" else i.toString()
       case b: terms.BooleanLiteral => b.toString
       case terms.Quantification(q, vars, body, _, _, _, _) =>
-        val varString = vars.map(v =>
-          if (rewrites.varRenames.contains(v.id.name)) rewrites.varRenames(v.id.name)
-          else safeId(v.id) // TODO: never rewrite, but add to rewrties for new vars
-        ).mkString(" ")
-        wrap(s"${quantifierToString(q)}$varString. ${rec(body, 10)}", 10)
+        val varRenames = vars.map(v => (v.id.name, v.id.name.takeWhile(_ != '@')))
+        val newRewrites = rewrites.addRenames(varRenames)
+        val varString = varRenames.map(_._2).mkString(" ")
+        wrap(s"${quantifierToString(q)}$varString. ${translateTerm(body, 10, newRewrites)}", 10)
       // Arithmetic
       case terms.Plus(left, right) => recOp(left, "+", right, 65)
       case terms.Minus(left, right) => recOp(left, "-", right, 65)
@@ -686,11 +688,12 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
   private def translateExp(e: Exp,
                            parenthesisLevel: Int = 0,
+                           rewrites: Rewrites = basicRewrites,
                            isFrameAxiom: Boolean = false,
                            variablePrime: Boolean = false,
                            resultString: Option[String] = None,
                            oldHeapLabel: Option[String] = None): String = {
-    def rec(e2: Exp, pLevel: Int): String = translateExp(e2, pLevel, isFrameAxiom, variablePrime, resultString, oldHeapLabel)
+    def rec(e2: Exp, pLevel: Int): String = translateExp(e2, pLevel, rewrites, isFrameAxiom, variablePrime, resultString, oldHeapLabel)
     def wrap(s: String, pLevel: Int): String = if (pLevel <= parenthesisLevel) s"($s)" else s
     def recOp(left: Exp, op: String, right: Exp, pLevel: Int): String = {
       wrap(rec(left, pLevel) + s" $op " + rec(right, pLevel), pLevel)
@@ -722,7 +725,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         else if (isFrameAxiom && right.isPure) rec(left, parenthesisLevel)
         else recOp(left, "\\<and>", right, 35)
       case ast.Implies(left, right) =>
-        val translation = translateExp(left, parenthesisLevel, isFrameAxiom = false, variablePrime, resultString) +
+        val translation = translateExp(left, parenthesisLevel, rewrites, isFrameAxiom = false, variablePrime, resultString) +
           " \\<longrightarrow> " + rec(right, 25)
         wrap(translation, 25)
       case ast.MagicWand(left, right) => rec(left, 50) + " \\<longrightarrow> " + rec(right, 50) // TODO: remove?
@@ -741,7 +744,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.FieldAccessPredicate(loc, _) =>
         if (isFrameAxiom) {
           val loc1 = rec(loc.rcv, 100)
-          val loc2 = translateExp(loc.rcv, 100, isFrameAxiom, variablePrime = true, resultString)
+          val loc2 = translateExp(loc.rcv, 100, rewrites, isFrameAxiom, variablePrime = true, resultString)
           s"${loc.field.name} h $loc1 = ${loc.field.name} h' $loc2"
         }
         else "undefined"
@@ -749,7 +752,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         if (isFrameAxiom){
           val argString1 = loc.args.map(rec(_, 100)).mkString(", ")
           val argString2 = loc.args.map(
-            translateExp(_, parenthesisLevel, isFrameAxiom, variablePrime = true, resultString)
+            translateExp(_, parenthesisLevel, rewrites, isFrameAxiom, variablePrime = true, resultString)
           ).mkString(", ")
           s"${loc.predicateName}_eq (h, $argString1) (h', $argString2)"
         } else {
@@ -776,19 +779,24 @@ class Translator(val obl: ProofObligation, val filename: String) {
         " else " + rec(els, 10) + ")"
       case ast.Unfolding(_, body) => rec(body, parenthesisLevel)
       case ast.Asserting(_, body) => rec(body, parenthesisLevel)
-      case ast.Old(exp) => translateExp(exp, parenthesisLevel, isFrameAxiom, variablePrime, resultString, Some("old"))
+      case ast.Old(exp) => translateExp(exp, parenthesisLevel, rewrites, isFrameAxiom, variablePrime, resultString, Some("old"))
       case ast.LabelledOld(exp, oldLabel) =>
-        translateExp(exp, parenthesisLevel, isFrameAxiom, variablePrime, resultString, Some(oldLabel))
+        translateExp(exp, parenthesisLevel, rewrites, isFrameAxiom, variablePrime, resultString, Some(oldLabel))
       case ast.DebugLabelledOld(exp, oldLabel) =>
-        translateExp(exp, parenthesisLevel, isFrameAxiom, variablePrime, resultString, Some(oldLabel))
+        translateExp(exp, parenthesisLevel, rewrites, isFrameAxiom, variablePrime, resultString, Some(oldLabel))
       case ast.Let(variable, exp, body) =>
         s"let ${safeString(variable.name)} = ${rec(exp, 10)} in ${rec(body, 10)}"
-      case ast.Forall(variables, _, exp) =>
-        wrap("\\<forall>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + rec(exp, 10), 10)
+      case ast.Forall(vars, _, exp) =>
+        val varRenames = vars.map(v => (v.name, v.name.takeWhile(_ != '@')))
+        val newRewrites = rewrites.addRenames(varRenames)
+        val varString = varRenames.map(_._2).mkString(" ")
+        val bodyString = translateExp(exp, 10, newRewrites, isFrameAxiom, variablePrime, resultString, oldHeapLabel)
+        wrap(s"\\<forall>$varString. $bodyString", 10)
       case ast.Exists(variables, _, exp) =>
         wrap("\\<exists>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + rec(exp, 10), 10)
       case ast.LocalVar(name, _) =>
-        if (variablePrime) safeString(name) + "'" else basicRewrites.varRenames.getOrElse(name, safeString(name))
+        val baseName = rewrites.varRenames.getOrElse(name, safeString(name))
+        if (variablePrime) baseName + "'" else baseName
       case ast.Result(_) => wrap(resultString.getOrElse("result"), 100)
       case ast.LocalVarWithVersion(name, _) =>
         if (variablePrime) safeString(name) + "'" else basicRewrites.varRenames.getOrElse(name, safeString(name))
@@ -992,7 +1000,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
     varMap.toMap
   }
 
-  private def translateDebugExp(de: DebugExp, prefix: String = "", suffix: String = "", inAux: Boolean = false): Unit = {
+  private def translateDebugExp(de: DebugExp, prefix: String = "", suffix: String = "",
+                                rewrites: Rewrites = basicRewrites,
+                                inAux: Boolean = false): Unit = {
     de.category match {
       case LoopInvariant() =>
         strings += "  (* Begin loop invariant *)"
@@ -1002,7 +1012,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         strings += "  (* End loop invariant *)"
       case FunctionPrecondition(name, _) =>
         if (program.findFunction(name).pres.nonEmpty) {
-          val assmString = s"$prefix${translateTerm(de.term.get)}$suffix"
+          val assmString = s"$prefix${translateTerm(de.term.get, rewrites = rewrites)}$suffix"
           if (!printedAssumptions.contains(assmString)) {
             printedAssumptions += assmString
             strings += s"  assumes ${de.id}: \"$assmString\""
@@ -1016,13 +1026,15 @@ class Translator(val obl: ProofObligation, val filename: String) {
             if (ide.term.isDefined) {
               val filtered = filterPure(ide.term.get)
               if (filtered.isDefined) {
-                val LHS = translateTerm(filtered.get)
-                ide.children.foreach { translateDebugExp(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix, inAux = inAux) }
+                val LHS = translateTerm(filtered.get, rewrites = rewrites)
+                ide.children.foreach { translateDebugExp(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix, rewrites, inAux = inAux) }
               }
             }
           case qde: QuantifiedDebugExp =>
-            val qvarString = "\\<forall>" + qde.qvars.map(translateExp(_)).mkString(" ") + ". "
-            qde.children.foreach { translateDebugExp(_, prefix + qvarString, suffix, inAux = inAux) }
+            val varRenames = qde.qvars.map(v => (v.toString, v.toString.takeWhile(_ != '@')))
+            val newRewrites = basicRewrites.addRenames(varRenames)
+            val qvarString = "\\<forall>" + varRenames.map(_._2).mkString(" ") + ". "
+            qde.children.foreach { translateDebugExp(_, prefix + qvarString, suffix, newRewrites, inAux = inAux) }
           case _ =>
             if (!de.isInternal_) {
               if (de.description(false).getOrElse("").contains("unfolding")) {
@@ -1050,7 +1062,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
                 }
               } */
             } else {
-              de.children.foreach { translateDebugExp(_, prefix, suffix) }
+              de.children.foreach { translateDebugExp(_, prefix, suffix, rewrites = rewrites) }
             }
         }
     }
