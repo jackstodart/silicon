@@ -6,7 +6,7 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.Config.JoinMode
 
@@ -310,7 +310,7 @@ object executor extends ExecutionRules {
                       intermediateResult combine executionFlowController.locally(s2, v1)((s3, v2) => {
                         v2.decider.declareAndRecordAsFreshFunctions(ff1 -- v2.decider.freshFunctions) /* [BRANCH-PARALLELISATION] */
                         v2.decider.declareAndRecordAsFreshMacros(fm1.filter(!v2.decider.freshMacros.contains(_)))  /* [BRANCH-PARALLELISATION] */
-                        v2.decider.assume(pcs.assumptions, Option.when(debugOn)(DebugExp.createInstance("Loop invariant", pcs.assumptionExps)), false)
+                        v2.decider.assume(pcs.assumptions, Option.when(debugOn)(DebugInvariant(invs.headOption.map(_.pos).getOrElse(ast.NoPosition), pcs.assumptionExps)), false)
                         v2.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
                         if (v2.decider.checkSmoke())
                           Success()
@@ -442,7 +442,7 @@ object executor extends ExecutionRules {
         val debugExp = Option.when(debugOn)(ast.NeCmp(x, ast.NullLit()())())
         val debugExpSubst = Option.when(debugOn)(ast.NeCmp(eRcvrNew.get, ast.NullLit()())())
 
-        v.decider.assume(tRcvr !== Null, debugExp, debugExpSubst)
+        v.decider.assume(tRcvr !== Null, Option.when(debugOn)(DebugExp(debugExp, debugExpSubst)))
 
         val eRcvr = Option.when(debugOn)(Seq(x))
         val p = FullPerm
@@ -465,8 +465,7 @@ object executor extends ExecutionRules {
         addFieldPerms(s, fields, v)((s1, v1) => {
           val s1a = s1.copy(g = s1.g + (x, (tRcvr, eRcvrNew)))
           val s1b = if (debugOn) v1.recordHeap(s1a, oldLabel, ExecStmt(stmt), oldPCS) else s1a
-          v1.decider.assume(ts, Option.when(debugOn)(DebugExp.createInstance(
-            Some("Reference Disjointness"), esNew, esNew, InsertionOrderedSet.empty)), enforceAssumption = false)
+          v1.decider.assume(ts, Option.when(debugOn)(DebugReferenceDisjointness(esNew, esNew)), enforceAssumption = false)
           Q(s1b, v1)
         })
 
@@ -615,7 +614,7 @@ object executor extends ExecutionRules {
             permissionSupporter.assertPositive(s2, tPerm, if (debugOn) ePermNew.get else ePerm, pve, v2)((s3, v3) => {
               val wildcards = s3.constrainableARPs -- s1.constrainableARPs
               predicateSupporter.fold(s3, predAcc, tArgs, eArgsNew, tPerm, ePermNew, wildcards, pve, v3)((s4, v4) => {
-                v4.decider.finishDebugSubExp(s"folded ${predAcc.toString}")
+                v4.decider.finishDebugSubExp(children => DebugFold(predAcc, children))
                 val s4a = if (debugOn) v4.finishKeyHeap(s4) else s4
                 Q(s4a, v4)
               })
@@ -636,7 +635,7 @@ object executor extends ExecutionRules {
               val wildcards = s3.constrainableARPs -- s1.constrainableARPs
               predicateSupporter.unfold(s3, predicate, tArgs, eArgsNew, tPerm, ePermNew, wildcards, pve, v3, pa)(
                 (s4, v4) => {
-                  v2.decider.finishDebugSubExp(s"unfolded ${pa.toString}")
+                  v2.decider.finishDebugSubExp(children => DebugUnfold(pa, children))
                   val s4a = if (debugOn) v4.finishKeyHeap(s4) else s4
                   Q(s4a, v4)
                 })
@@ -732,7 +731,7 @@ object executor extends ExecutionRules {
            val eNew = ast.LocalVarWithVersion(simplifyVariableName(t.id.name), typ)(eRhs.pos, eRhs.info, eRhs.errT)
            val exp = ast.EqCmp(ast.LocalVar(name, typ)(), eRhs)(eRhs.pos, eRhs.info, eRhs.errT)
            val expNew = ast.EqCmp(eNew, rhsExpNew.get)()
-           val debugExp = DebugExp.createInstance(exp, expNew)
+           val debugExp = DebugExp(exp, expNew)
            (Some(eNew), Some(debugExp))
          } else {
             (None, None)

@@ -6,7 +6,7 @@
 
 package viper.silicon.supporters
 
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger._
 import viper.silicon.state.terms.{Combine, First, Second, Sort, Term, Unit, sorts}
 import viper.silicon.state.{State, SymbolConverter}
 import viper.silicon.utils.toSf
@@ -158,7 +158,7 @@ class DefaultSnapshotSupporter(symbolConverter: SymbolConverter) extends Snapsho
 
         (snap0, snap1, snap === Combine(snap0, snap1))
       }
-    v.decider.assume(snapshotEq, Option.when(Verifier.config.enableDebugging())(DebugExp.createInstance("Snapshot", true)))
+    v.decider.assume(snapshotEq, Option.when(Verifier.config.enableDebugging())(DebugSnapshot(SnapshotKind.Definition)))
 
     (snap0, snap1)
   }

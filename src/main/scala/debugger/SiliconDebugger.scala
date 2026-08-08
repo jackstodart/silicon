@@ -29,9 +29,9 @@ case class ProofObligation(s: State,
                            preambleAssumptions: Seq[DebugAxiom],
                            branchConditions: Seq[Term],
                            branchConditionExps: Seq[(ast.Exp, ast.Exp)],
-                           assumptionsExp: InsertionOrderedSet[DebugExp],
+                           assumptionsExp: InsertionOrderedSet[DebugNode],
                            assertion: Term,
-                           eAssertion: DebugExp,
+                           eAssertion: DebugNode,
                            timeout: Option[Int],
                            printConfig: DebugExpPrintConfiguration,
                            originalErrorReason: ErrorReason,
@@ -442,10 +442,10 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
     indexOpt match {
       case Some(id) =>
         val toSearch = obl.assumptionsExp.toSeq
-        var found: Option[DebugExp] = None
+        var found: Option[DebugNode] = None
         var i = 0
         while (found.isEmpty && i < toSearch.size) {
-          found = toSearch(i).getExpWithId(id, new mutable.HashSet())
+          found = toSearch(i).getNodeWithId(id, new mutable.HashSet())
           i += 1
         }
         if (found.isDefined) {
@@ -479,7 +479,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       val assumptionE = translateStringToExp(userInput, obl)
       evalAssumption(assumptionE, obl, free, obl.v) match {
         case Some((resS, resT, resE, evalAssumptions)) =>
-          val allAssumptions = obl.assumptionsExp ++ evalAssumptions + DebugExp.createInstance(assumptionE, resE).withTerm(resT)
+          val allAssumptions = obl.assumptionsExp ++ evalAssumptions + DebugExp(assumptionE, resE).withTerm(Some(resT))
           obl.copy(s = resS, assumptionsExp = allAssumptions)
         case None =>
           obl
@@ -506,7 +506,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       })
       verificationResult match {
         case Success() =>
-          obl.copy(assumptionsExp = resV.decider.pcs.assumptionExps, assertion = resT, eAssertion = DebugExp.createInstance(resE, resE), v = resV)
+          obl.copy(assumptionsExp = resV.decider.pcs.assumptionExps, assertion = resT, eAssertion = DebugExp(resE, resE), v = resV)
         case _ =>
           throw new UnknownError("Error while evaluating expression: " + verificationResult.toString)
       }
@@ -557,7 +557,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
     translatePExp(pexp)
   }
 
-  private def evalAssumption(e: ast.Exp, obl: ProofObligation, isFree: Boolean, v: Verifier): Option[(State, Term, ast.Exp, InsertionOrderedSet[DebugExp])] = {
+  private def evalAssumption(e: ast.Exp, obl: ProofObligation, isFree: Boolean, v: Verifier): Option[(State, Term, ast.Exp, InsertionOrderedSet[DebugNode])] = {
     var resT: Term = null
     var resS: State = null
     var resE: ast.Exp = null

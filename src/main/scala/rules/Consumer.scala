@@ -7,7 +7,7 @@
 package viper.silicon.rules
 
 import viper.silicon.Config.JoinMode
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger._
 
 import scala.collection.mutable
 import viper.silver.ast
@@ -412,18 +412,18 @@ object consumer extends ConsumptionRules {
           case Quantification(q, vars, body, trgs, name, isGlob, weight) =>
             val transformed = FunctionPreconditionTransformer.transform(body, s3.program)
             v2.decider.assume(Quantification(q, vars, transformed, trgs, name+"_precondition", isGlob, weight),
-              Option.when(debugOn)(DebugExp.createInstance("Function preconditions hold in quantifier " + eNew.toString, true)))
+              Option.when(debugOn)(DebugQuantifiedFnPreconditions(eNew.get)))
             Quantification(q, vars, Implies(transformed, body), trgs, name, isGlob, weight)
           case _ => t
         }
         v2.decider.assert(termToAssert) {
           case true =>
-            v2.decider.assume(t, Option.when(debugOn)(e), eNew)
+            v2.decider.assume(t, Option.when(debugOn)(DebugExp(e, eNew.get)))
             QS(s3, v2)
           case false =>
             val failure = createFailure(pve dueTo AssertionFalse(e), v2, s3, termToAssert, eNew)
             if (s3.retryLevel == 0 && v2.reportFurtherErrors()){
-              v2.decider.assume(t, Option.when(debugOn)(e), eNew)
+              v2.decider.assume(t, Option.when(debugOn)(DebugExp(e, eNew.get)))
               failure combine QS(s3, v2)
             } else failure}})
     })((s4, v4) => {
