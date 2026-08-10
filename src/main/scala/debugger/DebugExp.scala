@@ -250,8 +250,8 @@ object DebugImplication {
             isInternal: Boolean = false): DebugImplication =
     new DebugImplication(DebugCounter.next(),
                          antecedentTerm,
-                         antecedentExp.map(Simplifier.simplify(_, true)),
-                         antecedentFinalExp.map(Simplifier.simplify(_, true)),
+                         antecedentExp.map(Simplifier.simplify(_, assumeWelldefinedness = true)),
+                         antecedentFinalExp.map(Simplifier.simplify(_, assumeWelldefinedness = true)),
                          children,
                          isInternal)
 }

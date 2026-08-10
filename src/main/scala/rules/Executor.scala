@@ -284,6 +284,14 @@ object executor extends ExecutionRules {
             val edgeConditions = sortedEdges.collect{case ce: cfg.ConditionalEdge[ast.Stmt, ast.Exp] => ce.condition}
                                             .distinct
 
+            /* The loop guard stands for the loop itself, as it does in WhileFailed: the ast.While
+             * node is not part of the CFG, so it is the only node left that points at the loop
+             * rather than at one of its invariants. The negated guard on the exit edge is
+             * synthesised and carries no position, hence the search for one that does. */
+            val loopPos: ast.Position =
+              edgeConditions.map(_.pos).collectFirst{case p: ast.HasLineColumn => p}
+                            .getOrElse(ast.NoPosition)
+
             type PhaseData = (State, RecordedPathConditions, Set[FunctionDecl], Seq[MacroDecl])
             var phase1data: Vector[PhaseData] = Vector.empty
 
@@ -310,7 +318,7 @@ object executor extends ExecutionRules {
                       intermediateResult combine executionFlowController.locally(s2, v1)((s3, v2) => {
                         v2.decider.declareAndRecordAsFreshFunctions(ff1 -- v2.decider.freshFunctions) /* [BRANCH-PARALLELISATION] */
                         v2.decider.declareAndRecordAsFreshMacros(fm1.filter(!v2.decider.freshMacros.contains(_)))  /* [BRANCH-PARALLELISATION] */
-                        v2.decider.assume(pcs.assumptions, Option.when(debugOn)(DebugInvariant(invs.headOption.map(_.pos).getOrElse(ast.NoPosition), pcs.assumptionExps)), false)
+                        v2.decider.assume(pcs.assumptions, Option.when(debugOn)(DebugInvariant(loopPos, pcs.assumptionExps)), false)
                         v2.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
                         if (v2.decider.checkSmoke())
                           Success()
