@@ -34,32 +34,18 @@ object DebugCounter {
  */
 sealed trait DebugNode {
   val id: Int
-
-  /** The term assumed for this node; children carry their own terms. */
-  def term: Option[Term] = None
-
-  /** The assumptions recorded underneath this one. */
-  def children: InsertionOrderedSet[DebugNode] = InsertionOrderedSet.empty
-
-  /** Whether this node is an internal detail, hidden from the user unless explicitly requested. */
-  def isInternal: Boolean = false
-
-  /** The expression shown for this node, if it stands for a source-level expression. */
+  def term: Option[Term]
   def finalExp: Option[ast.Exp] = None
-
-  /** The expression this node was derived from, before any transformation. */
   def originalExp: Option[ast.Exp] = None
-
-  /** Category-specific text describing this node. */
+  def children: InsertionOrderedSet[DebugNode] = InsertionOrderedSet.empty
+  def isInternal: Boolean
   def description: Option[String]
 
-  /**
-   * Returns a copy of this node recording the term that was assumed for it. The decider attaches
-   * the term after the fact because it is the one it actually assumed, which is not the one the
-   * call site passed: assumptions already known to hold are filtered out first. A copy rather than
-   * a mutation because one node may stand for several assumptions (see `producePredicateContents`).
-   */
-  def withTerm(newTerm: Option[Term]): DebugNode
+  /** Returns a copy of this node recording the term that was assumed for it. The decider attaches
+    * the term after the fact because it is the one it actually assumed, which is not the one the
+    * call site passed: assumptions already known to hold are filtered out first.
+    */
+  def withTerm(newTerm: Term): DebugNode
 
   lazy val isGlobal: Boolean = {
     val thisGlobal = term match {
@@ -113,7 +99,7 @@ sealed trait DebugNode {
   }
 
   def getTopLevelString(currDepth: Int, config: DebugExpPrintConfiguration): String = {
-    val toDisplay = if (config.printInternalTermRepresentation) term else finalExp
+    val toDisplay = if (config.printInternalTermRepresentation) Some(term) else finalExp
     val delimiter = if (toDisplay.isDefined && description.isDefined) ": " else ""
     "\n\t" + ("\t" * currDepth) + "[" + id + "] " + description.getOrElse("") + delimiter + toDisplay.getOrElse("")
   }
@@ -160,8 +146,8 @@ class DebugExp(val id: Int,
 
   def description: Option[String] = None
 
-  def withTerm(newTerm: Option[Term]): DebugExp =
-    new DebugExp(id, originalExp, finalExp, newTerm, isInternal)
+  def withTerm(newTerm: Term): DebugExp =
+    new DebugExp(id, originalExp, finalExp, Some(newTerm), isInternal)
 }
 
 object DebugExp {
@@ -188,8 +174,8 @@ class DebugPermissionPositive(val id: Int,
 
   def description: Option[String] = Some(s"$permExp > none")
 
-  def withTerm(newTerm: Option[Term]): DebugPermissionPositive =
-    new DebugPermissionPositive(id, permExp, newTerm)
+  def withTerm(newTerm: Term): DebugPermissionPositive =
+    new DebugPermissionPositive(id, permExp, Some(newTerm))
 }
 
 object DebugPermissionPositive {
@@ -216,7 +202,7 @@ class DebugImplication(val id: Int,
   override def term: Option[Term] = antecedentTerm
 
   /* The antecedent is the term this node stands for, so it is never overwritten. */
-  def withTerm(newTerm: Option[Term]): DebugImplication = this
+  def withTerm(newTerm: Term): DebugImplication = this
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugImplication =
     new DebugImplication(id, antecedentTerm, antecedentExp, antecedentFinalExp, newChildren, isInternal)
@@ -267,11 +253,12 @@ class DebugQuantifier(val id: Int,
                       override val children: InsertionOrderedSet[DebugNode]) extends DebugGroup {
 
   def description: Option[String] = None
+  override val term: Option[Term] = None
 
   def isUniversal: Boolean = quantifier == "QA"
 
   /* The term is the quantification built from the children, so it is never overwritten. */
-  def withTerm(newTerm: Option[Term]): DebugQuantifier = this
+  def withTerm(newTerm: Term): DebugQuantifier = this
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugQuantifier =
     new DebugQuantifier(id, isInternal, quantifier, qvarsExp, qvarsTerm, triggersExp, triggersTerm, newChildren)
@@ -316,14 +303,15 @@ class DebugInvariant(val id: Int,
                      override val term: Option[Term] = None) extends DebugGroup {
 
   def description: Option[String] = Some(s"Loop invariant ($posString)")
+  override val isInternal: Boolean = false
 
   private def posString: String = pos match {
     case lc: ast.HasLineColumn => s"${lc.line}.${lc.column}"
     case _ => "position unknown"
   }
 
-  def withTerm(newTerm: Option[Term]): DebugInvariant =
-    new DebugInvariant(id, pos, children, newTerm)
+  def withTerm(newTerm: Term): DebugInvariant =
+    new DebugInvariant(id, pos, children, Some(newTerm))
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugInvariant =
     new DebugInvariant(id, pos, newChildren, term)
@@ -340,9 +328,10 @@ class DebugBranchJoin(val id: Int,
                       override val term: Option[Term] = None) extends DebugGroup {
 
   def description: Option[String] = Some("Joined path conditions")
+  override def isInternal: Boolean = false
 
-  def withTerm(newTerm: Option[Term]): DebugBranchJoin =
-    new DebugBranchJoin(id, children, newTerm)
+  def withTerm(newTerm: Term): DebugBranchJoin =
+    new DebugBranchJoin(id, children, Some(newTerm))
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugBranchJoin =
     new DebugBranchJoin(id, newChildren, term)
@@ -360,9 +349,10 @@ class DebugFeasibleBranches(val id: Int,
                             override val term: Option[Term] = None) extends DebugNode {
 
   def description: Option[String] = Some("Feasible branches")
+  override def isInternal: Boolean = true
 
-  def withTerm(newTerm: Option[Term]): DebugFeasibleBranches =
-    new DebugFeasibleBranches(id, originalExp, finalExp, newTerm)
+  def withTerm(newTerm: Term): DebugFeasibleBranches =
+    new DebugFeasibleBranches(id, originalExp, finalExp, Some(newTerm))
 }
 
 object DebugFeasibleBranches {
@@ -377,9 +367,10 @@ class DebugLetBinding(val id: Int,
                       override val term: Option[Term] = None) extends DebugGroup {
 
   def description: Option[String] = Some(s"Binding of let variable ${boundVar.name}")
+  override def isInternal: Boolean = false
 
-  def withTerm(newTerm: Option[Term]): DebugLetBinding =
-    new DebugLetBinding(id, boundVar, children, newTerm)
+  def withTerm(newTerm: Term): DebugLetBinding =
+    new DebugLetBinding(id, boundVar, children, Some(newTerm))
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugLetBinding =
     new DebugLetBinding(id, boundVar, newChildren, term)
@@ -396,9 +387,10 @@ class DebugPathConditionDelta(val id: Int,
                               override val term: Option[Term] = None) extends DebugGroup {
 
   def description: Option[String] = Some("Path conditions of evaluation")
+  override def isInternal: Boolean = true
 
-  def withTerm(newTerm: Option[Term]): DebugPathConditionDelta =
-    new DebugPathConditionDelta(id, children, newTerm)
+  def withTerm(newTerm: Term): DebugPathConditionDelta =
+    new DebugPathConditionDelta(id, children, Some(newTerm))
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugPathConditionDelta =
     new DebugPathConditionDelta(id, newChildren, term)
@@ -408,10 +400,6 @@ object DebugPathConditionDelta {
   def apply(children: InsertionOrderedSet[DebugNode]): DebugPathConditionDelta =
     new DebugPathConditionDelta(DebugCounter.next(), children)
 }
-
-/* -------------------------------------------------------------------------------------------- *
- * Functions and predicates                                                                       *
- * -------------------------------------------------------------------------------------------- */
 
 /** The assumption that a function's precondition holds at one of its applications. */
 class DebugFnPrecondition(val id: Int,
@@ -428,8 +416,10 @@ class DebugFnPrecondition(val id: Int,
     Some(s"Precondition of $fnName$args holds$where")
   }
 
-  def withTerm(newTerm: Option[Term]): DebugFnPrecondition =
-    new DebugFnPrecondition(id, fnName, argsExp, argsTerm, heapLabel, children, newTerm)
+  override def isInternal: Boolean = true
+
+  def withTerm(newTerm: Term): DebugFnPrecondition =
+    new DebugFnPrecondition(id, fnName, argsExp, argsTerm, heapLabel, children, Some(newTerm))
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugFnPrecondition =
     new DebugFnPrecondition(id, fnName, argsExp, argsTerm, heapLabel, newChildren, term)
@@ -444,7 +434,7 @@ object DebugFnPrecondition {
     new DebugFnPrecondition(DebugCounter.next(), fnName, argsExp, argsTerm, heapLabel, children)
 }
 
-/** The assumption that the preconditions of the functions inside a quantifier hold. */
+/*/** The assumption that the preconditions of the functions inside a quantifier hold. */
 class DebugQuantifiedFnPreconditions(val id: Int,
                                      val quantifiedExp: ast.Exp,
                                      override val term: Option[Term] = None) extends DebugNode {
@@ -460,7 +450,7 @@ class DebugQuantifiedFnPreconditions(val id: Int,
 object DebugQuantifiedFnPreconditions {
   def apply(quantifiedExp: ast.Exp): DebugQuantifiedFnPreconditions =
     new DebugQuantifiedFnPreconditions(DebugCounter.next(), quantifiedExp)
-}
+}*/
 
 /** Assumptions made while folding a predicate. */
 class DebugFold(val id: Int,
@@ -470,8 +460,10 @@ class DebugFold(val id: Int,
 
   def description: Option[String] = Some(s"Folded $predicateExp")
 
-  def withTerm(newTerm: Option[Term]): DebugFold =
-    new DebugFold(id, predicateExp, children, newTerm)
+  override def isInternal: Boolean = false
+
+  def withTerm(newTerm: Term): DebugFold =
+    new DebugFold(id, predicateExp, children, Some(newTerm))
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugFold =
     new DebugFold(id, predicateExp, newChildren, term)
@@ -491,8 +483,10 @@ class DebugUnfold(val id: Int,
 
   def description: Option[String] = Some(s"Unfolded $predicateExp")
 
-  def withTerm(newTerm: Option[Term]): DebugUnfold =
-    new DebugUnfold(id, predicateExp, children, newTerm)
+  override def isInternal: Boolean = false
+
+  def withTerm(newTerm: Term): DebugUnfold =
+    new DebugUnfold(id, predicateExp, children, Some(newTerm))
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugUnfold =
     new DebugUnfold(id, predicateExp, newChildren, term)
@@ -517,8 +511,10 @@ class DebugUnfolding(val id: Int,
     Some(s"Unfolding of $predicateName(${argsExp.mkString(", ")})$where")
   }
 
-  def withTerm(newTerm: Option[Term]): DebugUnfolding =
-    new DebugUnfolding(id, predicateName, argsExp, heapLabel, children, newTerm)
+  override def isInternal: Boolean = false
+
+  def withTerm(newTerm: Term): DebugUnfolding =
+    new DebugUnfolding(id, predicateName, argsExp, heapLabel, children, Some(newTerm))
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugUnfolding =
     new DebugUnfolding(id, predicateName, argsExp, heapLabel, newChildren, term)
@@ -533,7 +529,7 @@ object DebugUnfolding {
 }
 
 /** Assumptions taken from the body of a predicate that has just been unfolded. */
-class DebugUnfoldedPredicateBody(val id: Int,
+/*class DebugUnfoldedPredicateBody(val id: Int,
                                  override val term: Option[Term] = None) extends DebugNode {
 
   def description: Option[String] = Some("Assumption from unfolded predicate body")
@@ -545,7 +541,7 @@ class DebugUnfoldedPredicateBody(val id: Int,
 object DebugUnfoldedPredicateBody {
   def apply(): DebugUnfoldedPredicateBody =
     new DebugUnfoldedPredicateBody(DebugCounter.next())
-}
+}*/
 
 /** Assumptions made while taking permissions to a resource out of the heap. */
 class DebugConsumePermissions(val id: Int,
@@ -555,8 +551,10 @@ class DebugConsumePermissions(val id: Int,
 
   def description: Option[String] = Some(s"Consume permissions for $resource")
 
-  def withTerm(newTerm: Option[Term]): DebugConsumePermissions =
-    new DebugConsumePermissions(id, resource, children, newTerm)
+  override def isInternal: Boolean = true
+
+  def withTerm(newTerm: Term): DebugConsumePermissions =
+    new DebugConsumePermissions(id, resource, children, Some(newTerm))
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugConsumePermissions =
     new DebugConsumePermissions(id, resource, newChildren, term)
@@ -602,19 +600,19 @@ object SnapshotKind {
 /** An assumption defining or relating the snapshots that record the values held by a resource. */
 class DebugSnapshot(val id: Int,
                     val kind: SnapshotKind,
-                    override val isInternal: Boolean,
                     override val term: Option[Term] = None) extends DebugNode {
 
   def description: Option[String] = Some(kind.description)
 
-  def withTerm(newTerm: Option[Term]): DebugSnapshot =
-    new DebugSnapshot(id, kind, isInternal, newTerm)
+  override def isInternal: Boolean = true
+
+  def withTerm(newTerm: Term): DebugSnapshot =
+    new DebugSnapshot(id, kind, Some(newTerm))
 }
 
 object DebugSnapshot {
-  def apply(kind: SnapshotKind,
-            isInternal: Boolean = true): DebugSnapshot =
-    new DebugSnapshot(DebugCounter.next(), kind, isInternal)
+  def apply(kind: SnapshotKind): DebugSnapshot =
+    new DebugSnapshot(DebugCounter.next(), kind)
 }
 
 /* -------------------------------------------------------------------------------------------- *
@@ -663,8 +661,8 @@ class DebugSnapshotMapDefinition(val id: Int,
 
   def description: Option[String] = Some(kind.description)
 
-  def withTerm(newTerm: Option[Term]): DebugSnapshotMapDefinition =
-    new DebugSnapshotMapDefinition(id, kind, newTerm)
+  def withTerm(newTerm: Term): DebugSnapshotMapDefinition =
+    new DebugSnapshotMapDefinition(id, kind, Some(newTerm))
 }
 
 object DebugSnapshotMapDefinition {
@@ -706,7 +704,6 @@ class DebugResourceTrigger(val id: Int,
                            val resourceName: Option[String],
                            val argsExp: Seq[ast.Exp],
                            val argsTerm: Seq[Term],
-                           override val isInternal: Boolean,
                            override val originalExp: Option[ast.Exp] = None,
                            override val finalExp: Option[ast.Exp] = None,
                            override val term: Option[Term] = None) extends DebugNode {
@@ -721,8 +718,10 @@ class DebugResourceTrigger(val id: Int,
     Some(s"${kind.description}$target")
   }
 
-  def withTerm(newTerm: Option[Term]): DebugResourceTrigger =
-    new DebugResourceTrigger(id, kind, resourceName, argsExp, argsTerm, isInternal, originalExp, finalExp, newTerm)
+  override def isInternal: Boolean = true
+
+  def withTerm(newTerm: Term): DebugResourceTrigger =
+    new DebugResourceTrigger(id, kind, resourceName, argsExp, argsTerm, originalExp, finalExp, Some(newTerm))
 }
 
 object DebugResourceTrigger {
@@ -730,13 +729,12 @@ object DebugResourceTrigger {
             resourceName: Option[String] = None,
             argsExp: Seq[ast.Exp] = Seq.empty,
             argsTerm: Seq[Term] = Seq.empty,
-            isInternal: Boolean = true,
             resourceExp: Option[ast.Exp] = None): DebugResourceTrigger =
-    new DebugResourceTrigger(DebugCounter.next(), kind, resourceName, argsExp, argsTerm, isInternal, resourceExp, resourceExp)
+    new DebugResourceTrigger(DebugCounter.next(), kind, resourceName, argsExp, argsTerm, resourceExp, resourceExp)
 
   /** A field trigger, whose target is written as `receiver.field` rather than as an application. */
   def field(receiver: ast.Exp, fieldName: String): DebugResourceTrigger =
-    apply(TriggerKind.Field, Some(s"$receiver.$fieldName"), isInternal = false)
+    apply(TriggerKind.Field, Some(s"$receiver.$fieldName"))
 }
 
 /* -------------------------------------------------------------------------------------------- *
@@ -775,8 +773,8 @@ class DebugInverseFunctions(val id: Int,
 
   def description: Option[String] = Some(kind.description)
 
-  def withTerm(newTerm: Option[Term]): DebugInverseFunctions =
-    new DebugInverseFunctions(id, kind, newTerm)
+  def withTerm(newTerm: Term): DebugInverseFunctions =
+    new DebugInverseFunctions(id, kind, Some(newTerm))
 }
 
 object DebugInverseFunctions {
@@ -795,8 +793,8 @@ class DebugInjectivityCheck(val id: Int,
 
   def description: Option[String] = Some("QP receiver injectivity check is well-defined")
 
-  def withTerm(newTerm: Option[Term]): DebugInjectivityCheck =
-    new DebugInjectivityCheck(id, newTerm)
+  def withTerm(newTerm: Term): DebugInjectivityCheck =
+    new DebugInjectivityCheck(id, Some(newTerm))
 }
 
 object DebugInjectivityCheck {
@@ -812,8 +810,8 @@ class DebugChunkAlias(val id: Int,
 
   def description: Option[String] = Some("Chunks alias")
 
-  def withTerm(newTerm: Option[Term]): DebugChunkAlias =
-    new DebugChunkAlias(id, newTerm)
+  def withTerm(newTerm: Term): DebugChunkAlias =
+    new DebugChunkAlias(id, Some(newTerm))
 }
 
 object DebugChunkAlias {
@@ -821,10 +819,9 @@ object DebugChunkAlias {
     new DebugChunkAlias(DebugCounter.next())
 }
 
-/**
- * Well-definedness conditions collected while evaluating the body of a quantifier. They are split
- * into those that hold globally and those that only hold under the current branch conditions.
- */
+/** Well-definedness conditions collected while evaluating the body of a quantifier. They are split
+  * into those that hold globally and those that only hold under the current branch conditions.
+  */
 class DebugAuxiliaryTerms(val id: Int,
                           val areGlobal: Boolean,
                           val fromEvaluation: Boolean,
@@ -837,8 +834,10 @@ class DebugAuxiliaryTerms(val id: Int,
     Some(s"Nested auxiliary terms: $scope$origin")
   }
 
-  def withTerm(newTerm: Option[Term]): DebugAuxiliaryTerms =
-    new DebugAuxiliaryTerms(id, areGlobal, fromEvaluation, children, newTerm)
+  override def isInternal: Boolean = true
+
+  def withTerm(newTerm: Term): DebugAuxiliaryTerms =
+    new DebugAuxiliaryTerms(id, areGlobal, fromEvaluation, children, Some(newTerm))
 
   def withChildren(newChildren: InsertionOrderedSet[DebugNode]): DebugAuxiliaryTerms =
     new DebugAuxiliaryTerms(id, areGlobal, fromEvaluation, newChildren, term)
@@ -863,8 +862,10 @@ class DebugReferenceDisjointness(val id: Int,
 
   def description: Option[String] = Some("Reference disjointness")
 
-  def withTerm(newTerm: Option[Term]): DebugReferenceDisjointness =
-    new DebugReferenceDisjointness(id, originalExp, finalExp, newTerm)
+  override def isInternal: Boolean = false
+
+  def withTerm(newTerm: Term): DebugReferenceDisjointness =
+    new DebugReferenceDisjointness(id, originalExp, finalExp, Some(newTerm))
 }
 
 object DebugReferenceDisjointness {
@@ -880,8 +881,8 @@ class DebugHavoc(val id: Int,
 
   def description: Option[String] = Some("Havoc axiom")
 
-  def withTerm(newTerm: Option[Term]): DebugHavoc =
-    new DebugHavoc(id, newTerm)
+  def withTerm(newTerm: Term): DebugHavoc =
+    new DebugHavoc(id, Some(newTerm))
 }
 
 object DebugHavoc {
@@ -905,8 +906,10 @@ class DebugFailedAssertion(val id: Int,
 
   def description: Option[String] = assertionDescription
 
-  def withTerm(newTerm: Option[Term]): DebugFailedAssertion =
-    new DebugFailedAssertion(id, assertionDescription, originalExp, finalExp, newTerm)
+  override def isInternal: Boolean = false
+
+  def withTerm(newTerm: Term): DebugFailedAssertion =
+    new DebugFailedAssertion(id, assertionDescription, originalExp, finalExp, Some(newTerm))
 }
 
 object DebugFailedAssertion {
@@ -925,8 +928,10 @@ class DebugMissingTerm(val id: Int,
   def description: Option[String] =
     Some(s"Asserted term for '$missingTermDescription' not available, substituting false.")
 
-  def withTerm(newTerm: Option[Term]): DebugMissingTerm =
-    new DebugMissingTerm(id, missingTermDescription, newTerm)
+  override def isInternal: Boolean = true
+
+  def withTerm(newTerm: Term): DebugMissingTerm =
+    new DebugMissingTerm(id, missingTermDescription, Some(newTerm))
 }
 
 object DebugMissingTerm {

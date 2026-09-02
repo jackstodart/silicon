@@ -479,7 +479,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       val assumptionE = translateStringToExp(userInput, obl)
       evalAssumption(assumptionE, obl, free, obl.v) match {
         case Some((resS, resT, resE, evalAssumptions)) =>
-          val allAssumptions = obl.assumptionsExp ++ evalAssumptions + DebugExp(assumptionE, resE).withTerm(Some(resT))
+          val allAssumptions = obl.assumptionsExp ++ evalAssumptions + DebugExp(assumptionE, resE).withTerm(resT)
           obl.copy(s = resS, assumptionsExp = allAssumptions)
         case None =>
           obl

@@ -1434,7 +1434,8 @@ object evaluator extends EvaluationRules {
         Success()
       })
     }
-    v.decider.assume(triggerAxioms, Option.when(debugOn)(DebugResourceTrigger(TriggerKind.Heap, argsExp = exps, isInternal = false)), enforceAssumption = false)
+    v.decider.assume(triggerAxioms,
+      Option.when(debugOn)(DebugResourceTrigger(TriggerKind.Heap, argsExp = exps)), enforceAssumption = false)
     var fr = s.functionRecorder
     for (smDef <- smDefs){
       fr = fr.recordFvfAndDomain(smDef)

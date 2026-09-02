@@ -289,8 +289,16 @@ object magicWandSupporter extends SymbolicExecutionRules {
         if (newChildren.nonEmpty || newTerm.isDefined) {
           val newDebugExp = if (newChildren != curChildrenSeq || newTerm != de.term)
             de match {
-              case group: DebugGroup => group.withChildren(InsertionOrderedSet(newChildren)).withTerm(newTerm)
-              case leaf => leaf.withTerm(newTerm)
+              case group: DebugGroup =>
+                newTerm match {
+                  case Some(value) => group.withChildren(InsertionOrderedSet(newChildren)).withTerm(value)
+                  case None => group.withChildren(InsertionOrderedSet(newChildren))
+                }
+              case leaf =>
+                newTerm match {
+                  case Some(t) => leaf.withTerm(t)
+                  case None => leaf
+                }
             }
           else
             de
@@ -334,7 +342,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
         val (ch, groundPcs, groundPcsExp) = v2.heapSupporter.createWandChunk(s2, wand, tArgs, eArgsNew, wandSnapshot, v2)
 
         val tPcs = (pcsQuantified +: pcsWithoutFreshSnapRoot) ++ groundPcs
-        val ePcs = Option.when(debugOn)(DebugSnapshot(SnapshotKind.MagicWandFunction).withTerm(Some(pcsQuantified)) +: (pcsWithoutExp.get ++ groundPcsExp.get))
+        val ePcs = Option.when(debugOn)(DebugSnapshot(SnapshotKind.MagicWandFunction).withTerm(pcsQuantified) +: (pcsWithoutExp.get ++ groundPcsExp.get))
 
         val s3 = s2.copy(packagingWandSnapshots = s2.packagingWandSnapshots.filterNot(_._1 == freshSnapRoot))
         appendToResults(s3, ch, v2.decider.pcs.after(preMark), (tPcs, ePcs), v2)

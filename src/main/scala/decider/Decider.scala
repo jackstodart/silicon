@@ -288,7 +288,7 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
 
 
       if (debugMode) {
-        filteredAssumptions foreach (a => addDebugExp(a._2.get.withTerm(Some(a._1))))
+        filteredAssumptions foreach (a => addDebugExp(a._2.get.withTerm(a._1)))
       }
 
       if (filteredAssumptions.nonEmpty) assumeWithoutSmokeChecks(filteredAssumptions map (_._1), isDefinition=isDefinition)
@@ -307,7 +307,7 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
         else terms filterNot isKnownToBeTrue
 
       if (debugMode && filteredTerms.nonEmpty) {
-        addDebugExp(debugExp.get.withTerm(Some(And(filteredTerms))))
+        addDebugExp(debugExp.get.withTerm(And(filteredTerms)))
       }
 
       if (filteredTerms.nonEmpty) assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTerms))
