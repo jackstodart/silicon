@@ -133,11 +133,10 @@ sealed trait DebugGroup extends DebugNode {
  * Plain assumptions                                                                              *
  * -------------------------------------------------------------------------------------------- */
 
-/**
- * An assumption that stands directly for a source-level expression, with no further structure.
- * This is the category for assumptions the user wrote themselves, as opposed to the ones Silicon
- * derives while reasoning about them.
- */
+/** An assumption that stands directly for a source-level expression, with no further structure.
+  * This is the category for assumptions the user wrote themselves, as opposed to the ones Silicon
+  * derives while reasoning about them.
+  */
 class DebugExp(val id: Int,
                override val originalExp: Option[ast.Exp],
                override val finalExp: Option[ast.Exp],
@@ -430,8 +429,9 @@ object DebugFnPrecondition {
             argsExp: Seq[ast.Exp],
             argsTerm: Seq[Term] = Seq.empty,
             heapLabel: Option[String] = None,
-            children: InsertionOrderedSet[DebugNode] = InsertionOrderedSet.empty): DebugFnPrecondition =
-    new DebugFnPrecondition(DebugCounter.next(), fnName, argsExp, argsTerm, heapLabel, children)
+            children: InsertionOrderedSet[DebugNode] = InsertionOrderedSet.empty,
+            term: Option[Term] = None): DebugFnPrecondition =
+    new DebugFnPrecondition(DebugCounter.next(), fnName, argsExp, argsTerm, heapLabel, children, term)
 }
 
 /*/** The assumption that the preconditions of the functions inside a quantifier hold. */

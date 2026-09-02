@@ -7,6 +7,7 @@
 package viper.silicon.rules
 
 import viper.silicon.Config.JoinMode
+import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger._
 
 import scala.collection.mutable
@@ -411,8 +412,12 @@ object consumer extends ConsumptionRules {
         val termToAssert = t match {
           case Quantification(q, vars, body, trgs, name, isGlob, weight) =>
             val transformed = FunctionPreconditionTransformer.transform(body, s3.program)
-            v2.decider.assume(Quantification(q, vars, transformed, trgs, name+"_precondition", isGlob, weight),
-              Option.when(debugOn)(DebugFnPrecondition(name, Seq(), Seq())))
+            val debugExp = if (debugOn) {
+              val debugExpPre = DebugFnPrecondition(name, Seq(), Seq(), term = Some(t))
+              val quant = DebugQuantifier(isInternal = true, q.toString, Seq(), vars, Seq(), trgs, InsertionOrderedSet(debugExpPre))
+              Some(quant)
+            } else None
+            v2.decider.assume(Quantification(q, vars, transformed, trgs, name+"_precondition", isGlob, weight), debugExp)
             Quantification(q, vars, Implies(transformed, body), trgs, name, isGlob, weight)
           case _ => t
         }
