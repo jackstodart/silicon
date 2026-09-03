@@ -281,11 +281,12 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
     def assume(assumptions: Iterable[(Term, Option[DebugNode])]): Unit =
       assume(InsertionOrderedSet(assumptions), false)
 
-    def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugNode])], enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit = {
+    def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugNode])],
+               enforceAssumption: Boolean = false,
+               isDefinition: Boolean = false): Unit = {
       val filteredAssumptions =
         if (enforceAssumption) assumptions
         else assumptions filterNot (a => isKnownToBeTrue(a._1))
-
 
       if (debugMode) {
         filteredAssumptions foreach (a => addDebugExp(a._2.get.withTerm(a._1)))

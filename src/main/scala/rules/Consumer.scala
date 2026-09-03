@@ -413,11 +413,11 @@ object consumer extends ConsumptionRules {
           case Quantification(q, vars, body, trgs, name, isGlob, weight) =>
             val transformed = FunctionPreconditionTransformer.transform(body, s3.program)
             val debugExp = if (debugOn) {
-              val debugExpPre = DebugFnPrecondition(name, Seq(), Seq(), term = Some(t))
+              val debugExpPre = DebugFnPrecondition(name, Seq(), Seq(), term = Some(transformed))
               val quant = DebugQuantifier(isInternal = true, q.toString, Seq(), vars, Seq(), trgs, InsertionOrderedSet(debugExpPre))
               Some(quant)
             } else None
-            v2.decider.assume(Quantification(q, vars, transformed, trgs, name+"_precondition", isGlob, weight), debugExp)
+            v2.decider.assume(Quantification(q, vars, transformed, trgs, name, isGlob, weight), debugExp)
             Quantification(q, vars, Implies(transformed, body), trgs, name, isGlob, weight)
           case _ => t
         }
