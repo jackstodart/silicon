@@ -10,13 +10,14 @@ import viper.silicon
 import viper.silicon.Config.JoinMode
 import viper.silicon.debugger._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.TriggerKind.Predicate
 import viper.silicon.interfaces.VerificationResult
 import viper.silicon.interfaces.state.{ChunkIdentifer, GeneralChunk, NonQuantifiedChunk}
 import viper.silicon.resources.FieldID
 import viper.silicon.state._
 import viper.silicon.state.terms._
 import viper.silicon.state.terms.predef.`?r`
-import viper.silicon.supporters.{PredicateBranchNode, PredicateLeafNode, PredicateContentsTree}
+import viper.silicon.supporters.{PredicateBranchNode, PredicateContentsTree, PredicateLeafNode}
 import viper.silicon.utils.toSf
 import viper.silicon.verifier.Verifier
 import viper.silver.ast
@@ -88,8 +89,9 @@ object predicateSupporter extends PredicateSupportRules {
         if (!Verifier.config.disableFunctionUnfoldTrigger()) {
           val predTrigger = App(s2.predicateData(predicate.name).triggerFunction,
             v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, s2.h) +: tArgs)
-          val eArgsString = eArgs.mkString(", ")
-          v2.decider.assume(predTrigger, Option.when(debugOn)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eArgsString))")))
+          v2.decider.assume(predTrigger, Option.when(debugOn)(
+            DebugResourceTrigger(predTrigger, TriggerKind.Predicate, Some(predicate.name))
+            ))
         }
         val s2a = v2.heapSupporter.triggerResourceIfNeeded(s2, pa, tArgs, eArgs, v2)
         Q(s2a, v2)
@@ -213,8 +215,9 @@ object predicateSupporter extends PredicateSupportRules {
             val predicateTrigger =
               App(s2.predicateData(predicate.name).triggerFunction,
                 v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, hPreUnfold) +: tArgs)
-            val eargs = eArgs.mkString(", ")
-            v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eargs))")))
+            v2.decider.assume(predicateTrigger, Option.when(debugOn)(
+              DebugResourceTrigger(predicateTrigger, TriggerKind.Predicate, Some(predicate.name), eArgs.getOrElse(Seq))
+            ))
           }
           Q(s2.copy(g = s.g,
             permissionScalingFactor = s.permissionScalingFactor,
@@ -228,8 +231,9 @@ object predicateSupporter extends PredicateSupportRules {
             val predicateTrigger =
               App(s2.predicateData(predicate.name).triggerFunction,
                 v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, hPreUnfold) +: tArgs)
-            val eargs = eArgs.mkString(", ")
-            v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eargs))")))
+            v2.decider.assume(predicateTrigger, Option.when(debugOn)(
+              DebugResourceTrigger(predicateTrigger, TriggerKind.Predicate, Some(predicate.name), eArgs.getOrElse(Seq()))
+            ))
           }
           Q(s2.copy(g = s.g,
             permissionScalingFactor = s.permissionScalingFactor,

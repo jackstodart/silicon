@@ -417,23 +417,24 @@ object consumer extends ConsumptionRules {
         val termToAssert = t match {
           case Quantification(q, vars, body, trgs, name, isGlob, weight) =>
             val transformed = FunctionPreconditionTransformer.transform(body, s2.program)
-            val debugExp = if (debugOn) {
-              val debugExpPre = DebugFnPrecondition(name, Seq(), Seq(), term = Some(transformed))
-              val quant = DebugQuantifier(isInternal = true, q.toString, Seq(), vars, Seq(), trgs, InsertionOrderedSet(debugExpPre))
-              Some(quant)
-            } else None
-            v2.decider.assume(Quantification(q, vars, transformed, trgs, name+"_precondition", isGlob, weight), debugExp)
+              // TODO: this should be assumed already in auxiliaries?
+//            val debugExp = if (debugOn) {
+//              val debugExpPre = DebugFnPrecondition(name, Seq(), Seq(), term = Some(transformed))
+//              val quant = DebugQuantifier(isInternal = true, q.toString, Seq(), vars, Seq(), trgs, InsertionOrderedSet(debugExpPre))
+//              Some(quant)
+//            } else None
+            v2.decider.assume(Quantification(q, vars, transformed, trgs, name+"_precondition", isGlob, weight), None)
             Quantification(q, vars, Implies(transformed, body), trgs, name, isGlob, weight)
           case _ => t
         }
         v2.decider.assert(termToAssert) {
           case true =>
-            v2.decider.assume(t, Option.when(debugOn)(DebugExp(e, eNew.get)))
+            v2.decider.assume(t, Option.when(debugOn)(DebugExp(t, e, eNew.get, isInternal = false)))
             QS(s2, v2)
           case false =>
             val failure = createFailure(pve dueTo AssertionFalse(e), v2, s2, termToAssert, eNew)
             if (s2.retryLevel == 0 && v2.reportFurtherErrors()){
-              v2.decider.assume(t, Option.when(debugOn)(DebugExp(e, eNew.get)))
+              v2.decider.assume(t, Option.when(debugOn)(DebugExp(t, e, eNew.get, isInternal = false)))
               failure combine QS(s2, v2)
             } else failure}})
     })((s4, v4) => {

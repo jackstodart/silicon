@@ -30,8 +30,7 @@ case class ProofObligation(s: State,
                            branchConditions: Seq[Term],
                            branchConditionExps: Seq[(ast.Exp, ast.Exp)],
                            assumptionsExp: InsertionOrderedSet[DebugNode],
-                           assertion: Term,
-                           eAssertion: DebugNode,
+                           assertion: DebugFailedAssertion,
                            timeout: Option[Int],
                            printConfig: DebugExpPrintConfiguration,
                            originalErrorReason: ErrorReason,
@@ -40,7 +39,11 @@ case class ProofObligation(s: State,
                           ){
 
   def removeAssumptions(ids: Seq[Int]): ProofObligation = {
-    val newAssumptionsExp = assumptionsExp.filter(a => !ids.contains(a.id)).map(c => c.removeChildrenById(ids))
+    val newAssumptionsExp = assumptionsExp.filter(a => !ids.contains(a.id)).map {
+      case g: DebugGroup => g.removeChildrenById(ids)
+      case a: DebugAssumption => a
+    }
+      // c => c.removeChildrenById(ids))
     this.copy(assumptionsExp = newAssumptionsExp)
   }
 
@@ -225,11 +228,8 @@ case class ProofObligation(s: State,
   }
 
   private def assertionString: String = {
-    if (eAssertion.finalExp.isDefined){
-      s"Assertion:\n\t$eAssertion\n\n"
-    } else {
-      eAssertion.description.get
-    }
+    if (assertion.finalExp.isDefined) s"Assertion:\n\t$assertion\n\n"
+    else assertion.description.get
   }
 
   override def toString: String = {
@@ -282,7 +282,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
   private def initializeAndDebugObligation(oblOption: Option[ProofObligation]): Unit = {
     oblOption match {
       case Some(obl) =>
-        initTypechecker(obl, obl.eAssertion.finalExp)
+        initTypechecker(obl, obl.assertion.finalExp)
         val obl1 = initVerifier(obl, "Z3", Verifier.config.proverArgs)
         debugProofObligation(obl1)
       case None =>
@@ -308,7 +308,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
 
       val obl = Some(ProofObligation(failureContext.state.get, failureContext.verifier.get, failureContext.proverDecls, failureContext.preambleAssumptions,
         failureContext.branchConditions, failureContext.branchConditionExps, failureContext.assumptions,
-        failureContext.failedAssertion, failureContext.failedAssertionExp, None,
+        failureContext.debugFailedAssertion, None,
         new DebugExpPrintConfiguration, currResult.message.reason,
         new DebugResolver(this.pprogram, this.resolver.names), new DebugTranslator(this.pprogram, translator.getMembers())))
       println(s"Current obligation:\n${obl.get}")
@@ -449,10 +449,10 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
           i += 1
         }
         if (found.isDefined) {
-          val filteredChildren = found.get.children.filter(d => !d.isInternal || obl.printConfig.isPrintInternalEnabled)
-          if (filteredChildren.nonEmpty) {
-            println(s"${filteredChildren.foldLeft[String]("")((s, de) => s + de.toString(obl.printConfig))}\n\n")
-          }
+          // val filteredChildren = found.get.children.filter(d => !d.isInternal || obl.printConfig.isPrintInternalEnabled)
+          // if (filteredChildren.nonEmpty) {
+          //   println(s"${filteredChildren.foldLeft[String]("")((s, de) => s + de.toString(obl.printConfig))}\n\n")
+          // }
         } else {
           println("Assumption not found")
         }
@@ -479,7 +479,8 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       val assumptionE = translateStringToExp(userInput, obl)
       evalAssumption(assumptionE, obl, free, obl.v) match {
         case Some((resS, resT, resE, evalAssumptions)) =>
-          val allAssumptions = obl.assumptionsExp ++ evalAssumptions + DebugExp(assumptionE, resE).withTerm(resT)
+          val allAssumptions = obl.assumptionsExp ++ evalAssumptions +
+            DebugExp(resT, assumptionE, resE, isInternal = false)
           obl.copy(s = resS, assumptionsExp = allAssumptions)
         case None =>
           obl
@@ -506,7 +507,8 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       })
       verificationResult match {
         case Success() =>
-          obl.copy(assumptionsExp = resV.decider.pcs.assumptionExps, assertion = resT, eAssertion = DebugExp(resE, resE), v = resV)
+          val newAssertion = DebugFailedAssertion(resT, Some(resE), Some(resE))
+          obl.copy(assumptionsExp = resV.decider.pcs.assumptionExps, assertion = newAssertion, v = resV)
         case _ =>
           throw new UnknownError("Error while evaluating expression: " + verificationResult.toString)
       }
@@ -592,7 +594,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
   }
 
   private def assertProofObligation(obl: ProofObligation): Unit = {
-    val verificationResult = obl.v.decider.prover.assert(obl.assertion, obl.timeout)
+    val verificationResult = obl.v.decider.prover.assert(obl.assertion.term, obl.timeout)
     if (verificationResult) {
       println("PASS: Proving obligation was successful.\n")
     } else {

@@ -120,7 +120,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
       abstractLhs,
       MWSFLookup(mwsf, abstractLhs) === rhsSnapshot,
       Trigger(MWSFLookup(mwsf, abstractLhs))
-    ), Option.when(debugOn)(DebugSnapshot(DebugSnapshotKind.MagicWand)))
+    ), Option.when(debugOn)(DebugSnapshot(True, DebugSnapshotKind.MagicWand)))
     magicWandSnapshot
   }
 
@@ -183,7 +183,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
               case (Some(ch1: QuantifiedBasicChunk), Some(ch2: QuantifiedBasicChunk)) => ch1.snapshotMap === ch2.snapshotMap
               case _ => True
             }
-            v.decider.assume(tEq, Option.when(debugOn)(DebugSnapshot(DebugSnapshotKind.Definition)))
+            v.decider.assume(tEq, Option.when(debugOn)(DebugSnapshot(tEq, DebugSnapshotKind.Definition)))
 
             /* In the future it might be worth to recheck whether the permissions needed, in the case of
              * success being an instance of Incomplete, are zero.

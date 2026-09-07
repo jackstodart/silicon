@@ -7,7 +7,7 @@
 package viper.silicon.decider
 
 import com.typesafe.scalalogging.Logger
-import viper.silicon.debugger.{DebugExp, DebugNode, DebugGroup}
+import viper.silicon.debugger.{DebugAssumption, DebugExp, DebugGroup, DebugNode}
 import viper.silicon._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.interfaces._
@@ -57,12 +57,12 @@ trait Decider {
   def startDebugGroup(): Unit
   def finishDebugGroup(mkNode: InsertionOrderedSet[DebugNode] => DebugGroup): Unit
 
-  def assume(t: Term, debugExp: Option[DebugNode]): Unit
-  def assume(terms: Seq[Term], debugExps: Option[Seq[DebugNode]]): Unit
-  def assume(assumptions: Iterable[(Term, Option[DebugNode])]): Unit
-  def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugNode])], enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit
-  def assume(terms: Iterable[Term], debugExp: Option[DebugNode], enforceAssumption: Boolean): Unit
-  def assumeDefinition(t: Term, debugExp: Option[DebugNode]): Unit
+  def assume(t: Term, debugExp: Option[DebugAssumption]): Unit
+  def assume(terms: Seq[Term], debugExps: Option[Seq[DebugAssumption]]): Unit
+  def assume(assumptions: Iterable[(Term, Option[DebugAssumption])]): Unit
+  def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugAssumption])], enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit
+  def assume(terms: Iterable[Term], debugExp: Option[DebugAssumption], enforceAssumption: Boolean): Unit
+  def assumeDefinition(t: Term, debugExp: Option[DebugAssumption]): Unit
 
   def check(t: Term, timeout: Int): Boolean
 
@@ -250,7 +250,7 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
 
     def setCurrentBranchCondition(t: Term, te: (ast.Exp, Option[ast.Exp])): Unit = {
       pathConditions.setCurrentBranchCondition(t, te)
-      assume(t, Option.when(te._2.isDefined)(DebugExp(te._1, te._2.get)))
+      assume(t, Option.when(debugMode)(DebugExp(t, te._1, te._2.getOrElse(te._1), isInternal = false)))
     }
 
     def setPathConditionMark(): Mark = pathConditions.mark()
@@ -275,14 +275,14 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       }
     }
 
-    def assume(t: Term, debugExp: Option[DebugNode]): Unit = {
+    def assume(t: Term, debugExp: Option[DebugAssumption]): Unit = {
       assume(InsertionOrderedSet(Seq((t, debugExp))), false)
     }
 
-    def assume(assumptions: Iterable[(Term, Option[DebugNode])]): Unit =
+    def assume(assumptions: Iterable[(Term, Option[DebugAssumption])]): Unit =
       assume(InsertionOrderedSet(assumptions), false)
 
-    def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugNode])],
+    def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugAssumption])],
                enforceAssumption: Boolean = false,
                isDefinition: Boolean = false): Unit = {
       val filteredAssumptions =
@@ -296,14 +296,14 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       if (filteredAssumptions.nonEmpty) assumeWithoutSmokeChecks(filteredAssumptions map (_._1), isDefinition=isDefinition)
     }
 
-    def assume(assumptions: Seq[Term], debugExps: Option[Seq[DebugNode]]): Unit = {
+    def assume(assumptions: Seq[Term], debugExps: Option[Seq[DebugAssumption]]): Unit = {
       assumeWithoutSmokeChecks(InsertionOrderedSet(assumptions))
       if (debugMode) {
         debugExps.get foreach (e => addDebugExp(e))
       }
     }
 
-    def assume(terms: Iterable[Term], debugExp: Option[DebugNode], enforceAssumption: Boolean): Unit = {
+    def assume(terms: Iterable[Term], debugExp: Option[DebugAssumption], enforceAssumption: Boolean): Unit = {
       val filteredTerms =
         if (enforceAssumption) terms
         else terms filterNot isKnownToBeTrue
@@ -315,11 +315,11 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       if (filteredTerms.nonEmpty) assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTerms))
     }
 
-    def assumeDefinition(t: Term, debugExp: Option[DebugNode]): Unit = {
-      assume(InsertionOrderedSet(Seq((t, debugExp))), enforceAssumption=false, isDefinition=true)
+    def assumeDefinition(t: Term, debugAssm: Option[DebugAssumption]): Unit = {
+      assume(InsertionOrderedSet(Seq((t, debugAssm))), isDefinition = true)
     }
 
-    def debuggerAssume(terms: Iterable[Term], de: DebugNode) = {
+    def debuggerAssume(terms: Iterable[Term], de: DebugNode): Unit = {
       terms.foreach(t => {
         if (!_debuggerAssumedTerms.contains(t)) {
           _debuggerAssumedTerms += t

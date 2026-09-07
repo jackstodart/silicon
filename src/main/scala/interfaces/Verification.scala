@@ -6,7 +6,7 @@
 
 package viper.silicon.interfaces
 
-import viper.silicon.debugger.{DebugAxiom, DebugNode}
+import viper.silicon.debugger.{DebugAxiom, DebugFailedAssertion, DebugNode}
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.interfaces.state.Chunk
 import viper.silicon.reporting._
@@ -147,7 +147,7 @@ case class SiliconDebuggingFailureContext(branchConditions: Seq[Term],
                                           functionDecls: Set[FunctionDecl],
                                           assumptions: InsertionOrderedSet[DebugNode],
                                           failedAssertion: Term,
-                                          failedAssertionExp: DebugNode) extends FailureContext {
+                                          debugFailedAssertion: DebugFailedAssertion) extends FailureContext {
 
   override lazy val toString: String = ""
 }

@@ -31,6 +31,7 @@ sealed trait DebugNode {
   def description: Option[String]
 
   def getAllTerms(visited: mutable.HashSet[DebugNode]): Seq[Term]
+  def getNodeWithId(soughtId: Int, visited: mutable.HashSet[DebugNode]): Option[DebugNode]
 
   def getTopLevelString(currDepth: Int, config: DebugExpPrintConfiguration): String
   def toString(currDepth: Int, maxDepth: Int, config: DebugExpPrintConfiguration): String
@@ -55,6 +56,8 @@ sealed trait DebugAssumption extends DebugNode {
   def withTerm(newTerm: Term): DebugNode
 
   override def getAllTerms(visited: mutable.HashSet[DebugNode]): Seq[Term] = Seq(term)
+  def getNodeWithId(soughtId: Int, visited: mutable.HashSet[DebugNode]): Option[DebugNode] =
+    Option.when(this.id == soughtId)(this)
 
   def getTopLevelString(currDepth: Int, config: DebugExpPrintConfiguration): String = {
     ""
@@ -589,8 +592,8 @@ object DebugHavoc {
 class DebugFailedAssertion(val id: Int,
                            val term: Term,
                            val assertionDescription: Option[String],
-                           val originalExp: Option[ast.Exp],
-                           val finalExp: Option[ast.Exp]) extends DebugNode {
+                           val originalExp: Option[Exp],
+                           val finalExp: Option[Exp]) extends DebugNode {
 
   def description: Option[String] = assertionDescription
 
@@ -606,15 +609,18 @@ class DebugFailedAssertion(val id: Int,
   override def toString(currDepth: Int, maxDepth: Int, config: DebugExpPrintConfiguration): String = ???
 
   override def getAllTerms(visited: mutable.HashSet[DebugNode]): Seq[Term] = ???
+
+  override def getNodeWithId(soughtId: Int, visited: mutable.HashSet[DebugNode]): Option[DebugNode] =
+    Option.when(id == soughtId)(this)
 }
 
-/*object DebugFailedAssertion {
-  def apply(assertionDescription: String): DebugFailedAssertion =
-    new DebugFailedAssertion(DebugCounter.next(), Some(assertionDescription), None, None)
+object DebugFailedAssertion {
+  def apply(term: Term, assertionDescription: String): DebugFailedAssertion =
+    new DebugFailedAssertion(DebugCounter.next(), term, Some(assertionDescription), None, None)
 
-  def apply(originalExp: Option[ast.Exp], finalExp: Option[ast.Exp]): DebugFailedAssertion =
-    new DebugFailedAssertion(DebugCounter.next(), None, originalExp, finalExp)
-}*/
+  def apply(term: Term, originalExp: Option[ast.Exp], finalExp: Option[ast.Exp]): DebugFailedAssertion =
+    new DebugFailedAssertion(DebugCounter.next(), term, None, originalExp, finalExp)
+}
 
 /** Stands in for an assertion whose term Silicon could not build, and which therefore cannot hold. */
 // TODO: no idea what this should be

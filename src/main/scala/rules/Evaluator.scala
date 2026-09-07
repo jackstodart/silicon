@@ -182,7 +182,7 @@ object evaluator extends EvaluationRules {
 
       case _: ast.WildcardPerm =>
         val (tVar, tConstraints, eVar) = v.decider.freshARP()
-        val constraintExp = Option.when(debugOn)(DebugPermissionPositive(eVar.get))
+        val constraintExp = Option.when(debugOn)(DebugPermissionPositive(tConstraints, eVar.get))
         v.decider.assumeDefinition(tConstraints, constraintExp)
         /* TODO: Only record wildcards in State.constrainableARPs that are used in exhale
          *       position. Currently, wildcards used in inhale position (only) may not be removed
@@ -653,9 +653,7 @@ object evaluator extends EvaluationRules {
             consumes(s2a, pres, true, _ => pvePre, v2)((s3, snap, v3) => {
               val (stateArgs, snapToRecord) = v3.heapSupporter.functionAppSnapArgs(s2a, func, tArgs, snap.get, v3)
               val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)), stateArgs ++ tArgs)
-              val preExp = Option.when(debugOn)({
-                DebugFnPrecondition(func.name, eArgsNew.get, tArgs)
-              })
+              val preExp = Option.when(debugOn)(DebugFnPrecondition(preFApp, func.name, eArgsNew.get, v.getDebugHeapLabel(s2a)))
               v3.decider.assume(preFApp, preExp)
               val funcAnn = func.info.getUniqueInfo[AnnotationInfo]
               val tFApp = funcAnn match {
@@ -856,7 +854,7 @@ object evaluator extends EvaluationRules {
           val debugExp = Option.when(debugOn)({
             val expNew = ast.EqCmp(ast.SeqLength(ast.ExplicitSeq(esNew.get)())(), ast.IntLit(es.size)())(seq.pos, seq.info, seq.errT)
             val exp = ast.EqCmp(ast.SeqLength(seq)(), ast.IntLit(es.size)())(seq.pos, seq.info, seq.errT)
-            DebugExp(exp, expNew)
+            DebugExp(SeqLength(tSeq) === IntLiteral(es.size), exp, expNew, isInternal = false)
           })
           v1.decider.assume(SeqLength(tSeq) === IntLiteral(es.size), debugExp)
           Q(s1, tSeq, esNew.map(en => ast.ExplicitSeq(en)(e.pos, e.info, e.errT)), v1)})
@@ -1009,7 +1007,10 @@ object evaluator extends EvaluationRules {
       v.decider.assert(indexInBoundsTerm) {
         case true => Success()
         case false =>
-          if (s.retryLevel == 0 && v.reportFurtherErrors()) v.decider.assume(indexInBoundsTerm, Option.when(debugOn)(DebugExp(indexInBoundsExp, indexInBoundsExpNew)))
+          if (s.retryLevel == 0 && v.reportFurtherErrors()) {
+            val da = Option.when(debugOn)(DebugExp(indexInBoundsTerm, indexInBoundsExp.get, indexInBoundsExpNew.get, isInternal = false))
+            v.decider.assume(indexInBoundsTerm, da)
+          }
           createFailure(pve dueTo SeqIndexExceedsLength(eSeq, eIndex), v, s, indexInBoundsTerm, indexInBoundsExpNew)
       }
     }

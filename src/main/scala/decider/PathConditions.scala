@@ -304,8 +304,9 @@ private trait LayeredPathConditionStackLike {
       }
 
       if (layer.nonGlobalAssumptionDebugExps.nonEmpty && !implicationLHSExp.equals(TrueLit()())) {
-        conditionalTerms :+= DebugImplication(Some(implicationLHS), Some(implicationLHSExp),
+        val debugImp = DebugImplication(implicationLHS, Some(implicationLHSExp),
           Some(implicationLHSExpNew), layer.nonGlobalAssumptionDebugExps)
+        conditionalTerms :+= debugImp
       } else {
         conditionalTerms ++= layer.nonGlobalAssumptionDebugExps
       }
@@ -372,25 +373,22 @@ private trait LayeredPathConditionStackLike {
       globals ++= layer.globalAssumptionDebugExps
 
       val branchConditionExp = layer.branchConditionExp
-        if (branchConditionExp.isDefined){
+        if (branchConditionExp.isDefined) {
           val quantBody: InsertionOrderedSet[DebugNode] =
             if (branchConditionExp.get._1.equals(ast.TrueLit()())) {
               layer.nonGlobalAssumptionDebugExps
             } else {
-              InsertionOrderedSet(DebugImplication(antecedentTerm = layer.branchCondition,
+              InsertionOrderedSet(DebugImplication(antecedentTerm = layer.branchCondition.get, // TODO: what if not defined?
                 antecedentExp = Some(branchConditionExp.get._1),
                 antecedentFinalExp = Some(branchConditionExp.get._2.get),
                 children = layer.nonGlobalAssumptionDebugExps))
             }
 
-          nonGlobals += DebugQuantifier(isInternal = false, quantifier = quantifier.toString,
-            qvarsExp = qvars, qvarsTerm = tQvars, triggersExp = triggers, triggersTerm = tTriggers,
-            children = quantBody)
+          nonGlobals += DebugQuantifier(quantifier == Forall, tQvars, qvars, tTriggers, triggers, isInternal = false, quantBody)
         } else {
           /* No branch condition on this layer, so the assumptions are quantified directly. */
-          nonGlobals += DebugQuantifier(isInternal = false, quantifier = quantifier.toString,
-            qvarsExp = qvars, qvarsTerm = tQvars, triggersExp = triggers, triggersTerm = tTriggers,
-            children = layer.nonGlobalAssumptionDebugExps)
+          nonGlobals += DebugQuantifier(quantifier == Forall, tQvars, qvars, tTriggers, triggers,
+            isInternal = false, layer.nonGlobalAssumptionDebugExps)
         }
     }
 
@@ -570,7 +568,8 @@ private[decider] class LayeredPathConditionStack
 
   def assumptionExps: InsertionOrderedSet[DebugNode] = InsertionOrderedSet(layers.flatMap(_.assumptionDebugExps))
 
-  override def definingAssumptionExps: InsertionOrderedSet[DebugNode] = InsertionOrderedSet(layers.flatMap(_.globalDefiningAssumptionDebugExps) ++ layers.flatMap(_.nonGlobalDefiningAssumptionDebugExps))
+  override def definingAssumptionExps: InsertionOrderedSet[DebugNode] =
+    InsertionOrderedSet(layers.flatMap(_.globalDefiningAssumptionDebugExps) ++ layers.flatMap(_.nonGlobalDefiningAssumptionDebugExps))
 
   def declarations: InsertionOrderedSet[Decl] =
     InsertionOrderedSet(layers.flatMap(_.declarations)) // Note: Performance?

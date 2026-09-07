@@ -118,8 +118,9 @@ object havocSupporter extends SymbolicExecutionRules {
         v.decider.prover.comment("Check havocall receiver injectivity")
         val notInjectiveReason = QuasihavocallNotInjective(havocall)
 
-        val injectivityDebugExp = Option.when(debugOn)(DebugInjectivityCheck())
-        v.decider.assume(FunctionPreconditionTransformer.transform(receiverInjectivityCheck, s.program), injectivityDebugExp)
+        val injTerm = FunctionPreconditionTransformer.transform(receiverInjectivityCheck, s.program)
+        val injectivityDebugExp = Option.when(debugOn)(DebugInjectivityCheck(injTerm))
+        v.decider.assume(injTerm, injectivityDebugExp)
         v.decider.assert(receiverInjectivityCheck) {
           case false => createFailure(pve dueTo notInjectiveReason, v, s1, receiverInjectivityCheck, "QP receiver injective")
           case true =>
@@ -141,7 +142,9 @@ object havocSupporter extends SymbolicExecutionRules {
             )
             val comment = "Definitional axioms for havocall inverse functions"
             v.decider.prover.comment(comment)
-            v.decider.assume(inverseFunctions.definitionalAxioms, Option.when(debugOn)(DebugInverseFunctions(InverseFunctionKind.HavocallDefinitional)), enforceAssumption = false)
+            v.decider.assume(inverseFunctions.definitionalAxioms,
+              // TODO: This term will be overwritten but this isn't great
+              Option.when(debugOn)(DebugInverseFunctions(True, InverseFunctionKind.HavocallDefinitional)), enforceAssumption = false)
 
             // Call the havoc helper function, which returns a new heap, which is
             // partially havocked. Since we are executing a Havocall statement, we wrap
