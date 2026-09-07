@@ -78,10 +78,13 @@ object consumer extends ConsumptionRules {
              (Q: (State, Option[Term], Verifier) => VerificationResult)
              : VerificationResult = {
 
-    consumeR(s, s.h, a.whenExhaling, returnSnap, pve, v)((s1, h1, snap, v1) => {
+    val aWhenExhaling = a.whenExhaling
+    consumeR(s, s.h, aWhenExhaling, returnSnap, pve, v)((s1, h1, snap, v1) => {
       val s2 = s1.copy(h = h1,
                        partiallyConsumedHeap = s.partiallyConsumedHeap)
-      Q(s2, snap, v1)})
+      val finalSnap = snap.map(sn =>
+        v1.snapshotSupporter.finalizeConsumedSnapshot(s1, s.h, sn, aWhenExhaling.topLevelConjuncts, v1))
+      Q(s2, finalSnap, v1)})
   }
 
   /** @inheritdoc */
@@ -104,10 +107,13 @@ object consumer extends ConsumptionRules {
       allPves ++= pves
     })
 
-    consumeTlcs(s, s.h, allTlcs.result(), returnSnap, allPves.result(), v)((s1, h1, snap1, v1) => {
+    val tlcsResult = allTlcs.result()
+    consumeTlcs(s, s.h, tlcsResult, returnSnap, allPves.result(), v)((s1, h1, snap1, v1) => {
       val s2 = s1.copy(h = h1,
                        partiallyConsumedHeap = s.partiallyConsumedHeap)
-      Q(s2, snap1, v1)
+      val finalSnap = snap1.map(sn =>
+        v1.snapshotSupporter.finalizeConsumedSnapshot(s1, s.h, sn, tlcsResult, v1))
+      Q(s2, finalSnap, v1)
     })
   }
 
@@ -121,7 +127,7 @@ object consumer extends ConsumptionRules {
                          : VerificationResult = {
 
     if (tlcs.isEmpty)
-      Q(s, h, if (returnSnap) Some(Unit) else None, v)
+      Q(s, h, if (returnSnap) Some(v.snapshotSupporter.unitSnapshot) else None, v)
     else {
       val a = tlcs.head
       val pve = pves.head
@@ -133,7 +139,7 @@ object consumer extends ConsumptionRules {
           consumeTlcs(s1, h1, tlcs.tail, returnSnap, pves.tail, v1)((s2, h2, snap2, v2) =>
 
             (snap1, snap2) match {
-              case (Some(sn1), Some(sn2)) if returnSnap => Q(s2, h2, Some(Combine(sn1, sn2)), v2)
+              case (Some(sn1), Some(sn2)) if returnSnap => Q(s2, h2, Some(v2.snapshotSupporter.combineSnapshots(s2, sn1, sn2, a, tlcs.tail, v2)), v2)
               case (None, None) if !returnSnap => Q(s2, h2, None, v2)
               case (_, _) =>  sys.error(s"Consume returned unexpected snapshot: ${(returnSnap, (snap1, snap2))}")
             })
@@ -216,7 +222,7 @@ object consumer extends ConsumptionRules {
             }),
             (s2, v2) => {
               v2.symbExLog.closeScope(uidImplies)
-              Q(s2, h, if (returnSnap) Some(Unit) else None, v2)
+              Q(s2, h, if (returnSnap) Some(v2.snapshotSupporter.unitSnapshot) else None, v2)
             }))
 
       case ite @ ast.CondExp(e0, a1, a2) if !a.isPure && s.moreJoins.id >= JoinMode.Impure.id =>
@@ -316,8 +322,7 @@ object consumer extends ConsumptionRules {
               val s2a = s2.copy(constrainableARPs = s.constrainableARPs, functionRecorder = s2.functionRecorder.leaveQuantifiedExp(qpa))
               Q(s2a, h2, snap, v2)
             })
-          case (s1, _, _, _, _, None, v1) =>
-            Q(s1, h, if (returnSnap) Some(Unit) else None, v1)
+          case (s1, _, _, _, _, None, v1) => Q(s1, h, if (returnSnap) Some(v1.snapshotSupporter.unitSnapshot) else None, v1)
         }
 
       case let: ast.Let if !let.isPure =>
@@ -358,7 +363,7 @@ object consumer extends ConsumptionRules {
               })
               case None =>
                 v2.symbExLog.closeScope(scopeUid)
-                QB(s2.copy(parallelizeBranches = s1.parallelizeBranches), (h, if (returnSnap) Some(Unit) else None), v2)
+                QB(s2.copy(parallelizeBranches = s1.parallelizeBranches), (h, if (returnSnap) Some(v2.snapshotSupporter.unitSnapshot) else None), v2)
             })
       })(entries => {
         val s2 = entries match {
@@ -403,39 +408,39 @@ object consumer extends ConsumptionRules {
      * the tryOrFail that wraps the consumption of each top-level conjunct would not consolidate
      * the right heap.
      */
-    val s1 = s.copy(h = magicWandSupporter.getEvalHeap(s),
+    val s0 = s.copy(h = magicWandSupporter.getEvalHeap(s, v),
                     reserveHeaps = Nil,
                     exhaleExt = false)
 
-    executionFlowController.tryOrFail0(s1, v)((s2, v1, QS) => {
-      eval(s2, e, pve, v1)((s3, t, eNew, v2) => {
+    executionFlowController.tryOrFail0(s0, v)((s1, v1, QS) => {
+      eval(s1, e, pve, v1)((s2, t, eNew, v2) => {
         val termToAssert = t match {
           case Quantification(q, vars, body, trgs, name, isGlob, weight) =>
-            val transformed = FunctionPreconditionTransformer.transform(body, s3.program)
+            val transformed = FunctionPreconditionTransformer.transform(body, s2.program)
             val debugExp = if (debugOn) {
               val debugExpPre = DebugFnPrecondition(name, Seq(), Seq(), term = Some(transformed))
               val quant = DebugQuantifier(isInternal = true, q.toString, Seq(), vars, Seq(), trgs, InsertionOrderedSet(debugExpPre))
               Some(quant)
             } else None
-            v2.decider.assume(Quantification(q, vars, transformed, trgs, name, isGlob, weight), debugExp)
+            v2.decider.assume(Quantification(q, vars, transformed, trgs, name+"_precondition", isGlob, weight), debugExp)
             Quantification(q, vars, Implies(transformed, body), trgs, name, isGlob, weight)
           case _ => t
         }
         v2.decider.assert(termToAssert) {
           case true =>
             v2.decider.assume(t, Option.when(debugOn)(DebugExp(e, eNew.get)))
-            QS(s3, v2)
+            QS(s2, v2)
           case false =>
-            val failure = createFailure(pve dueTo AssertionFalse(e), v2, s3, termToAssert, eNew)
-            if (s3.retryLevel == 0 && v2.reportFurtherErrors()){
+            val failure = createFailure(pve dueTo AssertionFalse(e), v2, s2, termToAssert, eNew)
+            if (s2.retryLevel == 0 && v2.reportFurtherErrors()){
               v2.decider.assume(t, Option.when(debugOn)(DebugExp(e, eNew.get)))
-              failure combine QS(s3, v2)
+              failure combine QS(s2, v2)
             } else failure}})
     })((s4, v4) => {
-      val s5 = s4.copy(h = s.h,
+      val s4a = s4.copy(h = s.h,
                        reserveHeaps = s.reserveHeaps,
                        exhaleExt = s.exhaleExt)
-      Q(s5, if (returnSnap) Some(Unit) else None, v4)
+      Q(s4a, if (returnSnap) Some(v4.snapshotSupporter.unitSnapshot) else None, v4)
     })
   }
 }
