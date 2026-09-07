@@ -7,7 +7,7 @@
 package viper.silicon.decider
 
 import com.typesafe.scalalogging.Logger
-import viper.silicon.debugger.{DebugExp, DebugNode}
+import viper.silicon.debugger.{DebugExp, DebugNode, DebugGroup}
 import viper.silicon._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.interfaces._
@@ -54,9 +54,8 @@ trait Decider {
   def setCurrentBranchCondition(t: Term, te: (ast.Exp, Option[ast.Exp])): Unit
   def setPathConditionMark(): Mark
 
-  def finishDebugSubExp(mkNode: InsertionOrderedSet[DebugNode] => DebugNode): Unit
-
-  def startDebugSubExp(): Unit
+  def startDebugGroup(): Unit
+  def finishDebugGroup(mkNode: InsertionOrderedSet[DebugNode] => DebugGroup): Unit
 
   def assume(t: Term, debugExp: Option[DebugNode]): Unit
   def assume(terms: Seq[Term], debugExps: Option[Seq[DebugNode]]): Unit
@@ -258,13 +257,13 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
 
     /* Assuming facts */
 
-    def startDebugSubExp(): Unit = {
+    def startDebugGroup(): Unit = {
       if (debugMode) {
         pathConditions.startDebugSubExp()
       }
     }
 
-    def finishDebugSubExp(mkNode: InsertionOrderedSet[DebugNode] => DebugNode): Unit = {
+    def finishDebugGroup(mkNode: InsertionOrderedSet[DebugNode] => DebugGroup): Unit = {
       if (debugMode) {
         pathConditions.finishDebugSubExp(mkNode)
       }

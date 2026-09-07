@@ -695,7 +695,7 @@ object evaluator extends EvaluationRules {
 
         val predicate = s.program.findPredicate(predicateName)
         if (s.cycles(predicate) < Verifier.config.recursivePredicateUnfoldings()) {
-          v.decider.startDebugSubExp()
+          v.decider.startDebugGroup()
           evals(s, eArgs, _ => pve, v)((s1, tArgs, eArgsNew, v1) =>
             eval(s1, ePerm.getOrElse(ast.FullPerm()()), pve, v1)((s2, tPerm, ePermNew, v2) => {
               val s2a = if (debugOn && s1.isRecordingHeaps) v2.recordIntermediateHeap(s2, EvalExp(uf)) else s2
@@ -772,10 +772,10 @@ object evaluator extends EvaluationRules {
                     })
                   })(join(eIn.typ, "joined_unfolding", s2.relevantQuantifiedVariables.map(_._1),
                     joinExp, v2))((s7, r7, v7) => {
-                      v7.decider.finishDebugSubExp(children => DebugUnfolding(predicate.name, eArgs, Some(s2Label), children))
+                      v7.decider.finishDebugGroup(children => DebugUnfolding(predicate.name, eArgs, Some(s2Label), children))
                       Q(s7, r7._1, r7._2, v7)})
                 case false =>
-                  v2.decider.finishDebugSubExp(children => DebugUnfolding(predicate.name, eArgs, Some(s2Label), children))
+                  v2.decider.finishDebugGroup(children => DebugUnfolding(predicate.name, eArgs, Some(s2Label), children))
                   createFailure(pve dueTo NonPositivePermission(ePerm.get), v2, s2, IsPositive(tPerm), ePermNew.map(p => ast.PermGtCmp(p, ast.NoPerm()())(p.pos, p.info, p.errT)))}}))
         } else {
           val unknownValue = v.decider.appliedFresh("recunf", v.symbolConverter.toSort(eIn.typ), s.relevantQuantifiedVariables.map(_._1))

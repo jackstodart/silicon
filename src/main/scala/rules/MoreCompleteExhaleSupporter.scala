@@ -172,7 +172,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
     }
 
     val (s1, taggedSnap, snapDefs, permSum, permSumExp) = summariseOnly(s, relevantChunks, resource, args, argsExp, knownValue, v)
-    v.decider.assumeDefinition(And(snapDefs), Option.when(debugOn)(DebugSnapshot(SnapshotKind.Definition)))
+    v.decider.assumeDefinition(And(snapDefs), Option.when(debugOn)(DebugSnapshot(DebugSnapshotKind.Definition)))
     //    v.decider.assume(PermAtMost(permSum, FullPerm())) /* Done in StateConsolidator instead */
 
     val s2 =
@@ -439,7 +439,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
                                                 (Q: (State, ListBuffer[NonQuantifiedChunk], Option[Term], Verifier) => VerificationResult)
                                                 : VerificationResult = {
 
-    v.decider.startDebugSubExp()
+    v.decider.startDebugGroup()
 
     var totalPermSum: Term = NoPerm
     var totalPermSumExp: Option[ast.Exp] = Option.when(debugOn)(ast.NoPerm()())
@@ -505,7 +505,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
           Q(s1, updatedChunks, None, v)
         }
       case false =>
-        v.decider.finishDebugSubExp(children => DebugConsumePermissions(resource.toString(), children))
+        v.decider.finishDebugGroup(children => DebugConsumePermissions(resource.toString(), children))
         createFailure(ve, v, s, totalPermTaken !== NoPerm, totalPermTakenExp.map(tpt => ast.NeCmp(tpt, ast.NoPerm()())()))
     }
   }

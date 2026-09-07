@@ -120,7 +120,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
       abstractLhs,
       MWSFLookup(mwsf, abstractLhs) === rhsSnapshot,
       Trigger(MWSFLookup(mwsf, abstractLhs))
-    ), Option.when(debugOn)(DebugSnapshot(SnapshotKind.MagicWand)))
+    ), Option.when(debugOn)(DebugSnapshot(DebugSnapshotKind.MagicWand)))
     magicWandSnapshot
   }
 
@@ -183,7 +183,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
               case (Some(ch1: QuantifiedBasicChunk), Some(ch2: QuantifiedBasicChunk)) => ch1.snapshotMap === ch2.snapshotMap
               case _ => True
             }
-            v.decider.assume(tEq, Option.when(debugOn)(DebugSnapshot(SnapshotKind.Definition)))
+            v.decider.assume(tEq, Option.when(debugOn)(DebugSnapshot(DebugSnapshotKind.Definition)))
 
             /* In the future it might be worth to recheck whether the permissions needed, in the case of
              * success being an instance of Incomplete, are zero.
@@ -347,7 +347,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
         val (ch, groundPcs, groundPcsExp) = v2.heapSupporter.createWandChunk(s2, wand, tArgs, eArgsNew, wandSnapshot, v2)
 
         val tPcs = (pcsQuantified +: pcsWithoutFreshSnapRoot) ++ groundPcs
-        val ePcs = Option.when(debugOn)(DebugSnapshot(SnapshotKind.MagicWandFunction).withTerm(pcsQuantified) +: (pcsWithoutExp.get ++ groundPcsExp.get))
+        val ePcs = Option.when(debugOn)(DebugSnapshot(DebugSnapshotKind.MagicWandFunction).withTerm(pcsQuantified) +: (pcsWithoutExp.get ++ groundPcsExp.get))
 
         val s3 = s2.copy(packagingWandSnapshots = s2.packagingWandSnapshots.filterNot(_._1 == freshSnapRoot))
         appendToResults(s3, ch, v2.decider.pcs.after(preMark), (tPcs, ePcs), v2)

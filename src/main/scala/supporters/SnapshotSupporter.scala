@@ -199,7 +199,7 @@ class DefaultSnapshotSupporter(symbolConverter: SymbolConverter) extends Snapsho
 
         (snap0, snap1, snap === Combine(snap0, snap1))
       }
-    v.decider.assume(snapshotEq, Option.when(Verifier.config.enableDebugging())(DebugSnapshot(SnapshotKind.Definition)))
+    v.decider.assume(snapshotEq, Option.when(Verifier.config.enableDebugging())(DebugSnapshot(DebugSnapshotKind.Definition)))
 
     (snap0, snap1)
   }

@@ -472,7 +472,7 @@ object executor extends ExecutionRules {
         addFieldPerms(s, fields, v)((s1, v1) => {
           val s1a = s1.copy(g = s1.g + (x, (tRcvr, eRcvrNew)))
           val s1b = if (debugOn) v1.recordHeap(s1a, oldLabel, ExecStmt(stmt), oldPCS) else s1a
-          v1.decider.assume(ts, Option.when(debugOn)(DebugReferenceDisjointness(esNew, esNew)), enforceAssumption = false)
+          v1.decider.assume(ts, Option.when(debugOn)(DebugRefDisjoint(esNew, esNew)), enforceAssumption = false)
           Q(s1b, v1)
         })
 
@@ -646,7 +646,7 @@ object executor extends ExecutionRules {
 
       case fold @ ast.Fold(pap @ ast.PredicateAccessPredicate(predAcc @ ast.PredicateAccess(eArgs, _), _)) =>
         assert(s.constrainableARPs.isEmpty)
-        v.decider.startDebugSubExp()
+        v.decider.startDebugGroup()
         val ePerm = pap.perm
         val pve = FoldFailed(fold)
         val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(fold)) else s
@@ -655,7 +655,7 @@ object executor extends ExecutionRules {
             permissionSupporter.assertPositive(s2, tPerm, if (debugOn) ePermNew.get else ePerm, pve, v2)((s3, v3) => {
               val wildcards = s3.constrainableARPs -- s1.constrainableARPs
               predicateSupporter.fold(s3, predAcc, tArgs, eArgsNew, tPerm, ePermNew, wildcards, pve, v3)((s4, v4) => {
-                v4.decider.finishDebugSubExp(children => DebugFold(predAcc, children))
+                v4.decider.finishDebugGroup(children => DebugFold(predAcc, children))
                 val s4a = if (debugOn) v4.finishKeyHeap(s4) else s4
                 Q(s4a, v4)
               })
@@ -663,7 +663,7 @@ object executor extends ExecutionRules {
 
       case unfold @ ast.Unfold(pap @ ast.PredicateAccessPredicate(pa @ ast.PredicateAccess(eArgs, predicateName), _)) =>
         assert(s.constrainableARPs.isEmpty)
-        v.decider.startDebugSubExp()
+        v.decider.startDebugGroup()
         val ePerm = pap.perm
         val predicate = s.program.findPredicate(predicateName)
         val pve = UnfoldFailed(unfold)
@@ -676,7 +676,7 @@ object executor extends ExecutionRules {
               val wildcards = s3.constrainableARPs -- s1.constrainableARPs
               predicateSupporter.unfold(s3, predicate, tArgs, eArgsNew, tPerm, ePermNew, wildcards, pve, v3, pa)(
                 (s4, v4) => {
-                  v2.decider.finishDebugSubExp(children => DebugUnfold(pa, children))
+                  v2.decider.finishDebugGroup(children => DebugUnfold(pa, children))
                   val s4a = if (debugOn) v4.finishKeyHeap(s4) else s4
                   Q(s4a, v4)
                 })

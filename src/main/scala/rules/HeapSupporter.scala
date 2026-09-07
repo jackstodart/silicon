@@ -277,12 +277,12 @@ class DefaultHeapSupportRules extends HeapSupportRules {
             val h3 = Heap(remainingChunks ++ untouchedChunks ++ otherChunks)
             val (sm, smValueDef) = quantifiedChunkSupporter.singletonSnapshotMap(s3, field, Seq(tRcvr), tRhs, v1)
             v1.decider.prover.comment("Definitional axioms for singleton-FVF's value")
-            val debugExp = Option.when(debugOn)(DebugExp.createInstance("Definitional axioms for singleton-FVF's value", isInternal_ = true))
+            val debugExp = Option.when(debugOn)(DebugSnapshotMapDefinition(SnapshotMapKind.SingletonFvfValue))
             v1.decider.assumeDefinition(smValueDef, debugExp)
             val ch = quantifiedChunkSupporter.createSingletonQuantifiedChunk(Seq(`?r`), Option.when(debugOn)(Seq(ast.LocalVarDecl("r", ast.Ref)(ass.pos, ass.info, ass.errT))),
               field, Seq(tRcvr), Option.when(debugOn)(Seq(eRcvrNew.get)), FullPerm, Option.when(debugOn)(ast.FullPerm()(ass.pos, ass.info, ass.errT)), sm, newTag, s1.program)
             if (s3.heapDependentTriggers.contains(field)) {
-              val debugExp2 = Option.when(debugOn)(DebugExp.createInstance(s"FieldTrigger(${eRcvrNew.toString()}.${field.name})"))
+              val debugExp2 = Option.when(debugOn)(DebugResourceTrigger.field(eRcvrNew.get, field.name))
               v1.decider.assume(FieldTrigger(field.name, sm, tRcvr), debugExp2)
             }
             val s4 = s3.copy(h = h3 + ch)
