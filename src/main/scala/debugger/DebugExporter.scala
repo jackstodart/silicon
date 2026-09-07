@@ -490,7 +490,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
               case Some((_, snapString)) => s"$snapString $freeRef"
               case None => s"${qfc.id}_${translateTerm(qfc.fvf)} $freeRef"
             }
-            val chunkString = s"\\<And>$varString. $condString\n    let r = $rcvr in $permCond$field = $default"
+            val chunkString = s"\\<forall>$varString. $condString\n    let r = $rcvr in $permCond$field = $default"
             strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunkString\""
         }
       case qpc: QuantifiedPredicateChunk =>
@@ -575,7 +575,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         val newRewrites = rewrites.addRenames(varRenames)
         val varString = varRenames.map(_._2).mkString(" ")
         wrap(s"${quantifierToString(q)}$varString. ${translateTerm(body, 10, newRewrites)}", 10)
-      // Arithmetic
+      // Arithmeti
       case terms.Plus(left, right) => recOp(left, "+", right, 65)
       case terms.Minus(left, right) => recOp(left, "-", right, 65)
       case terms.Times(left, right) => recOp(left, "*", right, 70)
@@ -719,11 +719,12 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.IntLit(i) => i.toString()
       case ast.Minus(exp) => wrap("-" + rec(exp, 80), 80)
       case ast.Or(left, right) => recOp(left, "\\<or>", right, 30)
+      case ast.And(left, right) if isFrameAxiom && left.isPure => rec(right, parenthesisLevel)
+      case ast.And(left, right) if isFrameAxiom && right.isPure => rec(left, parenthesisLevel)
       case ast.And(left, right) =>
-        // TODO: Why do we get nested parens?
-        if (isFrameAxiom && left.isPure) rec(right, parenthesisLevel)
-        else if (isFrameAxiom && right.isPure) rec(left, parenthesisLevel)
-        else recOp(left, "\\<and>", right, 35)
+        val lPLevel = if (left.isInstanceOf[ast.And]) 34 else 35
+        val rPLevel = if (right.isInstanceOf[ast.And]) 34 else 35
+        wrap(rec(left, lPLevel) + " \\<and> " + rec(right, rPLevel), 35)
       case ast.Implies(left, right) =>
         val translation = translateExp(left, parenthesisLevel, rewrites, isFrameAxiom = false, variablePrime, resultString) +
           " \\<longrightarrow> " + rec(right, 25)
