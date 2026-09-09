@@ -479,7 +479,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       val assumptionE = translateStringToExp(userInput, obl)
       evalAssumption(assumptionE, obl, free, obl.v) match {
         case Some((resS, resT, resE, evalAssumptions)) =>
-          val allAssumptions = obl.assumptionsExp ++ evalAssumptions + DebugExp.createInstance(assumptionE, resE).withTerm(resT)
+          val allAssumptions = obl.assumptionsExp ++ evalAssumptions + DebugExp.createInstance(resT, assumptionE, resE)
           obl.copy(s = resS, assumptionsExp = allAssumptions)
         case None =>
           obl
@@ -506,7 +506,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       })
       verificationResult match {
         case Success() =>
-          obl.copy(assumptionsExp = resV.decider.pcs.assumptionExps, assertion = resT, eAssertion = DebugExp.createInstance(resE, resE), v = resV)
+          obl.copy(assumptionsExp = resV.decider.pcs.assumptionExps, assertion = resT, eAssertion = DebugExp.createInstance(resT, resE, resE), v = resV)
         case _ =>
           throw new UnknownError("Error while evaluating expression: " + verificationResult.toString)
       }

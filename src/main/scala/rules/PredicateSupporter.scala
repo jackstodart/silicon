@@ -89,7 +89,7 @@ object predicateSupporter extends PredicateSupportRules {
           val predTrigger = App(s2.predicateData(predicate.name).triggerFunction,
             v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, s2.h) +: tArgs)
           val eArgsString = eArgs.mkString(", ")
-          v2.decider.assume(predTrigger, Option.when(debugOn)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eArgsString))")))
+          v2.decider.assume(predTrigger, Option.when(debugOn)(DebugExp.construct(s"PredicateTrigger(${predicate.name}($eArgsString))")))
         }
         val s2a = v2.heapSupporter.triggerResourceIfNeeded(s2, pa, tArgs, eArgs, v2)
         Q(s2a, v2)
@@ -102,7 +102,7 @@ object predicateSupporter extends PredicateSupportRules {
             : VerificationResult = {
     tree match {
       case PredicateLeafNode(h, assumptions) =>
-        val debugExp = Option.when(debugOn)(DebugExp.createInstance("Assumption from unfolded predicate body"))
+        val debugExp = Option.when(debugOn)(DebugExp.construct("Assumption from unfolded predicate body"))
         v.decider.assume(assumptions.map(a => (a.replace(toReplace), debugExp)).toSeq)
         val substChunks = h.values.map(_.substitute(toReplace).asInstanceOf[GeneralChunk].permScale(s.permissionScalingFactor, s.permissionScalingFactorExp))
 
@@ -214,7 +214,7 @@ object predicateSupporter extends PredicateSupportRules {
               App(s2.predicateData(predicate.name).triggerFunction,
                 v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, hPreUnfold) +: tArgs)
             val eargs = eArgs.mkString(", ")
-            v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eargs))")))
+            v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.construct(s"PredicateTrigger(${predicate.name}($eargs))")))
           }
           Q(s2.copy(g = s.g,
             permissionScalingFactor = s.permissionScalingFactor,
@@ -229,7 +229,7 @@ object predicateSupporter extends PredicateSupportRules {
               App(s2.predicateData(predicate.name).triggerFunction,
                 v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, hPreUnfold) +: tArgs)
             val eargs = eArgs.mkString(", ")
-            v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.createInstance(s"PredicateTrigger(${predicate.name}($eargs))")))
+            v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.construct(s"PredicateTrigger(${predicate.name}($eargs))")))
           }
           Q(s2.copy(g = s.g,
             permissionScalingFactor = s.permissionScalingFactor,

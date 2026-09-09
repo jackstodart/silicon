@@ -8,8 +8,9 @@ package viper.silicon.debugger
 
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.decider.PathConditions
-import viper.silicon.state.terms.{And, Exists, Forall, Implies, Quantification, Term, Trigger, Var}
+import viper.silicon.state.terms.{And, Exists, Forall, Implies, Quantification, Term, Trigger, True, Var}
 import viper.silver.ast
+import viper.silver.ast.Exp
 import viper.silver.ast.utility.Simplifier
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -21,7 +22,7 @@ object DebugExp {
   def createInstance(description: Option[String],
                      originalExp: Option[ast.Exp],
                      finalExp: Option[ast.Exp],
-                     term: Option[Term],
+                     term: Term,
                      isInternal_ : Boolean,
                      children: InsertionOrderedSet[DebugExp]
                     ): DebugExp = {
@@ -32,6 +33,31 @@ object DebugExp {
     debugExp
   }
 
+  def createInstance(term: Term, originalExp: Exp, finalExp: Exp): DebugExp =
+    createInstance(None, Some(originalExp), Some(finalExp), term, isInternal_ = false, InsertionOrderedSet.empty)
+
+  def createInstance(description: String, children: InsertionOrderedSet[DebugExp]): DebugExp =
+    createInstance(Some(description), None, None, True, isInternal_ = false, children)
+
+  def createInstance(description: String, term: Term, isInternal_ : Boolean = false): DebugExp =
+    createInstance(Some(description), None, None, term, isInternal_, InsertionOrderedSet.empty)
+
+  def construct(description: String): Term => DebugExp =
+    term => createInstance(Some(description), None, None, term, isInternal_ = false, InsertionOrderedSet.empty)
+
+  def construct(description: String, isInternal_ : Boolean): Term => DebugExp =
+    term => createInstance(Some(description), None, None, term, isInternal_, InsertionOrderedSet.empty)
+
+  def construct(originalExp: ast.Exp, finalExp: ast.Exp): Term => DebugExp =
+    term => createInstance(None, Some(originalExp), Some(finalExp), term, isInternal_ = false, InsertionOrderedSet.empty)
+
+  def construct(description: String, children: InsertionOrderedSet[DebugExp]): Term => DebugExp =
+    term => createInstance(Some(description), None, None, term, isInternal_ = false, children)
+
+  def construct(description: String, originalExp: ast.Exp, finalExp: ast.Exp, isInternal_ : Boolean = false): Term => DebugExp =
+    term => createInstance(Some(description), Some(originalExp), Some(finalExp), term, isInternal_, InsertionOrderedSet.empty)
+
+  /*
   def createInstance(description: Option[String], originalExp: Option[ast.Exp], finalExp: Option[ast.Exp],
                      children: InsertionOrderedSet[DebugExp]): DebugExp = {
     createInstance(description, originalExp, finalExp, None, isInternal_ = false, children)
@@ -60,11 +86,12 @@ object DebugExp {
   def createInstance(originalExp: Option[ast.Exp], finalExp: Option[ast.Exp]): DebugExp = {
     createInstance(None, Some(originalExp.get), Some(finalExp.get), InsertionOrderedSet.empty)
   }
+  */
 
   def createImplicationInstance(description: Option[String],
                                 originalExp: Option[ast.Exp],
                                 finalExp: Option[ast.Exp],
-                                term: Option[Term],
+                                term: Term,
                                 isInternal_ : Boolean,
                                 children: InsertionOrderedSet[DebugExp]
                                ): ImplicationDebugExp = {
@@ -90,27 +117,23 @@ class DebugExp(val id: Int,
                val description : Option[String],
                val originalExp : Option[ast.Exp],
                val finalExp : Option[ast.Exp],
-               val term : Option[Term],
+               val term : Term,
                val isInternal_ : Boolean,
                val children : InsertionOrderedSet[DebugExp]) {
 
   lazy val isGlobal: Boolean = {
-    val thisGlobal = term match {
-      case Some(t) => PathConditions.isGlobal(t)
-      case _ => true
-    }
-    thisGlobal && children.forall(_.isGlobal)
+    PathConditions.isGlobal(term) && children.forall(_.isGlobal)
   }
 
   def withTerm(newTerm: Term): DebugExp = {
-    new DebugExp(id, description, originalExp, finalExp, Some(newTerm), isInternal_, children)
+    new DebugExp(id, description, originalExp, finalExp, newTerm, isInternal_, children)
   }
 
   def getAllTerms(visited: mutable.HashSet[DebugExp]): Seq[Term] = {
     if (visited.contains(this))
       return Seq.empty
     visited.add(this)
-    term.toSeq ++ children.toSeq.flatMap(_.getAllTerms(visited))
+    term +: children.toSeq.flatMap(_.getAllTerms(visited))
   }
 
   def isInternal: Boolean = isInternal_
@@ -138,7 +161,7 @@ class DebugExp(val id: Int,
   }
 
   def getTopLevelString(currDepth: Int, config: DebugExpPrintConfiguration): String = {
-    val toDisplay = if (config.printInternalTermRepresentation) term else finalExp
+    val toDisplay = if (config.printInternalTermRepresentation) Some(term) else finalExp
     val delimiter = if (toDisplay.isDefined && description.isDefined) ": " else ""
     "\n\t" + ("\t"*currDepth) + "[" + id + "] " + description.getOrElse("") + delimiter + toDisplay.getOrElse("")
   }
@@ -178,7 +201,7 @@ class ImplicationDebugExp(id: Int,
                           description : Option[String],
                           originalExp : Option[ast.Exp],
                           finalExp : Option[ast.Exp],
-                          term : Option[Term],
+                          term : Term,
                           isInternal_ : Boolean,
                           children : InsertionOrderedSet[DebugExp]) extends DebugExp(id, description, originalExp, finalExp, term, isInternal_, children) {
 
@@ -186,8 +209,7 @@ class ImplicationDebugExp(id: Int,
     if (visited.contains(this))
       return Seq.empty
     visited.add(this)
-    assert(term.isDefined)
-    Seq(Implies(term.get, And(children.toSeq.flatMap(_.getAllTerms(visited)))))
+    Seq(Implies(term, And(children.toSeq.flatMap(_.getAllTerms(visited)))))
   }
 
   override def toString(currDepth: Int, maxDepth: Int, config: DebugExpPrintConfiguration): String = {
@@ -211,7 +233,7 @@ class QuantifiedDebugExp(id: Int,
                          val qvars : Seq[ast.Exp],
                          val tQvars: Seq[Var],
                          val triggers: Seq[ast.Trigger],
-                         val tTriggers: Seq[Trigger]) extends DebugExp(id, description, None, None, None, isInternal_, children) {
+                         val tTriggers: Seq[Trigger]) extends DebugExp(id, description, None, None, True, isInternal_, children) {
   override def getAllTerms(visited: mutable.HashSet[DebugExp]): Seq[Term] = {
     if (visited.contains(this))
       return Seq.empty

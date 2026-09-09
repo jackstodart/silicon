@@ -172,7 +172,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
     }
 
     val (s1, taggedSnap, snapDefs, permSum, permSumExp) = summariseOnly(s, relevantChunks, resource, args, argsExp, knownValue, v)
-    v.decider.assumeDefinition(And(snapDefs), Option.when(debugOn)(DebugExp.createInstance("Snapshot", true)))
+    v.decider.assumeDefinition(And(snapDefs), Option.when(debugOn)(DebugExp.construct("Snapshot", true)))
     //    v.decider.assume(PermAtMost(permSum, FullPerm())) /* Done in StateConsolidator instead */
 
     val s2 =
@@ -384,7 +384,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
         newChunks foreach { ch =>
           val resource = Resources.resourceDescriptions(ch.resourceID)
           val pathCond = interpreter.buildPathConditionsForChunk(ch, resource.instanceProperties(s.mayAssumeUpperBounds))
-          pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.createInstance(p._2, p._2))))
+          pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.construct(p._2.get, p._2.get))))
         }
         val newHeap = Heap(allChunks)
 
@@ -472,7 +472,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
             ast.Implies(ast.Not(eqExp.get)(), ast.EqCmp(permTakenExp.get, ast.NoPerm()())())(pe.pos, pe.info, pe.errT))))
 
 
-        v.decider.assume(constraint, Option.when(debugOn)(DebugExp.createInstance(constraintExp, constraintExp)))
+        v.decider.assume(constraint, Option.when(debugOn)(DebugExp.construct(constraintExp.get, constraintExp.get)))
 
         newFr = newFr.recordPathSymbol(permTaken.applicable.asInstanceOf[Function]).recordConstraint(constraint)
 
@@ -497,7 +497,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
     v.decider.assert(Implies(PermLess(NoPerm, perms), totalPermTaken !== NoPerm)) {
       case true =>
         val constraintExp = permsExp.map(pe => ast.EqCmp(pe, totalPermTakenExp.get)())
-        v.decider.assume(perms === totalPermTaken, Option.when(debugOn)(DebugExp.createInstance(constraintExp, constraintExp)))
+        v.decider.assume(perms === totalPermTaken, Option.when(debugOn)(DebugExp.construct(constraintExp.get, constraintExp.get)))
         if (returnSnap) {
           summarise(s1, relevantChunks.toSeq, resource, args, argsExp, None, v)((s2, snap, _, _, v1) =>
             Q(s2, updatedChunks, Some(snap), v1))

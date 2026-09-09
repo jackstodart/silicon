@@ -421,7 +421,7 @@ object consumer extends ConsumptionRules {
               case None => "Function preconditions hold in quantifier"
             }
             v2.decider.assume(Quantification(q, vars, transformed, trgs, name+"_precondition", isGlob, weight),
-              Option.when(debugOn)(DebugExp.createInstance(comment, true)))
+              Option.when(debugOn)(DebugExp.construct(comment, true)))
             Quantification(q, vars, Implies(transformed, body), trgs, name, isGlob, weight)
           case _ => t
         }

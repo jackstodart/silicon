@@ -7,7 +7,7 @@
 package viper.silicon.decider
 
 import com.typesafe.scalalogging.Logger
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.{DebugExp}
 import viper.silicon._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.interfaces._
@@ -54,18 +54,19 @@ trait Decider {
   def setCurrentBranchCondition(t: Term, te: (ast.Exp, Option[ast.Exp])): Unit
   def setPathConditionMark(): Mark
 
-  def finishDebugSubExp(description : String): Unit
-
   def startDebugSubExp(): Unit
+  def finishDebugSubExp(description : String): Unit
 
   def assume(t: Term, e: ast.Exp, finalExp: ast.Exp): Unit
   def assume(t: Term, e: Option[ast.Exp], finalExp: Option[ast.Exp]): Unit
-  def assume(t: Term, debugExp: Option[DebugExp]): Unit
+  def assume(t: Term, debugExp: Option[Term => DebugExp]): Unit
   def assume(terms: Seq[Term], debugExps: Option[Seq[DebugExp]]): Unit
-  def assumeDefinition(t: Term, debugExp: Option[DebugExp]): Unit
-  def assume(assumptions: Iterable[(Term, Option[DebugExp])]): Unit
-  def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugExp])], enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit
-  def assume(terms: Iterable[Term], debugExp: Option[DebugExp], enforceAssumption: Boolean): Unit
+  def assumeDefinition(t: Term, debugExp: Option[Term => DebugExp]): Unit
+  def assume(assumptions: Iterable[(Term, Option[Term => DebugExp])]): Unit
+  def assume(assumptions: InsertionOrderedSet[(Term, Option[Term => DebugExp])], enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit
+
+  // Is this used for groups?
+  def assume(terms: Iterable[Term], debugExp: Option[Term => DebugExp], enforceAssumption: Boolean): Unit
 
   def check(t: Term, timeout: Int): Boolean
 
@@ -278,37 +279,37 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       }
     }
 
-    def assume(t: Term, e : ast.Exp, finalExp : ast.Exp): Unit = {
-      assume(assumptions=InsertionOrderedSet((t, Some(DebugExp.createInstance(e, finalExp)))), false, false)
-    }
+     def assume(t: Term, e : ast.Exp, finalExp : ast.Exp): Unit = {
+       assume(assumptions=InsertionOrderedSet((t, Some(DebugExp.construct(e, finalExp)))), false, false)
+     }
 
     def assume(t: Term, e: Option[ast.Exp], finalExp: Option[ast.Exp]): Unit = {
       if (finalExp.isDefined) {
-        assume(assumptions=InsertionOrderedSet((t, Some(DebugExp.createInstance(e.get, finalExp.get)))), false, false)
+        assume(assumptions=InsertionOrderedSet((t, Some(DebugExp.construct(e.get, finalExp.get)))), false, false)
       } else {
         assume(assumptions=InsertionOrderedSet((t, None)), false, false)
       }
     }
 
-    def assume(t: Term, debugExp: Option[DebugExp]): Unit = {
+    def assume(t: Term, debugExp: Option[Term => DebugExp]): Unit = {
       assume(InsertionOrderedSet(Seq((t, debugExp))), false)
     }
 
-    def assumeDefinition(t: Term, debugExp: Option[DebugExp]): Unit = {
+    def assumeDefinition(t: Term, debugExp: Option[Term => DebugExp]): Unit = {
       assume(InsertionOrderedSet(Seq((t, debugExp))), enforceAssumption=false, isDefinition=true)
     }
 
-    def assume(assumptions: Iterable[(Term, Option[DebugExp])]): Unit =
+    def assume(assumptions: Iterable[(Term, Option[Term => DebugExp])]): Unit =
       assume(InsertionOrderedSet(assumptions), false)
 
-    def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugExp])], enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit = {
+    def assume(assumptions: InsertionOrderedSet[(Term, Option[Term => DebugExp])], enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit = {
       val filteredAssumptions =
         if (enforceAssumption) assumptions
         else assumptions filterNot (a => isKnownToBeTrue(a._1))
 
 
       if (debugMode) {
-        filteredAssumptions foreach (a => addDebugExp(a._2.get.withTerm(a._1)))
+        filteredAssumptions foreach (a => addDebugExp(a._2.get(a._1)))
       }
 
       if (filteredAssumptions.nonEmpty) assumeWithoutSmokeChecks(filteredAssumptions map (_._1), isDefinition=isDefinition)
@@ -321,13 +322,13 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       }
     }
 
-    def assume(terms: Iterable[Term], debugExp: Option[DebugExp], enforceAssumption: Boolean): Unit = {
+    def assume(terms: Iterable[Term], debugExp: Option[Term => DebugExp], enforceAssumption: Boolean): Unit = {
       val filteredTerms =
         if (enforceAssumption) terms
         else terms filterNot isKnownToBeTrue
 
       if (debugMode && filteredTerms.nonEmpty) {
-        addDebugExp(debugExp.get.withTerm(And(filteredTerms)))
+        addDebugExp(debugExp.get(And(filteredTerms)))
       }
 
       if (filteredTerms.nonEmpty) assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTerms))

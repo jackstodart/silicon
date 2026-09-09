@@ -103,13 +103,13 @@ object joiner extends JoiningRules {
           val pcsExp = Option.when(debugOn)(entry.pathConditions.conditionalizedExp)
           val comment = "Joined path conditions"
           v.decider.prover.comment(comment)
-          v.decider.assume(pcs, Option.when(debugOn)(DebugExp.createInstance(comment, InsertionOrderedSet(pcsExp.get))), enforceAssumption = false)
+          v.decider.assume(pcs, Option.when(debugOn)(DebugExp.construct(comment, InsertionOrderedSet(pcsExp.get))), enforceAssumption = false)
           feasibleBranches = And(entry.pathConditions.branchConditions) :: feasibleBranches
           feasibleBranchesExp = feasibleBranchesExp.map(fbe => BigAnd(entry.pathConditions.branchConditionExps.map(_._1)) :: fbe)
           feasibleBranchesExpNew = feasibleBranchesExpNew.map(fbe => BigAnd(entry.pathConditions.branchConditionExps.map(_._2.get)) :: fbe)
         })
         // Assume we are in a feasible branch
-        v.decider.assume(Or(feasibleBranches), Option.when(debugOn)(DebugExp.createInstance(Some("Feasible Branches"), feasibleBranchesExp.map(BigOr(_)), feasibleBranchesExpNew.map(BigOr(_)), InsertionOrderedSet.empty)))
+        v.decider.assume(Or(feasibleBranches), Option.when(debugOn)(DebugExp.construct("Feasible Branches", feasibleBranchesExp.map(BigOr(_)).get, feasibleBranchesExpNew.map(BigOr(_)).get)))
         Q(sJoined2, dataJoined, v)
       }
     }

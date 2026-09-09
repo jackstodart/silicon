@@ -120,7 +120,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
       abstractLhs,
       MWSFLookup(mwsf, abstractLhs) === rhsSnapshot,
       Trigger(MWSFLookup(mwsf, abstractLhs))
-    ), Option.when(debugOn)(DebugExp.createInstance("Magic wand snapshot definition", true)))
+    ), Option.when(debugOn)(DebugExp.construct("Magic wand snapshot definition", true)))
     magicWandSnapshot
   }
 
@@ -183,7 +183,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
               case (Some(ch1: QuantifiedBasicChunk), Some(ch2: QuantifiedBasicChunk)) => ch1.snapshotMap === ch2.snapshotMap
               case _ => True
             }
-            v.decider.assume(tEq, Option.when(debugOn)(DebugExp.createInstance("Snapshots", isInternal_ = true)))
+            v.decider.assume(tEq, Option.when(debugOn)(DebugExp.construct("Snapshots", isInternal_ = true)))
 
             /* In the future it might be worth to recheck whether the permissions needed, in the case of
              * success being an instance of Incomplete, are zero.
@@ -287,13 +287,13 @@ object magicWandSupporter extends SymbolicExecutionRules {
       debugExps.flatMap(de => {
         val curChildrenSeq = de.children.toSeq
         val newChildren = filterDebugExpsWithoutSnapshot(curChildrenSeq, snapshot)
-        val (newTerm, newOExp, newFExp) = de.term match {
-          case s@Some(t) if !t.contains(snapshot) => (s, de.originalExp, de.finalExp)
-          case _ => (None, None, None)
-        }
-        if (newChildren.nonEmpty || newTerm.isDefined) {
+        val (newTerm, newOExp, newFExp) =
+          if (!de.term.contains(snapshot)) (Some(de.term), de.originalExp, de.finalExp)
+          else (None, None, None)
+
+        if (newChildren.nonEmpty) {
           val newDebugExp = if (newChildren != curChildrenSeq || newTerm != de.term)
-            new DebugExp(de.id, de.description, newOExp, newFExp, newTerm, de.isInternal, InsertionOrderedSet(newChildren))
+            new DebugExp(de.id, de.description, newOExp, newFExp, newTerm.getOrElse(True), de.isInternal, InsertionOrderedSet(newChildren))
           else
             de
           Some(newDebugExp)

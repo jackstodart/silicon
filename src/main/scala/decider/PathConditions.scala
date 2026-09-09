@@ -303,7 +303,7 @@ private trait LayeredPathConditionStackLike {
 
       if (layer.nonGlobalAssumptionDebugExps.nonEmpty && !implicationLHSExp.equals(TrueLit()())) {
         conditionalTerms :+= DebugExp.createImplicationInstance(None, Some(implicationLHSExp), Some(implicationLHSExpNew),
-          Some(implicationLHS), false, layer.nonGlobalAssumptionDebugExps)
+          implicationLHS, false, layer.nonGlobalAssumptionDebugExps)
       } else {
         conditionalTerms ++= layer.nonGlobalAssumptionDebugExps
       }
@@ -375,7 +375,7 @@ private trait LayeredPathConditionStackLike {
           if (branchConditionExp.get._1.equals(ast.TrueLit()())) {
             quantBody = layer.nonGlobalAssumptionDebugExps
           } else {
-            quantBody = InsertionOrderedSet(DebugExp.createImplicationInstance(description = None, originalExp = Some(branchConditionExp.get._1), finalExp = Some(branchConditionExp.get._2.get), term = layer.branchCondition, isInternal_ = false,
+            quantBody = InsertionOrderedSet(DebugExp.createImplicationInstance(description = None, originalExp = Some(branchConditionExp.get._1), finalExp = Some(branchConditionExp.get._2.get), term = layer.branchCondition.get, isInternal_ = false,
               children = layer.nonGlobalAssumptionDebugExps))
           }
 

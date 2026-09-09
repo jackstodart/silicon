@@ -309,7 +309,7 @@ object executor extends ExecutionRules {
                       intermediateResult combine executionFlowController.locally(s2, v1)((s3, v2) => {
                         v2.decider.declareAndRecordAsFreshFunctions(ff1 -- v2.decider.freshFunctions) /* [BRANCH-PARALLELISATION] */
                         v2.decider.declareAndRecordAsFreshMacros(fm1.filter(!v2.decider.freshMacros.contains(_)))  /* [BRANCH-PARALLELISATION] */
-                        v2.decider.assume(pcs.assumptions, Option.when(debugOn)(DebugExp.createInstance("Loop invariant", pcs.assumptionExps)), false)
+                        v2.decider.assume(pcs.assumptions, Option.when(debugOn)(DebugExp.construct("Loop invariant", pcs.assumptionExps)), false)
                         v2.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
                         if (v2.decider.checkSmoke())
                           Success()
@@ -464,8 +464,8 @@ object executor extends ExecutionRules {
         addFieldPerms(s, fields, v)((s1, v1) => {
           val s1a = s1.copy(g = s1.g + (x, (tRcvr, eRcvrNew)))
           val s1b = if (debugOn) v1.recordHeap(s1a, oldLabel, ExecStmt(stmt), oldPCS) else s1a
-          v1.decider.assume(ts, Option.when(debugOn)(DebugExp.createInstance(
-            Some("Reference Disjointness"), esNew, esNew, InsertionOrderedSet.empty)), enforceAssumption = false)
+          v1.decider.assume(ts, Option.when(debugOn)(DebugExp.construct(
+            "Reference Disjointness", esNew.get, esNew.get)), enforceAssumption = false)
           Q(s1b, v1)
         })
 
@@ -766,7 +766,7 @@ object executor extends ExecutionRules {
            val eNew = ast.LocalVarWithVersion(simplifyVariableName(t.id.name), typ)(eRhs.pos, eRhs.info, eRhs.errT)
            val exp = ast.EqCmp(ast.LocalVar(name, typ)(), eRhs)(eRhs.pos, eRhs.info, eRhs.errT)
            val expNew = ast.EqCmp(eNew, rhsExpNew.get)()
-           val debugExp = DebugExp.createInstance(exp, expNew)
+           val debugExp = DebugExp.construct(exp, expNew)
            (Some(eNew), Some(debugExp))
          } else {
             (None, None)
