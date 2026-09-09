@@ -845,8 +845,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
               tTriggers: Seq[Trigger],
               auxGlobals: Seq[Term],
               auxNonGlobals: Seq[Quantification],
-              auxGlobalsExp: Option[InsertionOrderedSet[DebugNode]],
-              auxNonGlobalsExp: Option[InsertionOrderedSet[DebugNode]],
+              auxDebugNode: Option[DebugAuxiliaryTerms],
               tCond: Term,
               eCond: Option[ast.Exp],
               tArgs: Seq[Term],
@@ -933,16 +932,17 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
 
     val commentGlobals = "Nested auxiliary terms: globals"
     v.decider.prover.comment(commentGlobals)
-    v.decider.assume(auxGlobals, Option.when(debugOn)(DebugAuxiliaryTerms(areGlobal = true, fromEvaluation = false, auxGlobalsExp.get)),
-      enforceAssumption = false)
+    v.decider.assume(auxGlobals, None, enforceAssumption = false)
 
     val commentNonGlobals = "Nested auxiliary terms: non-globals"
     v.decider.prover.comment(commentNonGlobals)
     v.decider.assume(
       auxNonGlobals.map(_.copy(
         vars = effectiveTriggersQVars,
-        triggers = effectiveTriggers)),
-      Option.when(debugOn)(DebugAuxiliaryTerms(areGlobal = false, fromEvaluation = false, auxNonGlobalsExp.get)), enforceAssumption = false)
+        triggers = effectiveTriggers)), None, enforceAssumption = false)
+
+    // To keep the auxilliary terms in one debug group, we now add them separately.
+    if (debugOn) v.decider.addDebugNode(auxDebugNode.get)
 
     val nonNegImplication = Implies(tCond, perms.IsNonNegative(tPerm))
     val nonNegImplicationExp = eCond.map(c => ast.Implies(c, ast.PermGeCmp(ePerm.get, ast.NoPerm()())())(c.pos, c.info, c.errT))
@@ -978,8 +978,8 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             v.decider.prover.comment(comment)
             val definitionalAxiomMark = v.decider.setPathConditionMark()
             v.decider.assume(inv.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
-              Option.when(debugOn)(DebugInverseFunctions(InverseFunctionKind.Definitional)), enforceAssumption = false)
-            v.decider.assume(inv.definitionalAxioms, Option.when(debugOn)(DebugInverseFunctions(InverseFunctionKind.Definitional)), enforceAssumption = false)
+              Option.when(debugOn)(DebugInverseFunctions(True, InverseFunctionKind.Definitional)), enforceAssumption = false)
+            v.decider.assume(inv.definitionalAxioms, Option.when(debugOn)(DebugInverseFunctions(True, InverseFunctionKind.Definitional)), enforceAssumption = false)
             val conservedPcs =
               if (s.recordPcs) (s.conservedPcs.head :+ v.decider.pcs.after(definitionalAxiomMark)) +: s.conservedPcs.tail
               else s.conservedPcs

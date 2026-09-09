@@ -56,7 +56,7 @@ trait RecordedPathConditions {
                     name: String,
                     isGlobal: Boolean,
                     ignore: Term /* TODO: Hack, implement properly, see quantified above */)
-  : (InsertionOrderedSet[DebugNode], InsertionOrderedSet[DebugNode])
+  : DebugAuxiliaryTerms
 }
 
 trait PathConditionStack extends RecordedPathConditions {
@@ -356,6 +356,7 @@ private trait LayeredPathConditionStackLike {
     (globals, nonGlobals)
   }
 
+  // Creates a DebugNode for quantifier auxiliary terms using the path condition's global and non-global assumptions.
   def quantifiedExp(layers: Stack[PathConditionStackLayer],
                     quantifier: Quantifier,
                     qvars: Seq[ast.Exp],
@@ -364,35 +365,34 @@ private trait LayeredPathConditionStackLike {
                     tTriggers: Seq[Trigger],
                     name: String,
                     isGlobal: Boolean,
-                    ignore: Term )
-                    : (InsertionOrderedSet[DebugNode], InsertionOrderedSet[DebugNode]) = {
+                    ignore: Term): DebugAuxiliaryTerms = {
     var globals = InsertionOrderedSet.empty[DebugNode]
-    var nonGlobals = InsertionOrderedSet.empty[DebugNode]
+    var nonGlobals = InsertionOrderedSet.empty[DebugQuantifier]
 
     for (layer <- layers) {
       globals ++= layer.globalAssumptionDebugExps
-
       val branchConditionExp = layer.branchConditionExp
-        if (branchConditionExp.isDefined) {
-          val quantBody: InsertionOrderedSet[DebugNode] =
-            if (branchConditionExp.get._1.equals(ast.TrueLit()())) {
-              layer.nonGlobalAssumptionDebugExps
-            } else {
-              InsertionOrderedSet(DebugImplication(antecedentTerm = layer.branchCondition.get, // TODO: what if not defined?
-                antecedentExp = Some(branchConditionExp.get._1),
-                antecedentFinalExp = Some(branchConditionExp.get._2.get),
-                children = layer.nonGlobalAssumptionDebugExps))
-            }
 
-          nonGlobals += DebugQuantifier(quantifier == Forall, tQvars, qvars, tTriggers, triggers, isInternal = false, quantBody)
-        } else {
-          /* No branch condition on this layer, so the assumptions are quantified directly. */
-          nonGlobals += DebugQuantifier(quantifier == Forall, tQvars, qvars, tTriggers, triggers,
-            isInternal = false, layer.nonGlobalAssumptionDebugExps)
-        }
+      if (branchConditionExp.isDefined) {
+        val quantBody: InsertionOrderedSet[DebugNode] =
+          if (branchConditionExp.get._1.equals(ast.TrueLit()())) {
+            layer.nonGlobalAssumptionDebugExps
+          } else {
+            InsertionOrderedSet(DebugImplication(antecedentTerm = layer.branchCondition.get, // TODO: what if not defined?
+              antecedentExp = Some(branchConditionExp.get._1),
+              antecedentFinalExp = Some(branchConditionExp.get._2.get),
+              children = layer.nonGlobalAssumptionDebugExps))
+          }
+
+        nonGlobals += DebugQuantifier(quantifier == Forall, tQvars, qvars, tTriggers, triggers, isInternal = false, quantBody)
+      } else {
+        /* No branch condition on this layer, so the assumptions are quantified directly. */
+        nonGlobals += DebugQuantifier(quantifier == Forall, tQvars, qvars, tTriggers, triggers,
+          isInternal = false, layer.nonGlobalAssumptionDebugExps)
+      }
     }
 
-    (globals, nonGlobals)
+    DebugAuxiliaryTerms(TrueLit()(), TrueLit()(), fromEvaluation = true, globals, nonGlobals)
   }
 }
 
@@ -435,8 +435,7 @@ private class DefaultRecordedPathConditions(from: Stack[PathConditionStackLayer]
                     tTriggers: Seq[Trigger],
                     name: String,
                     isGlobal: Boolean,
-                    ignore: Term)
-                    : (InsertionOrderedSet[DebugNode], InsertionOrderedSet[DebugNode]) = {
+                    ignore: Term): DebugAuxiliaryTerms = {
 
     quantifiedExp(from, quantifier, qvars, tQvars, triggers, tTriggers, name, isGlobal, ignore)
   }
@@ -589,8 +588,7 @@ private[decider] class LayeredPathConditionStack
                  name: String,
                  isGlobal: Boolean,
                  ignore: Term)
-                : (Seq[Term], Seq[Quantification]) = {
-
+                 : (Seq[Term], Seq[Quantification]) = {
     quantified(layers, quantifier, qvars, triggers, name, isGlobal, ignore)
   }
 
@@ -602,8 +600,7 @@ private[decider] class LayeredPathConditionStack
                     name: String,
                     isGlobal: Boolean,
                     ignore: Term)
-  : (InsertionOrderedSet[DebugNode], InsertionOrderedSet[DebugNode]) = {
-
+                    : DebugAuxiliaryTerms = {
     quantifiedExp(layers, quantifier, qvars, tQvars, triggers, tTriggers, name, isGlobal, ignore)
   }
 

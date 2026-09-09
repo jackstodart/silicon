@@ -364,7 +364,7 @@ object producer extends ProductionRules {
           case (s1, qvars, qvarExps, Seq(tCond), eCondNew, Some((Seq(tPerm, tArgs@_*), permArgs, tTriggers, (auxGlobals, auxNonGlobals), auxExps)), v1) =>
             val s1a = s1.copy(constrainableARPs = s.constrainableARPs)
             v1.heapSupporter.produceQuantified(s1a, sf, forall, resource, qvars, qvarExps, tFormalArgs, eFormalArgs, qid, optTrigger, tTriggers,
-              auxGlobals, auxNonGlobals, auxExps.map(_._1), auxExps.map(_._2), tCond, eCondNew.map(_.head), tArgs, permArgs.map(_.tail),
+              auxGlobals, auxNonGlobals, auxExps, tCond, eCondNew.map(_.head), tArgs, permArgs.map(_.tail),
               tPerm, permArgs.map(_.head), pve, NegativePermission(ePerm), QPAssertionNotInjective(resAcc), v1)((s2, v2) =>
                 Q(s2.copy(functionRecorder = s2.functionRecorder.leaveQuantifiedExp(qpa)), v2)
               )

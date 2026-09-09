@@ -158,8 +158,7 @@ trait HeapSupportRules extends SymbolicExecutionRules {
                         tTriggers: Seq[Trigger],
                         auxGlobals: Seq[Term],
                         auxNonGlobals: Seq[Quantification],
-                        auxGlobalsExp: Option[InsertionOrderedSet[DebugNode]],
-                        auxNonGlobalsExp: Option[InsertionOrderedSet[DebugNode]],
+                        auxDebugNode: Option[DebugAuxiliaryTerms],
                         tCond: Term,
                         eCond: Option[ast.Exp],
                         tArgs: Seq[Term],
@@ -200,8 +199,7 @@ trait HeapSupportRules extends SymbolicExecutionRules {
                         tTriggers: Seq[Trigger],
                         auxGlobals: Seq[Term],
                         auxNonGlobals: Seq[Quantification],
-                        auxGlobalsExp: Option[InsertionOrderedSet[DebugNode]],
-                        auxNonGlobalsExp: Option[InsertionOrderedSet[DebugNode]],
+                        auxDebugNode: Option[DebugAuxiliaryTerms],
                         tCond: Term,
                         eCond: Option[ast.Exp],
                         tArgs: Seq[Term],
@@ -227,7 +225,6 @@ trait HeapSupportRules extends SymbolicExecutionRules {
                                eArgs: Option[Seq[ast.Exp]]): Seq[(Term, (ast.Exp, Option[ast.Exp]), Seq[Var], Store, Seq[Trigger])]
 
   def getEmptyHeap(program: ast.Program, v: Verifier, mayDefineNewVars: Boolean = true): Heap
-
 }
 
 class DefaultHeapSupportRules extends HeapSupportRules {
@@ -634,8 +631,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
                         tTriggers: Seq[Trigger],
                         auxGlobals: Seq[Term],
                         auxNonGlobals: Seq[Quantification],
-                        auxGlobalsExp: Option[InsertionOrderedSet[DebugNode]],
-                        auxNonGlobalsExp: Option[InsertionOrderedSet[DebugNode]],
+                        auxDebugNode: Option[DebugAuxiliaryTerms],
                         tCond: Term,
                         eCond: Option[ast.Exp],
                         tArgs: Seq[Term],
@@ -669,8 +665,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
       tTriggers,
       auxGlobals,
       auxNonGlobals,
-      auxGlobalsExp,
-      auxNonGlobalsExp,
+      auxDebugNode,
       tCond,
       eCond,
       tArgs,
@@ -697,8 +692,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
                         tTriggers: Seq[Trigger],
                         auxGlobals: Seq[Term],
                         auxNonGlobals: Seq[Quantification],
-                        auxGlobalsExp: Option[InsertionOrderedSet[DebugNode]],
-                        auxNonGlobalsExp: Option[InsertionOrderedSet[DebugNode]],
+                        auxDebugNode: Option[DebugAuxiliaryTerms],
                         tCond: Term,
                         eCond: Option[ast.Exp],
                         tArgs: Seq[Term],
@@ -725,8 +719,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
       tTriggers,
       auxGlobals,
       auxNonGlobals,
-      auxGlobalsExp,
-      auxNonGlobalsExp,
+      auxDebugNode,
       tCond,
       eCond,
       tArgs,

@@ -291,7 +291,7 @@ object consumer extends ConsumptionRules {
           else Some(forall.triggers)
         val s0 = s.copy(functionRecorder = s.functionRecorder.enterQuantifiedExp(qpa))
         evalQuantified(s0, Forall, forall.variables, Seq(cond), ePerm +: eArgs, optTrigger, qid, pve, v) {
-          case (s1, qvars, qvarExps, Seq(tCond), condNew, Some((Seq(tPerm, tArgs@_*), permArgsNew, tTriggers, (auxGlobals, auxNonGlobals), auxExps)), v1) =>
+          case (s1, qvars, qvarExps, Seq(tCond), condNew, Some((Seq(tPerm, tArgs@_*), permArgsNew, tTriggers, (auxGlobals, auxNonGlobals), auxDebugNode)), v1) =>
             v1.heapSupporter.consumeQuantified(
               s = s1,
               h = h,
@@ -305,8 +305,7 @@ object consumer extends ConsumptionRules {
               tTriggers = tTriggers,
               auxGlobals = auxGlobals,
               auxNonGlobals = auxNonGlobals,
-              auxGlobalsExp = auxExps.map(_._1),
-              auxNonGlobalsExp = auxExps.map(_._2),
+              auxDebugNode = auxDebugNode,
               tCond = tCond,
               eCond = condNew.map(_.head),
               tArgs = tArgs,
