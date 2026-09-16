@@ -6,8 +6,7 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.{DebugExp, DebugGroup}
-import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.{DebugExp, DebugGroup, DebugInvariant}
 import viper.silicon.Config.JoinMode
 import viper.silver.cfg.silver.SilverCfg
 import viper.silver.cfg.silver.SilverCfg.{SilverBlock, SilverEdge}
@@ -283,6 +282,8 @@ object executor extends ExecutionRules {
             val sortedEdges = otherEdges ++ outEdges
             val edgeConditions = sortedEdges.collect{case ce: cfg.ConditionalEdge[ast.Stmt, ast.Exp] => ce.condition}
                                             .distinct
+            val loopPos: ast.Position = edgeConditions.map(_.pos).collectFirst{case p: ast.HasLineColumn => p}
+              .getOrElse(ast.NoPosition)
 
             type PhaseData = (State, RecordedPathConditions, Set[FunctionDecl], Seq[MacroDecl])
             var phase1data: Vector[PhaseData] = Vector.empty
@@ -310,7 +311,7 @@ object executor extends ExecutionRules {
                       intermediateResult combine executionFlowController.locally(s2, v1)((s3, v2) => {
                         v2.decider.declareAndRecordAsFreshFunctions(ff1 -- v2.decider.freshFunctions) /* [BRANCH-PARALLELISATION] */
                         v2.decider.declareAndRecordAsFreshMacros(fm1.filter(!v2.decider.freshMacros.contains(_)))  /* [BRANCH-PARALLELISATION] */
-                        val debugGroup = Option.when(debugOn)(DebugGroup("Loop invariant", pcs.assumptionExps))
+                        val debugGroup = Option.when(debugOn)(DebugInvariant(loopPos, pcs.assumptionExps))
                         v2.decider.assume(pcs.assumptions, debugGroup, enforceAssumption = false)
                         v2.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
                         if (v2.decider.checkSmoke())

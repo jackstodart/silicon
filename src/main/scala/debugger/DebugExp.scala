@@ -9,9 +9,10 @@ package viper.silicon.debugger
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.decider.PathConditions
-import viper.silicon.state.terms.{Exists, Forall, Quantifier, Term, Trigger, Var}
+import viper.silicon.state.terms
+import viper.silicon.state.terms.{Quantifier, Term, Var}
 import viper.silver.ast
-import viper.silver.ast.Exp
+import viper.silver.ast.{Exp, Position}
 import viper.silver.ast.utility.Simplifier
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -34,8 +35,8 @@ sealed trait DebugNode[Self <: DebugNode[Self]] {
   def isGlobal: Boolean
 
   // TODO: Why do these take visited? Could we just remove?
-  def getAllTerms(visited: mutable.HashSet[DebugNode[_]]): Seq[Term]
-  def getNodeWithId(soughtId: Int, visited: mutable.HashSet[DebugNode[_]]): Option[DebugNode[_]]
+  def getAllTerms(visited: mutable.HashSet[AnyDebugNode]): Seq[Term]
+  def getNodeWithId(soughtId: Int, visited: mutable.HashSet[AnyDebugNode]): Option[AnyDebugNode]
 
   // Remove the node and any children containing 'term'.
   def filterTerm(t: Term): Option[DebugNode[Self]]
@@ -59,10 +60,10 @@ sealed trait DebugAssumption[Self <: DebugAssumption[Self]] extends DebugNode[Se
 
   lazy val isGlobal: Boolean = PathConditions.isGlobal(term)
 
-  override def getAllTerms(visited: mutable.HashSet[DebugNode[_]]): Seq[Term] =
+  override def getAllTerms(visited: mutable.HashSet[AnyDebugNode]): Seq[Term] =
     if (visited.contains(this)) Seq() else Seq(term)
 
-  override def getNodeWithId(soughtId: Int, visited: mutable.HashSet[DebugNode[_]]): Option[DebugAssumption[Self]] =
+  override def getNodeWithId(soughtId: Int, visited: mutable.HashSet[AnyDebugNode]): Option[DebugAssumption[Self]] =
     Option.when(this.id == soughtId)(this)
 
   override def filterTerm(t: Term): Option[DebugAssumption[Self]] =
@@ -77,11 +78,11 @@ sealed trait DebugAssumption[Self <: DebugAssumption[Self]] extends DebugNode[Se
 
 /** A category that groups the assumptions made underneath it, rather than standing alone. */
 sealed trait DebugGroupNode[Self <: DebugGroupNode[Self]] extends DebugNode[Self] {
-  def children: InsertionOrderedSet[DebugNode[_]]
+  def children: InsertionOrderedSet[AnyDebugNode]
 
   lazy val isGlobal: Boolean = children.forall(_.isGlobal)
 
-  def getAllTerms(visited: mutable.HashSet[DebugNode[_]]): Seq[Term] = {
+  def getAllTerms(visited: mutable.HashSet[AnyDebugNode]): Seq[Term] = {
     if (visited.contains(this))
       return Seq.empty
     visited.add(this)
@@ -89,25 +90,32 @@ sealed trait DebugGroupNode[Self <: DebugGroupNode[Self]] extends DebugNode[Self
   }
 
   // Return a copy of the group with any children matching 'ids' removed.
-  def removeChildrenById(ids: Seq[Int]): DebugGroupNode[Self]
+  def removeChildrenById(ids: Seq[Int]): DebugGroupNode[Self] = {
+    val newChildren = children.flatMap[AnyDebugNode] {
+      case ass: DebugAssumption[_] => if (ids.contains(ass.id)) None else Some(ass)
+      case group: DebugGroupNode[_] => if (ids.contains(group.id)) None else Some(group.removeChildrenById(ids))
+    }
+    this.withChildren(newChildren)
+  }
 
-  def getNodeWithId(soughtId: Int, visited: mutable.HashSet[DebugNode[_]] = mutable.HashSet.empty): Option[DebugNode[_]] = {
-    /*    if (visited.contains(this))
-          return None
-        visited.add(this)
-        if (id == soughtId) {
-          return Some(this)
-        }
-        val toSearch = children.toSeq
-        var found: Option[DebugNode] = None
-        var i = 0
-        while (found.isEmpty && i < toSearch.size) {
-          found = toSearch(i).getNodeWithId(soughtId, visited)
-          i += 1
-        }
-        found*/
-    // TODO: do we need visited? Can't we just filter?
-    None
+  def withChildren(newChildren: InsertionOrderedSet[AnyDebugNode]): Self
+
+  def getNodeWithId(soughtId: Int, visited: mutable.HashSet[AnyDebugNode] = mutable.HashSet.empty): Option[AnyDebugNode] = {
+    if (visited.contains(this))
+      return None
+
+    visited.add(this)
+    if (id == soughtId)
+      return Some(this)
+
+    val toSearch = children.toSeq
+    var found: Option[AnyDebugNode] = None
+    var i = 0
+    while (found.isEmpty && i < toSearch.size) {
+      found = toSearch(i).getNodeWithId(soughtId, visited)
+      i += 1
+    }
+    found
   }
 
   private def childrenToString(currDepth: Int, maxDepth: Int, config: DebugPrintConfiguration): String = {
@@ -190,44 +198,52 @@ object DebugExp {
 // Generic group of assumptions
 class DebugGroup(val id: Int,
                  val description: Option[String],
-                 val children: InsertionOrderedSet[DebugNode[_]]) extends DebugGroupNode[DebugGroup] {
+                 val children: InsertionOrderedSet[AnyDebugNode]) extends DebugGroupNode[DebugGroup] {
   override val isInternal: Boolean = children.forall(_.isInternal)
 
   lazy val terms: Option[InsertionOrderedSet[Term]] =
     Some(children.flatMap(c => c.getAllTerms(mutable.HashSet.empty)))
 
-  override def getNodeWithId(soughtId: Int, visited: mutable.HashSet[DebugNode[_]]): Option[DebugNode[_]] =
-    ???
+  override def filterTerm(t: Term): Option[DebugNode[DebugGroup]] = {
+    val newChildren = children.flatMap(_.filterTerm(t))
+    Option.when(newChildren.nonEmpty)(this.withChildren(newChildren))
+  }
 
-  override def filterTerm(t: Term): Option[DebugNode[DebugGroup]] = ???
+  override def withChildren(newChildren: InsertionOrderedSet[AnyDebugNode]): DebugGroup =
+    new DebugGroup(id, description, newChildren)
 
   override def headerString(config: DebugPrintConfiguration): String = description.getOrElse("Group") + ":"
-
-  override def removeChildrenById(ids: Seq[Int]): DebugGroupNode[DebugGroup] = ???
 }
 
 object DebugGroup {
-  def apply(description: String, children: InsertionOrderedSet[DebugNode[_]]): DebugGroup =
+  def apply(description: String, children: InsertionOrderedSet[AnyDebugNode]): DebugGroup =
     new DebugGroup(DebugCounter.next(), Some(description), children)
 
   def apply(description: String, children: Iterable[AnyDebugNode]): DebugGroup =
     new DebugGroup(DebugCounter.next(), Some(description), InsertionOrderedSet(children))
 
-  def awaitChildren(description: String): InsertionOrderedSet[DebugNode[_]] => DebugGroup =
+  def awaitChildren(description: String): InsertionOrderedSet[AnyDebugNode] => DebugGroup =
     children => DebugGroup(description, children)
 }
 
 class DebugImplication(val id: Int,
                        val description: Option[String],
                        val isInternal: Boolean,
-                       term : Term, // Antecedent of the implication
-                       originalExp: Option[Exp],
-                       finalExp: Option[Exp],
-                       val children: InsertionOrderedSet[DebugNode[_]]) extends DebugGroupNode[DebugImplication] {
+                       val term : Term, // Antecedent of the implication
+                       val originalExp: Option[Exp],
+                       val finalExp: Option[Exp],
+                       val children: InsertionOrderedSet[AnyDebugNode])
+                       extends DebugGroupNode[DebugImplication] {
+  override def filterTerm(t: Term): Option[DebugNode[DebugImplication]] = {
+    if (term.contains(t)) None
+    else {
+      val newChildren = children.flatMap(_.filterTerm(t))
+      Option.when(newChildren.nonEmpty)(this.withChildren(newChildren))
+    }
+  }
 
-  override def removeChildrenById(ids: Seq[Int]): DebugGroupNode[DebugImplication] = ???
-
-  override def filterTerm(t: Term): Option[DebugNode[DebugImplication]] = ???
+  override def withChildren(newChildren: InsertionOrderedSet[AnyDebugNode]): DebugImplication =
+    new DebugImplication(id, description, isInternal, term, originalExp, finalExp, newChildren)
 
   override def headerString(config: DebugPrintConfiguration): String = {
     if (config.printInternalTermRepresentation) s"$term ==>"
@@ -241,7 +257,7 @@ class DebugImplication(val id: Int,
 
 object DebugImplication {
   def apply(description: Option[String], isInternal: Boolean, term: Term, originalExp: Option[Exp], finalExp: Option[Exp],
-            children: InsertionOrderedSet[DebugNode[_]]): DebugImplication =
+            children: InsertionOrderedSet[AnyDebugNode]): DebugImplication =
     new DebugImplication(DebugCounter.next(), description, isInternal, term, originalExp, finalExp, children)
 }
 
@@ -252,13 +268,18 @@ class DebugQuantifier(val id: Int,
                       val qvars : Seq[Exp],
                       val tQvars: Seq[Var],
                       val triggers: Seq[ast.Trigger],
-                      val tTriggers: Seq[Trigger],
-                      val children : InsertionOrderedSet[DebugNode[_]]) extends DebugGroupNode[DebugQuantifier] {
-  val terms = None
+                      val tTriggers: Seq[terms.Trigger],
+                      val children : InsertionOrderedSet[AnyDebugNode]) extends DebugGroupNode[DebugQuantifier] {
+  override def filterTerm(t: Term): Option[DebugNode[DebugQuantifier]] = {
+    if (tQvars.exists(_.contains(t))) None
+    else {
+      val newChildren = children.flatMap(_.filterTerm(t))
+      Option.when(newChildren.nonEmpty)(this.withChildren(newChildren))
+    }
+  }
 
-  override def removeChildrenById(ids: Seq[Int]): DebugGroupNode[DebugQuantifier] = ???
-
-  override def filterTerm(t: Term): Option[DebugNode[DebugQuantifier]] = ???
+  override def withChildren(newChildren: InsertionOrderedSet[AnyDebugNode]): DebugQuantifier =
+    new DebugQuantifier(id, description, isInternal, quantifier, qvars, tQvars, triggers, tTriggers, newChildren)
 
   override def headerString(config: DebugPrintConfiguration): String =
     if (config.printInternalTermRepresentation) s"$quantifier ${tQvars.mkString(", ")} ::"
@@ -272,10 +293,39 @@ object DebugQuantifier {
             qvars : Seq[Exp],
             tQvars: Seq[Var],
             triggers: Seq[ast.Trigger],
-            tTriggers: Seq[Trigger],
-            children : InsertionOrderedSet[DebugNode[_]]): DebugQuantifier =
+            tTriggers: Seq[terms.Trigger],
+            children : InsertionOrderedSet[AnyDebugNode]): DebugQuantifier =
     new DebugQuantifier(DebugCounter.next(), description, isInternal, quantifier, qvars, tQvars, triggers, tTriggers, children)
 }
+
+class DebugInvariant(val id: Int,
+                     val loopPos: Position,
+                     val children: InsertionOrderedSet[AnyDebugNode])
+                     extends DebugGroupNode[DebugInvariant] {
+  override def description: Option[String] = Some("Loop invariants")
+
+  override def isInternal: Boolean = false
+
+  override def withChildren(newChildren: InsertionOrderedSet[AnyDebugNode]): DebugInvariant =
+    new DebugInvariant(id, loopPos, newChildren)
+
+  override def filterTerm(t: Term): Option[DebugNode[DebugInvariant]] = {
+    val newChildren = children.flatMap(_.filterTerm(t))
+    Option.when(newChildren.nonEmpty)(this.withChildren(newChildren))
+  }
+
+  override def headerString(config: DebugPrintConfiguration): String = s"Loop invariants (at $loopPos):"
+}
+
+object DebugInvariant {
+  def apply(loopPos: Position, children: InsertionOrderedSet[AnyDebugNode]): DebugInvariant =
+    new DebugInvariant(DebugCounter.next(), loopPos, children)
+}
+
+
+/* -------------------------------------------------------------------------------------------- *
+ * Configuration                                                                                *
+ * -------------------------------------------------------------------------------------------- */
 
 class DebugPrintConfiguration {
   var isPrintInternalEnabled: Boolean = false
