@@ -6,9 +6,10 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.{DebugAssumption, DebugExp, DebugGroup, DebugGroupNode, DebugNode}
 import viper.silicon._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.debugger.{AnyDebugNode, PreDebugAssumption}
 import viper.silicon.decider.RecordedPathConditions
 import viper.silicon.interfaces._
 import viper.silicon.interfaces.state._
@@ -120,7 +121,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
       abstractLhs,
       MWSFLookup(mwsf, abstractLhs) === rhsSnapshot,
       Trigger(MWSFLookup(mwsf, abstractLhs))
-    ), Option.when(debugOn)(DebugExp.construct("Magic wand snapshot definition", true)))
+    ), Option.when(debugOn)(DebugExp.awaitTerm("Magic wand snapshot definition", true)))
     magicWandSnapshot
   }
 
@@ -183,7 +184,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
               case (Some(ch1: QuantifiedBasicChunk), Some(ch2: QuantifiedBasicChunk)) => ch1.snapshotMap === ch2.snapshotMap
               case _ => True
             }
-            v.decider.assume(tEq, Option.when(debugOn)(DebugExp.construct("Snapshots", isInternal_ = true)))
+            v.decider.assume(tEq, Option.when(debugOn)(DebugExp.awaitTerm("Snapshots", isInternal = true)))
 
             /* In the future it might be worth to recheck whether the permissions needed, in the case of
              * success being an instance of Incomplete, are zero.
@@ -249,7 +250,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
 
     val stackSize = 3 + s.reserveHeaps.tail.size
     // IMPORTANT: Size matches structure of reserveHeaps at [State RHS] below
-    var recordedBranches: Seq[(State, Stack[Term], Stack[(Exp, Option[Exp])], (Seq[Term], Option[Seq[DebugExp]]), Chunk)] = Nil
+    var recordedBranches: Seq[(State, Stack[Term], Stack[(Exp, Option[Exp])], (Seq[Term], Option[Seq[AnyDebugNode]]), Chunk)] = Nil
 
     /* TODO: When parallelising branches, some of the runtime assertions in the code below crash
      *       during some executions - since such crashes are hard to debug, branch parallelisation
@@ -262,7 +263,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
                       recordPcs = true,
                       parallelizeBranches = false)
 
-    def appendToResults(s5: State, ch: Chunk, pcs: RecordedPathConditions, conservedPcs: (Seq[Term], Option[Seq[DebugExp]]), v4: Verifier): Unit = {
+    def appendToResults(s5: State, ch: Chunk, pcs: RecordedPathConditions, conservedPcs: (Seq[Term], Option[Seq[AnyDebugNode]]), v4: Verifier): Unit = {
       assert(s5.conservedPcs.nonEmpty, s"Unexpected structure of s5.conservedPcs: ${s5.conservedPcs}")
 
       var conservedPcsStack: Stack[Vector[RecordedPathConditions]] = s5.conservedPcs
@@ -283,24 +284,9 @@ object magicWandSupporter extends SymbolicExecutionRules {
       recordedBranches :+= (s6, v4.decider.pcs.branchConditions, v4.decider.pcs.branchConditionExps, conservedPcs, ch)
     }
 
-    def filterDebugExpsWithoutSnapshot(debugExps: Seq[DebugExp], snapshot: Term): Seq[DebugExp] = {
-      debugExps.flatMap(de => {
-        val curChildrenSeq = de.children.toSeq
-        val newChildren = filterDebugExpsWithoutSnapshot(curChildrenSeq, snapshot)
-        val (newTerm, newOExp, newFExp) =
-          if (!de.term.contains(snapshot)) (Some(de.term), de.originalExp, de.finalExp)
-          else (None, None, None)
-
-        if (newChildren.nonEmpty) {
-          val newDebugExp = if (newChildren != curChildrenSeq || newTerm != de.term)
-            new DebugExp(de.id, de.description, newOExp, newFExp, newTerm.getOrElse(True), de.isInternal, InsertionOrderedSet(newChildren))
-          else
-            de
-          Some(newDebugExp)
-        } else {
-          None
-        }
-      })
+    // Remove all leaf nodes containing 'snapshot'
+    def filterDebugExpsWithoutSnapshot(debugExps: Seq[AnyDebugNode], snapshot: Term): Seq[AnyDebugNode] = {
+      debugExps.flatMap(de => de.filterTerm(snapshot))
     }
 
     def createWandChunkAndRecordResults(s: State,
@@ -339,7 +325,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
         val (ch, groundPcs, groundPcsExp) = v2.heapSupporter.createWandChunk(s2, wand, tArgs, eArgsNew, wandSnapshot, v2)
 
         val tPcs = (pcsQuantified +: pcsWithoutFreshSnapRoot) ++ groundPcs
-        val ePcs = Option.when(debugOn)(DebugExp.createInstance("MWSF definition path conditions", pcsQuantified, true) +: (pcsWithoutExp.get ++ groundPcsExp.get))
+        val ePcs = Option.when(debugOn)(DebugExp(Some("MWSF definition path conditions"), isInternal = true, pcsQuantified, None, None) +: (pcsWithoutExp.get ++ groundPcsExp.get))
 
         val s3 = s2.copy(packagingWandSnapshots = s2.packagingWandSnapshots.filterNot(_._1 == freshSnapRoot))
         appendToResults(s3, ch, v2.decider.pcs.after(preMark), (tPcs, ePcs), v2)
@@ -433,7 +419,8 @@ object magicWandSupporter extends SymbolicExecutionRules {
           v1.decider.setCurrentBranchCondition(And(branchConditions), (exp, expNew))
 
           // Recreate all path conditions in the Z3 proof script that we recorded for that branch
-          v1.decider.assume(conservedPcs._1, conservedPcs._2)
+          val children: Option[Iterable[PreDebugAssumption]] = ??? // Option.when(debugOn)(conservedPcs._2.get.map)
+          v1.decider.assume(conservedPcs._1, children, Option.when(debugOn)(DebugGroup.awaitChildren("Joined path conditions for magic wand")), enforceAssumption = false)
 
           // Execute the continuation Q
           Q(s2, magicWandChunk, v1)

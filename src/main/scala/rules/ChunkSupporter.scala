@@ -164,7 +164,7 @@ object chunkSupporter extends ChunkSupportRules {
       val interpreter = new NonQuantifiedPropertyInterpreter(heap.values, v)
       val resource = Resources.resourceDescriptions(chunk.resourceID)
       val pathCond = interpreter.buildPathConditionsForChunk(chunk, resource.instanceProperties(s.mayAssumeUpperBounds))
-      pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.construct(p._2.get, p._2.get))))
+      pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2.get, p._2.get))))
     }
 
     findChunk[NonQuantifiedChunk](h.values, id, args, v) match {
@@ -191,7 +191,7 @@ object chunkSupporter extends ChunkSupportRules {
         } else {
           if (v.decider.check(ch.perm !== NoPerm, Verifier.config.checkTimeout())) {
             val constraintExp = permsExp.map(pe => ast.PermLtCmp(pe, ch.permExp.get)(pe.pos, pe.info, pe.errT))
-            v.decider.assume(PermLess(perms, ch.perm), Option.when(debugOn)(DebugExp.construct(constraintExp.get, constraintExp.get)))
+            v.decider.assume(PermLess(perms, ch.perm), Option.when(debugOn)(DebugExp.awaitTerm(constraintExp.get, constraintExp.get)))
             val newPermExp = permsExp.map(pe => ast.PermSub(ch.permExp.get, pe)(pe.pos, pe.info, pe.errT))
             val newChunk = ch.withPerm(PermMinus(ch.perm, perms), newPermExp)
             val takenChunk = ch.withPerm(perms, permsExp)

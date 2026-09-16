@@ -7,7 +7,7 @@
 package viper.silicon.supporters.functions
 
 import com.typesafe.scalalogging.Logger
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.{DebugExp, DebugGroup}
 import viper.silver.ast
 import viper.silver.ast.utility.Functions
 import viper.silver.components.StatefulComponent
@@ -20,6 +20,7 @@ import viper.silicon.state.State.OldHeaps
 import viper.silicon.state.terms._
 import viper.silicon.state.terms.predef.`?s`
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.decider.Decider
 import viper.silicon.rules.{consumer, evaluator, executionFlowController, producer}
 import viper.silicon.supporters.{AnnotationSupporter, PredicateData}
@@ -39,7 +40,7 @@ trait DefaultFunctionVerificationUnitProvider extends VerifierComponent { v: Ver
   def decider: Decider
   def symbolConverter: SymbolConverter
 
-  private case class Phase1Data(sPre: State, bcsPre: Stack[Term], bcsPreExp: Stack[(ast.Exp, Option[ast.Exp])], pcsPre: InsertionOrderedSet[Term], pcsPreExp: Option[InsertionOrderedSet[DebugExp]])
+  private case class Phase1Data(sPre: State, bcsPre: Stack[Term], bcsPreExp: Stack[(ast.Exp, Option[ast.Exp])], pcsPre: InsertionOrderedSet[Term], pcsPreExp: Option[InsertionOrderedSet[AnyDebugNode]])
 
   object functionsSupporter
       extends FunctionVerificationUnit[Sort, Decl, Term]
@@ -275,14 +276,15 @@ trait DefaultFunctionVerificationUnitProvider extends VerifierComponent { v: Ver
         case (intermediateResult, Phase1Data(sPre, bcsPre, bcsPreExp, pcsPre, pcsPreExp)) =>
           intermediateResult && executionFlowController.locally(sPre, v)((s1, _) => {
             decider.setCurrentBranchCondition(And(bcsPre), (BigAnd(bcsPreExp.map(_._1)), Option.when(debugOn)(BigAnd(bcsPreExp.map(_._2.get)))))
-            decider.assume(pcsPre, Option.when(debugOn)(DebugExp.construct(s"precondition of ${function.name}", pcsPreExp.get)), enforceAssumption = false)
+            decider.assume(pcsPre, None, None, enforceAssumption = false)
+            if (debugOn) decider.addDebugNode(DebugGroup(s"precondition of ${function.name}", pcsPreExp.get))
             v.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
             val s1a = if (debugOn) v.startKeyHeap(s1, "nil", EvalExp(body)) else s1
             eval(s1a, body, FunctionNotWellformed(function), v)((s2, tBody, bodyNew, _) => {
               val debugExp = if (debugOn) {
                 val e = ast.EqCmp(ast.Result(function.typ)(), body)(function.pos, function.info, function.errT)
                 val eNew = ast.EqCmp(ast.Result(function.typ)(), bodyNew.get)(function.pos, function.info, function.errT)
-                Some(DebugExp.construct(e, eNew))
+                Some(DebugExp.awaitTerm(e, eNew))
               } else { None }
               decider.assume(BuiltinEquals(data.formalResult, tBody), debugExp)
               val s2a = if (debugOn) {

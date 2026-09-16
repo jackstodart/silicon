@@ -6,12 +6,12 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.{DebugExp, DebugGroup}
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.decider.RecordedPathConditions
 import viper.silicon.interfaces.{Success, VerificationResult}
 import viper.silicon.logger.records.structural.JoiningRecord
-import viper.silicon.state.{StateMerge, State}
+import viper.silicon.state.{State, StateMerge}
 import viper.silicon.state.terms.{And, Or, Term}
 import viper.silicon.utils.ast.{BigAnd, BigOr}
 import viper.silicon.verifier.Verifier
@@ -103,13 +103,15 @@ object joiner extends JoiningRules {
           val pcsExp = Option.when(debugOn)(entry.pathConditions.conditionalizedExp)
           val comment = "Joined path conditions"
           v.decider.prover.comment(comment)
-          v.decider.assume(pcs, Option.when(debugOn)(DebugExp.construct(comment, InsertionOrderedSet(pcsExp.get))), enforceAssumption = false)
+          v.decider.assume(pcs, None, None, enforceAssumption = false)
+          if (debugOn) v.decider.addDebugNode(DebugGroup(comment, InsertionOrderedSet(pcsExp.get)))
           feasibleBranches = And(entry.pathConditions.branchConditions) :: feasibleBranches
           feasibleBranchesExp = feasibleBranchesExp.map(fbe => BigAnd(entry.pathConditions.branchConditionExps.map(_._1)) :: fbe)
           feasibleBranchesExpNew = feasibleBranchesExpNew.map(fbe => BigAnd(entry.pathConditions.branchConditionExps.map(_._2.get)) :: fbe)
         })
         // Assume we are in a feasible branch
-        v.decider.assume(Or(feasibleBranches), Option.when(debugOn)(DebugExp.construct("Feasible Branches", feasibleBranchesExp.map(BigOr(_)).get, feasibleBranchesExpNew.map(BigOr(_)).get)))
+        v.decider.assume(Or(feasibleBranches), Option.when(debugOn)(
+          DebugExp.awaitTerm("Feasible Branches", BigOr(feasibleBranchesExp.get), BigOr(feasibleBranchesExpNew.get), isInternal = false)))
         Q(sJoined2, dataJoined, v)
       }
     }

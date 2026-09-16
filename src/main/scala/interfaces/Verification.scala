@@ -6,7 +6,7 @@
 
 package viper.silicon.interfaces
 
-import viper.silicon.debugger.{DebugAxiom, DebugExp}
+import viper.silicon.debugger.{DebugAxiom, DebugExp, DebugNode}
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.interfaces.state.Chunk
 import viper.silicon.reporting._
@@ -142,10 +142,10 @@ case class SiliconDebuggingFailureContext(branchConditions: Seq[Term],
                                           state: Option[State],
                                           verifier: Option[Verifier],
                                           proverDecls: Seq[String],
-                                          preambleAssumptions: Seq[DebugAxiom] ,
+                                          preambleAssumptions: Seq[DebugAxiom],
                                           macroDecls: Vector[MacroDecl],
                                           functionDecls: Set[FunctionDecl],
-                                          assumptions: InsertionOrderedSet[DebugExp],
+                                          assumptions: InsertionOrderedSet[DebugNode[_]],
                                           failedAssertion: Term,
                                           failedAssertionExp: DebugExp) extends FailureContext {
 

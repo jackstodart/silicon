@@ -9,7 +9,8 @@ package viper.silicon.rules
 import viper.silicon
 import viper.silicon.Config.ExhaleMode
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.debugger.AnyDebugNode
+import viper.silicon.debugger.{DebugExp, DebugNode}
 import viper.silicon.interfaces.{Success, VerificationResult}
 import viper.silicon.interfaces.state.{Chunk, ChunkIdentifer, NonQuantifiedChunk}
 import viper.silicon.resources.{FieldID, PredicateID}
@@ -158,8 +159,8 @@ trait HeapSupportRules extends SymbolicExecutionRules {
                         tTriggers: Seq[Trigger],
                         auxGlobals: Seq[Term],
                         auxNonGlobals: Seq[Quantification],
-                        auxGlobalsExp: Option[InsertionOrderedSet[DebugExp]],
-                        auxNonGlobalsExp: Option[InsertionOrderedSet[DebugExp]],
+                        auxGlobalsExp: Option[InsertionOrderedSet[AnyDebugNode]],
+                        auxNonGlobalsExp: Option[InsertionOrderedSet[AnyDebugNode]],
                         tCond: Term,
                         eCond: Option[ast.Exp],
                         tArgs: Seq[Term],
@@ -200,8 +201,8 @@ trait HeapSupportRules extends SymbolicExecutionRules {
                         tTriggers: Seq[Trigger],
                         auxGlobals: Seq[Term],
                         auxNonGlobals: Seq[Quantification],
-                        auxGlobalsExp: Option[InsertionOrderedSet[DebugExp]],
-                        auxNonGlobalsExp: Option[InsertionOrderedSet[DebugExp]],
+                        auxGlobalsExp: Option[InsertionOrderedSet[AnyDebugNode]],
+                        auxNonGlobalsExp: Option[InsertionOrderedSet[AnyDebugNode]],
                         tCond: Term,
                         eCond: Option[ast.Exp],
                         tArgs: Seq[Term],
@@ -277,12 +278,12 @@ class DefaultHeapSupportRules extends HeapSupportRules {
             val h3 = Heap(remainingChunks ++ untouchedChunks ++ otherChunks)
             val (sm, smValueDef) = quantifiedChunkSupporter.singletonSnapshotMap(s3, field, Seq(tRcvr), tRhs, v1)
             v1.decider.prover.comment("Definitional axioms for singleton-FVF's value")
-            val debugExp = Option.when(debugOn)(DebugExp.construct("Definitional axioms for singleton-FVF's value", isInternal_ = true))
+            val debugExp = Option.when(debugOn)(DebugExp.awaitTerm("Definitional axioms for singleton-FVF's value", isInternal = true))
             v1.decider.assumeDefinition(smValueDef, debugExp)
             val ch = quantifiedChunkSupporter.createSingletonQuantifiedChunk(Seq(`?r`), Option.when(debugOn)(Seq(ast.LocalVarDecl("r", ast.Ref)(ass.pos, ass.info, ass.errT))),
               field, Seq(tRcvr), Option.when(debugOn)(Seq(eRcvrNew.get)), FullPerm, Option.when(debugOn)(ast.FullPerm()(ass.pos, ass.info, ass.errT)), sm, newTag, s1.program)
             if (s3.heapDependentTriggers.contains(field)) {
-              val debugExp2 = Option.when(debugOn)(DebugExp.construct(s"FieldTrigger(${eRcvrNew.toString()}.${field.name})"))
+              val debugExp2 = Option.when(debugOn)(DebugExp.awaitTerm(s"FieldTrigger(${eRcvrNew.toString()}.${field.name})", isInternal = true))
               v1.decider.assume(FieldTrigger(field.name, sm, tRcvr), debugExp2)
             }
             val s4 = s3.copy(h = h3 + ch)
@@ -351,7 +352,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
                 case p: ast.Predicate => p.name
                 case w: ast.MagicWand => MagicWandIdentifier(w, s2.program).toString
               }
-              DebugExp.construct(s"Resource trigger(${name}($argsString))", isInternal_ = true)
+              DebugExp.awaitTerm(s"Resource trigger(${name}($argsString))", isInternal = true)
             }))
           }
 
@@ -361,8 +362,10 @@ class DefaultHeapSupportRules extends HeapSupportRules {
             case _: ast.Field =>
               v.decider.prover.comment(s"perm($resAcc)  ~~>  assume upper permission bound")
               val debugLabel = v.getDebugOldLabel(s2, resAcc.pos, Some(h))
-              val exp = Option.when(debugOn)(ast.PermLeCmp(ast.DebugLabelledOld(ast.CurrentPerm(resAcc)(), debugLabel)(), ast.FullPerm()())())
-              v.decider.assume(PermAtMost(currentPermAmount, FullPerm), exp, exp.map(s2.substituteVarsInExp(_)))
+              val debugExp = Option.when(debugOn) {
+                val exp = ast.PermLeCmp(ast.DebugLabelledOld(ast.CurrentPerm(resAcc)(), debugLabel)(), ast.FullPerm()())()
+                DebugExp.awaitTerm("Permission upper bound", exp, s2.substituteVarsInExp(exp), isInternal = false) }
+              v.decider.assume(PermAtMost(currentPermAmount, FullPerm), debugExp)
             case _ =>
           }
 
@@ -400,10 +403,10 @@ class DefaultHeapSupportRules extends HeapSupportRules {
            * quantifier in whose body field 'fa.field' was accessed)
            * which is protected by a trigger term that we currently don't have.
            */
-          v.decider.assume(And(fvfDef.valueDefinitions), Option.when(debugOn)(DebugExp.construct("Value definitions", isInternal_ = true)))
+          v.decider.assume(And(fvfDef.valueDefinitions), Option.when(debugOn)(DebugExp.awaitTerm("Value definitions", isInternal = true)))
           if (s.heapDependentTriggers.contains(fa.field)) {
             val trigger = FieldTrigger(fa.field.name, fvfDef.sm, tRcvr)
-            val triggerExp = Option.when(debugOn)(DebugExp.construct(s"FieldTrigger(${eRcvr.toString()}.${fa.field.name})"))
+            val triggerExp = Option.when(debugOn)(DebugExp.awaitTerm(s"FieldTrigger(${eRcvr.toString()}.${fa.field.name})", isInternal = true))
             v.decider.assume(trigger, triggerExp)
           }
           if (s.triggerExp) {
@@ -447,7 +450,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
           }
           if (s2.heapDependentTriggers.contains(fa.field)) {
             val trigger = FieldTrigger(fa.field.name, sm, tRcvr)
-            val triggerExp = Option.when(debugOn)(DebugExp.construct(s"FieldTrigger(${eRcvr.toString()}.${fa.field.name})"))
+            val triggerExp = Option.when(debugOn)(DebugExp.awaitTerm(s"FieldTrigger(${eRcvr.toString()}.${fa.field.name})", isInternal = true))
             v.decider.assume(trigger, triggerExp)
           }
           val (permCheck, permCheckExp, s3) =
@@ -509,7 +512,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
         quantifiedChunkSupporter.summarisingSnapshotMap(
           s, resource, tFormalArgs, relevantChunks, v)
       val eArgsStr = eArgs.mkString(", ")
-      val debugExp = Option.when(debugOn)(DebugExp.construct(s"Resource trigger(${name}($eArgsStr))", (resAcc), (resAcc)))
+      val debugExp = Option.when(debugOn)(DebugExp.awaitTerm(s"Resource trigger(${name}($eArgsStr))", resAcc, resAcc, isInternal = true))
       v.decider.assume(trigger(smDef1.sm), debugExp)
       s.copy(smCache = smCache1, functionRecorder = s.functionRecorder.recordFvfAndDomain(smDef1))
     } else {
@@ -529,7 +532,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
       // The singleton snapshot map maps the wand's arguments to its magic wand snap function.
       val (sm, smValueDef) = quantifiedChunkSupporter.singletonSnapshotMap(s, wand, tArgs, snapshot.mwsf, v)
       v.decider.prover.comment("Definitional axioms for singleton-SM's value")
-      val debugExp = Option.when(debugOn)(DebugExp.construct("Definitional axioms for singleton-SM's value", true))
+      val debugExp = Option.when(debugOn)(DebugExp.awaitTerm("Definitional axioms for singleton-SM's value", true))
       v.decider.assumeDefinition(smValueDef, debugExp)
       val chunk = quantifiedChunkSupporter.createSingletonQuantifiedChunk(formalVars, formalVarExps, wand, tArgs,
         eArgs, FullPerm, Option.when(debugOn)(ast.FullPerm()()), sm, None, s.program)
@@ -583,7 +586,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
                 && !Verifier.config.disableFunctionUnfoldTrigger()) {
                 val predicate = resource.asInstanceOf[ast.Predicate]
                 val argsString = eArgs.mkString(", ")
-                val debugExp = Option.when(debugOn)(DebugExp.construct(s"PredicateTrigger(${predicate.name}($argsString))", isInternal_ = true))
+                val debugExp = Option.when(debugOn)(DebugExp.awaitTerm(s"PredicateTrigger(${predicate.name}($argsString))", isInternal = true))
                 v2.decider.assume(App(s2.predicateData(predicate.name).triggerFunction, snap1 +: tArgs), debugExp)
               }
               Q(s2.copy(h = h2), v2)
@@ -636,8 +639,8 @@ class DefaultHeapSupportRules extends HeapSupportRules {
                         tTriggers: Seq[Trigger],
                         auxGlobals: Seq[Term],
                         auxNonGlobals: Seq[Quantification],
-                        auxGlobalsExp: Option[InsertionOrderedSet[DebugExp]],
-                        auxNonGlobalsExp: Option[InsertionOrderedSet[DebugExp]],
+                        auxGlobalsExp: Option[InsertionOrderedSet[AnyDebugNode]],
+                        auxNonGlobalsExp: Option[InsertionOrderedSet[AnyDebugNode]],
                         tCond: Term,
                         eCond: Option[ast.Exp],
                         tArgs: Seq[Term],
@@ -699,8 +702,8 @@ class DefaultHeapSupportRules extends HeapSupportRules {
                         tTriggers: Seq[Trigger],
                         auxGlobals: Seq[Term],
                         auxNonGlobals: Seq[Quantification],
-                        auxGlobalsExp: Option[InsertionOrderedSet[DebugExp]],
-                        auxNonGlobalsExp: Option[InsertionOrderedSet[DebugExp]],
+                        auxGlobalsExp: Option[InsertionOrderedSet[AnyDebugNode]],
+                        auxNonGlobalsExp: Option[InsertionOrderedSet[AnyDebugNode]],
                         tCond: Term,
                         eCond: Option[ast.Exp],
                         tArgs: Seq[Term],
@@ -867,7 +870,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
       )
 
       v.decider.prover.comment("axiomatized snapshot map after havoc")
-      val debugExp = Option.when(debugOn)(DebugExp.construct("havoc new axiom", isInternal_ = true))
+      val debugExp = Option.when(debugOn)(DebugExp.awaitTerm("havoc new axiom", isInternal = true))
       v.decider.assume(newAxiom, debugExp)
 
       ch.withSnapshotMap(newSm)

@@ -1,6 +1,7 @@
 package viper.silicon.debugger
 
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.decider.{Cvc5ProverStdIO, RecordedPathConditions, Z3ProverStdIO}
 import viper.silicon.interfaces.state.Chunk
 import viper.silicon.interfaces.{Failure, SiliconDebuggingFailureContext, Success, VerificationResult}
@@ -9,7 +10,7 @@ import viper.silicon.rules.evaluator
 import viper.silicon.state.State.TemporaryRecord
 import viper.silicon.state._
 import viper.silicon.state.terms.{Term, True}
-import viper.silicon.utils.ast.simplifyVariableName
+import viper.silicon.utils.ast.{flattenOperator, simplifyVariableName}
 import viper.silicon.verifier.{MainVerifier, Verifier, WorkerVerifier}
 import viper.silver.ast
 import viper.silver.ast._
@@ -23,24 +24,33 @@ import java.nio.file.Paths
 import scala.collection.mutable
 import scala.io.StdIn.readLine
 
+package object debugger {
+  type AnyDebugNode = DebugNode[_]
+  // These are constructors which are used in decider.assume, where terms are later attached to DebugAssumptions
+  type PreDebugAssumption = Term => DebugAssumption[_]
+  type PreDebugGroup = InsertionOrderedSet[DebugNode[_]] => DebugGroupNode[_]
+}
+
 case class ProofObligation(s: State,
                            v: Verifier,
                            proverEmits: Seq[String],
                            preambleAssumptions: Seq[DebugAxiom],
                            branchConditions: Seq[Term],
                            branchConditionExps: Seq[(ast.Exp, ast.Exp)],
-                           assumptionsExp: InsertionOrderedSet[DebugExp],
+                           assumptionsExp: InsertionOrderedSet[AnyDebugNode],
                            assertion: Term,
                            eAssertion: DebugExp,
                            timeout: Option[Int],
-                           printConfig: DebugExpPrintConfiguration,
+                           printConfig: DebugPrintConfiguration,
                            originalErrorReason: ErrorReason,
                            resolver: DebugResolver,
-                           translator: DebugTranslator
-                          ){
+                           translator: DebugTranslator) {
 
   def removeAssumptions(ids: Seq[Int]): ProofObligation = {
-    val newAssumptionsExp = assumptionsExp.filter(a => !ids.contains(a.id)).map(c => c.removeChildrenById(ids))
+    val newAssumptionsExp = assumptionsExp.filter(a => !ids.contains(a.id)).map[DebugNode[_]] {
+      case assumption: DebugAssumption[_] => assumption
+      case group: DebugGroupNode[_] => group.removeChildrenById(ids)
+    }
     this.copy(assumptionsExp = newAssumptionsExp)
   }
 
@@ -200,9 +210,13 @@ case class ProofObligation(s: State,
   }
 
   private def assumptionString: String = {
-    val filteredAssumptions = assumptionsExp.filter(d => !d.isInternal || printConfig.isPrintInternalEnabled)
+    val filteredAssumptions = if (printConfig.isPrintInternalEnabled) assumptionsExp
+    else assumptionsExp.filter(d => !d.isInternal)
+
     if (filteredAssumptions.nonEmpty) {
-      s"Assumptions: ${filteredAssumptions.foldLeft[String]("")((s, de) => s + de.toString(printConfig))}\n\n"
+      "Assumptions: \n" +
+        filteredAssumptions.foldLeft[String]("")((s, de) => s + de.toString(printConfig) + "\n") +
+        "\n\n"
     } else {
       ""
     }
@@ -226,7 +240,7 @@ case class ProofObligation(s: State,
 
   private def assertionString: String = {
     if (eAssertion.finalExp.isDefined){
-      s"Assertion:\n\t$eAssertion\n\n"
+      s"Assertion:\n$eAssertion\n\n"
     } else {
       eAssertion.description.get
     }
@@ -300,6 +314,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
         println(s"Debugging results are not available. No failure context found.")
         return None
       }
+
       val failureContext = failureContexts.head
       if (failureContext.state.isEmpty || failureContext.verifier.isEmpty) {
         println(s"State or verifier not found.")
@@ -309,7 +324,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       val obl = Some(ProofObligation(failureContext.state.get, failureContext.verifier.get, failureContext.proverDecls, failureContext.preambleAssumptions,
         failureContext.branchConditions, failureContext.branchConditionExps, failureContext.assumptions,
         failureContext.failedAssertion, failureContext.failedAssertionExp, None,
-        new DebugExpPrintConfiguration, currResult.message.reason,
+        new DebugPrintConfiguration, currResult.message.reason,
         new DebugResolver(this.pprogram, this.resolver.names), new DebugTranslator(this.pprogram, translator.getMembers())))
       println(s"Current obligation:\n${obl.get}")
       obl
@@ -442,19 +457,24 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
     indexOpt match {
       case Some(id) =>
         val toSearch = obl.assumptionsExp.toSeq
-        var found: Option[DebugExp] = None
+        var found: Option[AnyDebugNode] = None
         var i = 0
         while (found.isEmpty && i < toSearch.size) {
-          found = toSearch(i).getExpWithId(id, new mutable.HashSet())
+          toSearch(i) match {
+            case ass: DebugAssumption[_] => if (ass.id == id) found = Some(ass)
+            case group: DebugGroupNode[_] => found = group.getNodeWithId(id)
+          }
           i += 1
         }
-        if (found.isDefined) {
-          val filteredChildren = found.get.children.filter(d => !d.isInternal || obl.printConfig.isPrintInternalEnabled)
-          if (filteredChildren.nonEmpty) {
-            println(s"${filteredChildren.foldLeft[String]("")((s, de) => s + de.toString(obl.printConfig))}\n\n")
-          }
-        } else {
-          println("Assumption not found")
+
+        found match {
+          case None => println("Assumption not found")
+          case Some(_: DebugAssumption[_]) => println("Assumption has no children")
+          case Some(ass: DebugGroupNode[_]) =>
+            val filteredChildren = if (obl.printConfig.isPrintInternalEnabled) ass.children else ass.children.filter(!_.isInternal)
+            if (filteredChildren.nonEmpty) {
+              println(s"${filteredChildren.foldLeft[String]("")((s, de) => s + de.toString(obl.printConfig))}\n\n")
+            }
         }
       case None =>
         println("Invalid input")
@@ -479,7 +499,8 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       val assumptionE = translateStringToExp(userInput, obl)
       evalAssumption(assumptionE, obl, free, obl.v) match {
         case Some((resS, resT, resE, evalAssumptions)) =>
-          val allAssumptions = obl.assumptionsExp ++ evalAssumptions + DebugExp.createInstance(resT, assumptionE, resE)
+          val newDE = DebugExp(None, isInternal = false, resT, Some(assumptionE), Some(resE))
+          val allAssumptions = obl.assumptionsExp ++ evalAssumptions + newDE
           obl.copy(s = resS, assumptionsExp = allAssumptions)
         case None =>
           obl
@@ -506,7 +527,8 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       })
       verificationResult match {
         case Success() =>
-          obl.copy(assumptionsExp = resV.decider.pcs.assumptionExps, assertion = resT, eAssertion = DebugExp.createInstance(resT, resE, resE), v = resV)
+          val eAssertion = DebugExp(None, isInternal = false, resT, Some(resE), Some(resE))
+          obl.copy(assumptionsExp = resV.decider.pcs.assumptionExps, assertion = resT, eAssertion = eAssertion, v = resV)
         case _ =>
           throw new UnknownError("Error while evaluating expression: " + verificationResult.toString)
       }
@@ -557,7 +579,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
     translatePExp(pexp)
   }
 
-  private def evalAssumption(e: ast.Exp, obl: ProofObligation, isFree: Boolean, v: Verifier): Option[(State, Term, ast.Exp, InsertionOrderedSet[DebugExp])] = {
+  private def evalAssumption(e: ast.Exp, obl: ProofObligation, isFree: Boolean, v: Verifier): Option[(State, Term, ast.Exp, InsertionOrderedSet[AnyDebugNode])] = {
     var resT: Term = null
     var resS: State = null
     var resE: ast.Exp = null

@@ -6,7 +6,7 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.{DebugExp, DebugGroup}
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.Config.JoinMode
 import viper.silver.cfg.silver.SilverCfg
@@ -25,6 +25,7 @@ import viper.silicon.utils.ast.{BigAnd, extractPTypeFromExp, simplifyVariableNam
 import viper.silicon.utils.{freshSnap, toSf}
 import viper.silicon.verifier.Verifier
 import viper.silver.cfg.{ConditionalEdge, StatementBlock}
+
 import scala.annotation.unused
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -309,7 +310,8 @@ object executor extends ExecutionRules {
                       intermediateResult combine executionFlowController.locally(s2, v1)((s3, v2) => {
                         v2.decider.declareAndRecordAsFreshFunctions(ff1 -- v2.decider.freshFunctions) /* [BRANCH-PARALLELISATION] */
                         v2.decider.declareAndRecordAsFreshMacros(fm1.filter(!v2.decider.freshMacros.contains(_)))  /* [BRANCH-PARALLELISATION] */
-                        v2.decider.assume(pcs.assumptions, Option.when(debugOn)(DebugExp.construct("Loop invariant", pcs.assumptionExps)), false)
+                        v2.decider.assume(pcs.assumptions, None, isInternal = true, enforceAssumption = false)
+                        if (debugOn) v2.decider.addDebugNode(DebugGroup("Loop invariant", pcs.assumptionExps))
                         v2.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
                         if (v2.decider.checkSmoke())
                           Success()
@@ -441,7 +443,7 @@ object executor extends ExecutionRules {
         val debugExp = Option.when(debugOn)(ast.NeCmp(x, ast.NullLit()())())
         val debugExpSubst = Option.when(debugOn)(ast.NeCmp(eRcvrNew.get, ast.NullLit()())())
 
-        v.decider.assume(tRcvr !== Null, debugExp, debugExpSubst)
+        v.decider.assume(tRcvr !== Null, Option.when(debugOn)(DebugExp.awaitTerm(debugExp, debugExpSubst)))
 
         val eRcvr = Option.when(debugOn)(Seq(x))
         val p = FullPerm
@@ -460,12 +462,14 @@ object executor extends ExecutionRules {
           }
         }
         val ts = viper.silicon.state.utils.computeReferenceDisjointnesses(s, tRcvr)
+        val esNew2 = eRcvrNew.map(rcvr => viper.silicon.state.utils.computeReferenceDisjointnessesExp(s, rcvr))
         val esNew = eRcvrNew.map(rcvr => BigAnd(viper.silicon.state.utils.computeReferenceDisjointnessesExp(s, rcvr)))
         addFieldPerms(s, fields, v)((s1, v1) => {
           val s1a = s1.copy(g = s1.g + (x, (tRcvr, eRcvrNew)))
           val s1b = if (debugOn) v1.recordHeap(s1a, oldLabel, ExecStmt(stmt), oldPCS) else s1a
-          v1.decider.assume(ts, Option.when(debugOn)(DebugExp.construct(
-            "Reference Disjointness", esNew.get, esNew.get)), enforceAssumption = false)
+          val children = esNew2.map(_.map(e => DebugExp.awaitTerm(e, e)))
+          v1.decider.assume(ts, children, Option.when(debugOn)(DebugGroup.awaitChildren("Reference disjointness")),
+            enforceAssumption = false)
           Q(s1b, v1)
         })
 
@@ -766,7 +770,7 @@ object executor extends ExecutionRules {
            val eNew = ast.LocalVarWithVersion(simplifyVariableName(t.id.name), typ)(eRhs.pos, eRhs.info, eRhs.errT)
            val exp = ast.EqCmp(ast.LocalVar(name, typ)(), eRhs)(eRhs.pos, eRhs.info, eRhs.errT)
            val expNew = ast.EqCmp(eNew, rhsExpNew.get)()
-           val debugExp = DebugExp.construct(exp, expNew)
+           val debugExp = DebugExp.awaitTerm(exp, expNew)
            (Some(eNew), Some(debugExp))
          } else {
             (None, None)

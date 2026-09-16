@@ -421,18 +421,20 @@ object consumer extends ConsumptionRules {
               case None => "Function preconditions hold in quantifier"
             }
             v2.decider.assume(Quantification(q, vars, transformed, trgs, name+"_precondition", isGlob, weight),
-              Option.when(debugOn)(DebugExp.construct(comment, true)))
+              Option.when(debugOn)(DebugExp.awaitTerm(comment, true)))
             Quantification(q, vars, Implies(transformed, body), trgs, name, isGlob, weight)
           case _ => t
         }
         v2.decider.assert(termToAssert) {
           case true =>
-            v2.decider.assume(t, Option.when(debugOn)(e), eNew)
+            val da = Option.when(debugOn)(DebugExp.awaitTerm(e, eNew.getOrElse(e)))
+            v2.decider.assume(t, da)
             QS(s2, v2)
           case false =>
             val failure = createFailure(pve dueTo AssertionFalse(e), v2, s2, termToAssert, eNew)
-            if (s2.retryLevel == 0 && v2.reportFurtherErrors()){
-              v2.decider.assume(t, Option.when(debugOn)(e), eNew)
+            if (s2.retryLevel == 0 && v2.reportFurtherErrors()) {
+              val da = Option.when(debugOn)(DebugExp.awaitTerm(e, eNew.getOrElse(e)))
+              v2.decider.assume(t, da)
               failure combine QS(s2, v2)
             } else failure}})
     })((s4, v4) => {
