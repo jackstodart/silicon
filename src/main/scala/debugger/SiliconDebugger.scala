@@ -215,8 +215,7 @@ case class ProofObligation(s: State,
 
     if (filteredAssumptions.nonEmpty) {
       "Assumptions: \n" +
-        filteredAssumptions.foldLeft[String]("")((s, de) => s + de.toString(printConfig) + "\n") +
-        "\n\n"
+        filteredAssumptions.foldLeft[String]("")((s, de) => s + de.toString(printConfig) + "\n") + "\n"
     } else {
       ""
     }

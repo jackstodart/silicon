@@ -7,6 +7,7 @@
 package viper.silicon.debugger
 
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.decider.PathConditions
 import viper.silicon.state.terms.{Exists, Forall, Quantifier, Term, Trigger, Var}
 import viper.silver.ast
@@ -109,10 +110,10 @@ sealed trait DebugGroupNode[Self <: DebugGroupNode[Self]] extends DebugNode[Self
     None
   }
 
-  def childrenToString(currDepth: Int, maxDepth: Int, config: DebugPrintConfiguration): String = {
+  private def childrenToString(currDepth: Int, maxDepth: Int, config: DebugPrintConfiguration): String = {
     val printableChildren = children.filter(de => config.isPrintInternalEnabled || !de.isInternal)
     if (printableChildren.isEmpty) ""
-    else if (maxDepth <= currDepth) "\n" + ("\t" * (currDepth + 1)) + "[...]"
+    else if (maxDepth <= currDepth) "\n" + ("\t" * (currDepth + 2)) + "[...]"
     else {
       val resBuilder = new mutable.StringBuilder()
       val childrenToPrint = if (config.nChildrenToShow > 0) printableChildren.take(config.nChildrenToShow) else printableChildren
@@ -157,13 +158,16 @@ object DebugExp {
   def apply(description: Option[String],
             isInternal: Boolean,
             term: Term,
-            originalExp: Option[ast.Exp],
-            finalExp: Option[ast.Exp])
+            originalExp: Option[Exp],
+            finalExp: Option[Exp])
             : DebugExp = {
     val originalExpSimplified = originalExp.map(Simplifier.simplify(_, assumeWelldefinedness = true))
     val finalExpSimplified = finalExp.map(Simplifier.simplify(_, assumeWelldefinedness = true))
     new DebugExp(DebugCounter.next(), description, isInternal, term, originalExpSimplified, finalExpSimplified)
   }
+
+  def apply(term: Term, originalExp: Option[Exp], finalExp: Option[Exp], isInternal: Boolean): DebugExp =
+    new DebugExp(DebugCounter.next(), None, isInternal, term, originalExp, finalExp)
 
   def awaitTerm(description: String, isInternal: Boolean): Term => DebugExp =
     term => DebugExp(Some(description), isInternal, term, None, None)
@@ -206,6 +210,9 @@ object DebugGroup {
   def apply(description: String, children: InsertionOrderedSet[DebugNode[_]]): DebugGroup =
     new DebugGroup(DebugCounter.next(), Some(description), children)
 
+  def apply(description: String, children: Iterable[AnyDebugNode]): DebugGroup =
+    new DebugGroup(DebugCounter.next(), Some(description), InsertionOrderedSet(children))
+
   def awaitChildren(description: String): InsertionOrderedSet[DebugNode[_]] => DebugGroup =
     children => DebugGroup(description, children)
 }
@@ -222,7 +229,14 @@ class DebugImplication(val id: Int,
 
   override def filterTerm(t: Term): Option[DebugNode[DebugImplication]] = ???
 
-  override def headerString(config: DebugPrintConfiguration): String = ???
+  override def headerString(config: DebugPrintConfiguration): String = {
+    if (config.printInternalTermRepresentation) s"$term ==>"
+    else (finalExp, originalExp) match {
+      case (Some(exp), _) => exp.toString + " ==>"
+      case (None, Some(exp)) => exp.toString + " ==>"
+      case _ => "No antecedent exp"
+    }
+  }
 }
 
 object DebugImplication {
@@ -235,23 +249,20 @@ class DebugQuantifier(val id: Int,
                       val description: Option[String],
                       val isInternal: Boolean,
                       val quantifier: Quantifier,
-                      val qvars : Seq[ast.Exp],
+                      val qvars : Seq[Exp],
                       val tQvars: Seq[Var],
                       val triggers: Seq[ast.Trigger],
                       val tTriggers: Seq[Trigger],
                       val children : InsertionOrderedSet[DebugNode[_]]) extends DebugGroupNode[DebugQuantifier] {
   val terms = None
 
-  val isUniversal: Boolean = quantifier match {
-    case Forall => true
-    case Exists => false
-  }
-
   override def removeChildrenById(ids: Seq[Int]): DebugGroupNode[DebugQuantifier] = ???
 
   override def filterTerm(t: Term): Option[DebugNode[DebugQuantifier]] = ???
 
-  override def headerString(config: DebugPrintConfiguration): String = ???
+  override def headerString(config: DebugPrintConfiguration): String =
+    if (config.printInternalTermRepresentation) s"$quantifier ${tQvars.mkString(", ")} ::"
+    else s"${quantifier.fullName} ${qvars.mkString(", ")} ::"
 }
 
 object DebugQuantifier {

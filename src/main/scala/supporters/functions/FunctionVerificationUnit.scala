@@ -276,8 +276,7 @@ trait DefaultFunctionVerificationUnitProvider extends VerifierComponent { v: Ver
         case (intermediateResult, Phase1Data(sPre, bcsPre, bcsPreExp, pcsPre, pcsPreExp)) =>
           intermediateResult && executionFlowController.locally(sPre, v)((s1, _) => {
             decider.setCurrentBranchCondition(And(bcsPre), (BigAnd(bcsPreExp.map(_._1)), Option.when(debugOn)(BigAnd(bcsPreExp.map(_._2.get)))))
-            decider.assume(pcsPre, None, None, enforceAssumption = false)
-            if (debugOn) decider.addDebugNode(DebugGroup(s"precondition of ${function.name}", pcsPreExp.get))
+            decider.assume(pcsPre, Option.when(debugOn)(DebugGroup(s"precondition of ${function.name}", pcsPreExp.get)), enforceAssumption = false)
             v.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
             val s1a = if (debugOn) v.startKeyHeap(s1, "nil", EvalExp(body)) else s1
             eval(s1a, body, FunctionNotWellformed(function), v)((s2, tBody, bodyNew, _) => {

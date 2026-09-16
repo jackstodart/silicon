@@ -310,8 +310,8 @@ object executor extends ExecutionRules {
                       intermediateResult combine executionFlowController.locally(s2, v1)((s3, v2) => {
                         v2.decider.declareAndRecordAsFreshFunctions(ff1 -- v2.decider.freshFunctions) /* [BRANCH-PARALLELISATION] */
                         v2.decider.declareAndRecordAsFreshMacros(fm1.filter(!v2.decider.freshMacros.contains(_)))  /* [BRANCH-PARALLELISATION] */
-                        v2.decider.assume(pcs.assumptions, None, isInternal = true, enforceAssumption = false)
-                        if (debugOn) v2.decider.addDebugNode(DebugGroup("Loop invariant", pcs.assumptionExps))
+                        val debugGroup = Option.when(debugOn)(DebugGroup("Loop invariant", pcs.assumptionExps))
+                        v2.decider.assume(pcs.assumptions, debugGroup, enforceAssumption = false)
                         v2.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
                         if (v2.decider.checkSmoke())
                           Success()

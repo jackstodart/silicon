@@ -538,12 +538,11 @@ object evaluator extends EvaluationRules {
             val auxNonGlobalsExp = auxExps.map(_._2)
             val commentGlobal = "Nested auxiliary terms: globals (aux)"
             v1.decider.prover.comment(commentGlobal)
-            v1.decider.assume(tAuxGlobal, None, isInternal = true, enforceAssumption = false)
-            if (debugOn) v1.decider.addDebugNode(DebugGroup(commentGlobal, auxGlobalsExp.get))
+            v1.decider.assume(tAuxGlobal, Option.when(debugOn)(DebugGroup(commentGlobal, auxGlobalsExp.get)), enforceAssumption = false)
             val commentNonGlobals = "Nested auxiliary terms: non-globals (aux)"
             v1.decider.prover.comment(commentNonGlobals)
-            v1.decider.assume(tAuxHeapIndep/*tAux*/, None, isInternal = true, enforceAssumption = false)
-            if (debugOn) v1.decider.addDebugNode(DebugGroup(commentNonGlobals, auxNonGlobalsExp.get))
+            val debugAux = Option.when(debugOn)(DebugGroup(commentNonGlobals, auxNonGlobalsExp.get))
+            v1.decider.assume(tAuxHeapIndep/*tAux*/, debugAux, enforceAssumption = false)
 
             if (qantOp == Exists) {
               // For universal quantification, the non-global auxiliary assumptions will contain the information that
@@ -1377,8 +1376,7 @@ object evaluator extends EvaluationRules {
 
     (r, optRemainingTriggerTerms) match {
       case (Success(), Some(remainingTriggerTerms)) =>
-        v.decider.assume(pcDelta, None, isInternal = true, enforceAssumption = false)
-        if (debugOn) v.decider.addDebugNode(DebugGroup("pcDeltaExp", pcDeltaExp))
+        v.decider.assume(pcDelta, Option.when(debugOn)(DebugGroup("pcDeltaExp", pcDeltaExp)), enforceAssumption = false)
         Q(s.copy(functionRecorder = functionRecorder), v.heapSupporter.adaptTriggerTerms(cachedTriggerTerms ++ remainingTriggerTerms, s), v)
       case _ =>
         for (e <- remainingTriggerExpressions)

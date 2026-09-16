@@ -934,14 +934,13 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
 
     val commentGlobals = "Nested auxiliary terms: globals"
     v.decider.prover.comment(commentGlobals)
-    v.decider.assume(auxGlobals, None, None, enforceAssumption = false)
-    if (debugOn) v.decider.addDebugNode(DebugGroup(commentGlobals, auxGlobalsExp.get))
+    v.decider.assume(auxGlobals, Option.when(debugOn)(DebugGroup(commentGlobals, auxGlobalsExp.get)), enforceAssumption = false)
 
     val commentNonGlobals = "Nested auxiliary terms: non-globals"
+    val debugNonGlobals = Option.when(debugOn)(DebugGroup(commentNonGlobals, auxNonGlobalsExp.get))
     v.decider.prover.comment(commentNonGlobals)
     v.decider.assume(auxNonGlobals.map(_.copy(vars = effectiveTriggersQVars, triggers = effectiveTriggers)),
-      None, None, enforceAssumption = false)
-    if (debugOn) v.decider.addDebugNode(DebugGroup(commentNonGlobals, auxNonGlobalsExp.get))
+      debugNonGlobals, enforceAssumption = false)
 
     val nonNegImplication = Implies(tCond, perms.IsNonNegative(tPerm))
     val nonNegImplicationExp = eCond.map(c => ast.Implies(c, ast.PermGeCmp(ePerm.get, ast.NoPerm()())())(c.pos, c.info, c.errT))
@@ -1162,23 +1161,22 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
          inverseFunctions.axiomInversesOfInvertibles.vars)
     }
 
-    val comment = "Nested auxiliary terms: globals"
-    v.decider.prover.comment(comment)
-    v.decider.assume(auxGlobals, None, None, enforceAssumption = false)
-    if (debugOn) v.decider.addDebugNode(DebugGroup(comment, auxGlobalsExp.get))
+    val commentGlobals = "Nested auxiliary terms: globals"
+    v.decider.prover.comment(commentGlobals)
+    v.decider.assume(auxGlobals, Option.when(debugOn)(DebugGroup(commentGlobals, auxGlobalsExp.get)), enforceAssumption = false)
 
-    val comment2 = "Nested auxiliary terms: non-globals"
-    v.decider.prover.comment(comment2)
+    val commentNonGlobals = "Nested auxiliary terms: non-globals"
+    val debugNonGlobals = Option.when(debugOn)(DebugGroup(commentNonGlobals, auxNonGlobalsExp.get))
+    v.decider.prover.comment(commentNonGlobals)
     optTrigger match {
       case None =>
         /* No explicit triggers provided */
         v.decider.assume(
-          auxNonGlobals.map(_.copy(vars = effectiveTriggersQVars, triggers = effectiveTriggers)), None, None, enforceAssumption = false)
+          auxNonGlobals.map(_.copy(vars = effectiveTriggersQVars, triggers = effectiveTriggers)), debugNonGlobals, enforceAssumption = false)
       case Some(_) =>
         /* Explicit triggers were provided. */
-        v.decider.assume(auxNonGlobals, None, None, enforceAssumption = false)
+        v.decider.assume(auxNonGlobals, debugNonGlobals, enforceAssumption = false)
     }
-    v.decider.addDebugNode(DebugGroup(comment2, auxNonGlobalsExp.get))
 
     val nonNegImplication = Implies(tCond, perms.IsNonNegative(tPerm))
     val nonNegImplicationExp = ePerm.map(p => ast.Implies(eCond.get, ast.PermGeCmp(p, ast.NoPerm()())())(p.pos, p.info, p.errT))

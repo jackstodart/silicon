@@ -666,7 +666,9 @@ case object False extends BooleanLiteral {
 
 /* Quantifiers */
 
-sealed trait Quantifier
+sealed trait Quantifier {
+  def fullName: String
+}
 
 case object Forall extends Quantifier {
 
@@ -714,6 +716,8 @@ case object Forall extends Quantifier {
     Some(q.vars, q.body, q.triggers, q.name, q.isGlobal)
 
   override lazy val toString = "QA"
+
+  override def fullName: String = "forall"
 }
 
 object SimplifyingForall {
@@ -743,6 +747,8 @@ object Exists extends Quantifier {
     Quantification(Exists, qvars.toSeq, tBody, triggers)
 
   override lazy val toString = "QE"
+
+  override def fullName: String = "exists"
 }
 
 class Quantification private[terms] (val q: Quantifier, /* TODO: Rename */
