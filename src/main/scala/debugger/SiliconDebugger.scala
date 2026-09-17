@@ -15,6 +15,7 @@ import viper.silicon.verifier.{MainVerifier, Verifier, WorkerVerifier}
 import viper.silver.ast
 import viper.silver.ast._
 import viper.silver.ast.utility.Simplifier
+import viper.silver.frontend.FrontendStateCache
 import viper.silver.parser._
 import viper.silver.reporter.{NoopReporter, Reporter}
 import viper.silver.verifier.errors.ContractNotWellformed
@@ -249,6 +250,15 @@ case class ProofObligation(s: State,
     "\n" + originalErrorInfo + branchConditionString + storeString + heapString +
       axiomsString + declarationsString + assumptionString + assertionString
   }
+}
+
+object ProofObligation {
+  def apply(s: State, v: Verifier, assertion: Term, eAssertion: DebugExp, reason: ErrorReason): ProofObligation =
+    new ProofObligation(s, v, v.decider.prover.getAllEmits(), v.decider.prover.preambleAssumptions,
+      v.decider.pcs.branchConditions, v.decider.pcs.branchConditionExps.map(bce => bce._1 -> bce._2.get),
+      v.decider.pcs.assumptionExps, assertion, eAssertion, None, new DebugPrintConfiguration, reason,
+      new DebugResolver(FrontendStateCache.pprogram, FrontendStateCache.resolver.names),
+      new DebugTranslator(FrontendStateCache.pprogram, FrontendStateCache.translator.getMembers()))
 }
 
 class SiliconDebugger(verificationResults: List[VerificationResult],

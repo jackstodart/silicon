@@ -72,5 +72,5 @@ class DefaultFunctionEncoding extends FunctionEncoding {
   }
 
   def translateFunctionApp(fun: Applicable, snap: Term, args: Seq[Term], func: ast.Function, program: ast.Program): Term =
-    App(fun, snap +: args)
+    App(fun, snap +: args, None)
 }

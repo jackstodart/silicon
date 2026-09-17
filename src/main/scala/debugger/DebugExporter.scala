@@ -6,6 +6,7 @@ import org.jgrapht.graph.{DefaultDirectedGraph, DefaultEdge}
 import org.jgrapht.traverse.TopologicalOrderIterator
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.ExportUtils._
+import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.interfaces.state.Chunk
 import viper.silicon.{Map, resources}
 import viper.silicon.resources.{FieldID, PredicateID}
@@ -474,10 +475,11 @@ class Translator(val obl: ProofObligation, val filename: String) {
             val eqString = s"${qfc.id.name} ${safeString(domLabel)} $rcvrString = $default"
             strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$permCondString$eqString\""
           case None =>
+            /*
             val rcvr = (for (inv <- qfc.invs; exps <- inv.invertibleExps; e <- exps.headOption)
-              yield translateExp(e, parenthesisLevel = 100)).getOrElse("missingInvExp")
+              yield translateExp(e, parenthesisLevel = 100)) // .getOrElse("missingInvExp")
             // val permCondition = Simplifier.simplify(qfc.conditionExp.get) // , permCondSimpExp(qfc.permValueExp.get))())
-            val quantifiedVars = qfc.invs.map(_.qvarExps.getOrElse(Seq())).getOrElse(Seq())
+            val quantifiedVars = qfc.invs.map(_.qvarExps.getOrElse(Seq())) // .getOrElse(Seq())
             val varString = quantifiedVars.map(v => s" (${safeString(v.name)}::${translateType(v.typ)})").mkString("")
             val freeRef = safeString(qfc.quantifiedVarExps.get.head.name)
             val condString = translateExp(qfc.conditionExp.get, oldHeapLabel = Some(heapLabel)) + s" $META_ARR"
@@ -492,6 +494,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
             }
             val chunkString = s"\\<forall>$varString. $condString\n    let r = $rcvr in $permCond$field = $default"
             strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunkString\""
+
+             */
         }
       case qpc: QuantifiedPredicateChunk =>
         val condString = translateTerm(terms.And(qpc.condition, permCondSimp(qpc.permValue)))
@@ -966,6 +970,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
   }
 
   private lazy val freeVars: InsertionOrderedSet[terms.Var] = {
+    /*
     def deToVars(de: DebugExp): InsertionOrderedSet[terms.Var] = {
       if (de.term.isDefined) {
         de.term.get.freeVariables ++ de.children.flatMap(deToVars)
@@ -975,6 +980,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
 
     obl.assumptionsExp.flatMap(deToVars)
+     */
+    InsertionOrderedSet.empty
   }
 
   // Maps from variable ids to strings that are shorter, clearer
@@ -1001,9 +1008,10 @@ class Translator(val obl: ProofObligation, val filename: String) {
     varMap.toMap
   }
 
-  private def translateDebugExp(de: DebugExp, prefix: String = "", suffix: String = "",
+  private def translateDebugExp(de: AnyDebugNode, prefix: String = "", suffix: String = "",
                                 rewrites: Rewrites = basicRewrites,
                                 inAux: Boolean = false): Unit = {
+    /*
     de.category match {
       case LoopInvariant() =>
         strings += "  (* Begin loop invariant *)"
@@ -1066,7 +1074,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
               de.children.foreach { translateDebugExp(_, prefix, suffix, rewrites = rewrites) }
             }
         }
-    }
+    } */
   }
 }
 

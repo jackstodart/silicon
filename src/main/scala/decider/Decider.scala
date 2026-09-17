@@ -512,7 +512,7 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
         case hvr: HasVarRepr if hvr.varRepr.isEmpty && s.quantifiedVariables.isEmpty && s.packagingWandSnapshots.isEmpty && s.isMethodVerification =>
           val md = freshMacro("tmpTerm", Seq(), t)
           val mcr = Macro(md.id, Seq(), md.body.sort)
-          hvr.varRepr = Some(App(mcr, Seq()))
+          hvr.varRepr = Some(App(mcr, Seq(), None))
           t
         case _ => t
       }

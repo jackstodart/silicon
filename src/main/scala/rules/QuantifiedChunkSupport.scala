@@ -1677,7 +1677,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             val permsTakenDecl = v.decider.freshMacro("pTaken", permsTakenArgs, permsTakenBody)
             val permsTakenMacro = Macro(permsTakenDecl.id, permsTakenDecl.args.map(_.sort), permsTakenDecl.body.sort)
             currentFunctionRecorder = currentFunctionRecorder.recordFreshMacro(permsTakenDecl)
-            val permsTakenApp = App(permsTakenMacro, permsTakenArgs)
+            val permsTakenApp = App(permsTakenMacro, permsTakenArgs, None)
             v.symbExLog.addMacro(permsTakenApp, permsTakenBody)
             permsTakenApp
           } else {
@@ -2102,7 +2102,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
   private def invertiblesWithInversesApplied(invs: Seq[InverseFunctions], quantifiedVars: Seq[Var]): Seq[Term] =
     invs.flatMap(inv => {
       val qvarsAndInverses: Map[Var, Term] =
-        inv.qvarsToInverses.map { case (x, fn) => x -> (App(fn, inv.additionalArguments ++ quantifiedVars): Term) }.to(Map)
+        inv.qvarsToInverses.map { case (x, fn) => x -> (App(fn, inv.additionalArguments ++ quantifiedVars, None): Term) }.to(Map)
       inv.invertibles.map(_.replace(qvarsAndInverses))
     })
 

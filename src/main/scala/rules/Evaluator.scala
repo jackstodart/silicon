@@ -417,14 +417,14 @@ object evaluator extends EvaluationRules {
           val outSort = v1.symbolConverter.toSort(dfa.typ)
           val fi = v1.symbolConverter.toFunction(s.program.findDomainFunction(funcName), inSorts :+ outSort, s.program)
           val dfaP = Option.when(debugOn)(ast.DomainFuncApp(funcName, eArgsNew.get, m)(dfa.pos, dfa.info, dfa.typ, dfa.domainName, dfa.errT))
-          Q(s1, App(fi, tArgs), dfaP, v1)})
+          Q(s1, App(fi, tArgs, None), dfaP, v1)})
 
       case bf @ ast.BackendFuncApp(funcName, eArgs) =>
         evals(s, eArgs, _ => pve, v)((s1, tArgs, eArgsNew, v1) => {
           val func = s.program.findDomainFunction(funcName)
           val fi = v1.symbolConverter.toFunction(func, s.program)
           val bfP = Option.when(debugOn)(ast.BackendFuncApp(funcName, eArgsNew.get)(bf.pos, bf.info, bf.typ, bf.interpretation, bf.errT))
-          Q(s1, App(fi, tArgs), bfP, v1)})
+          Q(s1, App(fi, tArgs, None), bfP, v1)})
 
       case cp @ ast.CurrentPerm(resacc) =>
         val h = s.partiallyConsumedHeap.getOrElse(s.h)
@@ -655,7 +655,9 @@ object evaluator extends EvaluationRules {
                                s2.assertReadAccessOnly /* should currently always be false */ else true)
             consumes(s2a, pres, true, _ => pvePre, v2)((s3, snap, v3) => {
               val (stateArgs, snapToRecord) = v3.heapSupporter.functionAppSnapArgs(s2a, func, tArgs, snap.get, v3)
-              val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)), stateArgs ++ tArgs)
+              val heapLabel = v3.getDebugHeapLabel(s3)
+              val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)),
+                stateArgs ++ tArgs, heapLabel)
               val preExp = Option.when(debugOn)({
                 DebugExp.awaitTerm(s"precondition of ${func.name}(${eArgsNew.get.mkString(", ")}) holds", isInternal = true)
               })
@@ -665,10 +667,11 @@ object evaluator extends EvaluationRules {
                 case Some(a) if a.values.contains("opaque") =>
                   val funcAppAnn = fapp.info.getUniqueInfo[AnnotationInfo]
                   funcAppAnn match {
-                    case Some(a) if a.values.contains("reveal") => App(v3.symbolConverter.toFunction(func, s.program), stateArgs ++ tArgs)
-                    case _ => App(functionSupporter.limitedVersion(v3.symbolConverter.toFunction(func, s.program)), stateArgs ++ tArgs)
+                    case Some(a) if a.values.contains("reveal") =>
+                      App(v3.symbolConverter.toFunction(func, s.program), stateArgs ++ tArgs, heapLabel)
+                    case _ => App(functionSupporter.limitedVersion(v3.symbolConverter.toFunction(func, s.program)), stateArgs ++ tArgs, heapLabel)
                   }
-                case _ => App(v3.symbolConverter.toFunction(func, s.program), stateArgs ++ tArgs)
+                case _ => App(v3.symbolConverter.toFunction(func, s.program), stateArgs ++ tArgs, heapLabel)
               }
               val fr5 =
                 s3.functionRecorder.changeDepthBy(-1)
@@ -738,7 +741,10 @@ object evaluator extends EvaluationRules {
                       if (!Verifier.config.disableFunctionUnfoldTrigger()) {
                         val eArgsString = eArgsNew.mkString(", ")
                         val debugExp = Option.when(debugOn)(DebugExp.awaitTerm(s"PredicateTrigger(${predicate.name}($eArgsString))", isInternal = true))
-                        v4.decider.assume(App(s.predicateData(predicate.name).triggerFunction, v4.heapSupporter.predicateTriggerSnapArg(s4, predicate, snap.get, s4.h) +: tArgs), debugExp)
+                        val triggerTerm = App(s.predicateData(predicate.name).triggerFunction,
+                          v4.heapSupporter.predicateTriggerSnapArg(s4, predicate, snap.get, s4.h) +: tArgs,
+                          Some(s2Label))
+                        v4.decider.assume(triggerTerm, debugExp)
                       }
                       val body = predicate.body.get /* Only non-abstract predicates can be unfolded */
                       val s4b = s4a.scalePermissionFactor(tPerm, ePermNew)

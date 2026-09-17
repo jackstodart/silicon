@@ -87,7 +87,7 @@ object predicateSupporter extends PredicateSupportRules {
          * whose triggers refer to the chunk's heap can look it up in s3.h. */
         if (!Verifier.config.disableFunctionUnfoldTrigger()) {
           val predTrigger = App(s2.predicateData(predicate.name).triggerFunction,
-            v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, s2.h) +: tArgs)
+            v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, s2.h) +: tArgs, None)
           val eArgsString = eArgs.mkString(", ")
           v2.decider.assume(predTrigger, Option.when(debugOn)(DebugExp.awaitTerm(s"PredicateTrigger(${predicate.name}($eArgsString))", isInternal = true)))
         }
@@ -212,7 +212,7 @@ object predicateSupporter extends PredicateSupportRules {
           if (!Verifier.config.disableFunctionUnfoldTrigger()) {
             val predicateTrigger =
               App(s2.predicateData(predicate.name).triggerFunction,
-                v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, hPreUnfold) +: tArgs)
+                v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, hPreUnfold) +: tArgs, None)
             val eargs = eArgs.mkString(", ")
             v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.awaitTerm(s"PredicateTrigger(${predicate.name}($eargs))", isInternal = true)))
           }
@@ -227,7 +227,7 @@ object predicateSupporter extends PredicateSupportRules {
           if (!Verifier.config.disableFunctionUnfoldTrigger()) {
             val predicateTrigger =
               App(s2.predicateData(predicate.name).triggerFunction,
-                v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, hPreUnfold) +: tArgs)
+                v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, hPreUnfold) +: tArgs, None)
             val eargs = eArgs.mkString(", ")
             v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.awaitTerm(s"PredicateTrigger(${predicate.name}($eargs))", isInternal = true)))
           }

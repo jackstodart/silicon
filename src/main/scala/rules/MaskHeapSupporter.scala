@@ -1318,9 +1318,9 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
 
   override def adaptTriggerTerms(terms: Seq[Term], s: State): Seq[Term] = {
     terms.map(t => t.transform {
-      case App(hdf: HeapDepFun, args) =>
+      case App(hdf: HeapDepFun, args, heapLabel) =>
         val (heapArgs, otherArgs) = args.partition(a => a.sort == PredHeapSort || a.sort == WandHeapSort || a.sort.isInstanceOf[sorts.HeapSort])
-        if (heapArgs.isEmpty) App(hdf, args)
+        if (heapArgs.isEmpty) App(hdf, args, heapLabel)
         else {
           val funcName = hdf.id match {
             case SuffixedIdentifier(prefix, _, _) => prefix.name
@@ -1330,8 +1330,8 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
             case Some(fd) =>
               val frameFunc = functionSupporter.frameVersion(hdf, heapArgs.length)
               val frame = fd.functionEncoding.asInstanceOf[MaskHeapFunctionEncoding].getFrameVersion(fd, otherArgs, heapArgs)
-              App(frameFunc, frame +: otherArgs)
-            case None => App(hdf, args)
+              App(frameFunc, frame +: otherArgs, heapLabel)
+            case None => App(hdf, args, heapLabel)
           }
         }
     }(_ => true))

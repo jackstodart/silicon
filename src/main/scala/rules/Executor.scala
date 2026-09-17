@@ -6,7 +6,7 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.{DebugExp, DebugGroup, DebugInvariant}
+import viper.silicon.debugger.{DebugExp, DebugExporter, DebugGroup, DebugInvariant, ProofObligation}
 import viper.silicon.Config.JoinMode
 import viper.silver.cfg.silver.SilverCfg
 import viper.silver.cfg.silver.SilverCfg.{SilverBlock, SilverEdge}
@@ -513,7 +513,7 @@ object executor extends ExecutionRules {
 
       case assert @ ast.Assert(a) if assert.info.hasAnnotation(isabelleAnnotation) =>
         // TODO: Run quick check for provability
-        val de = DebugExp.createInstance(Some(a), Some(a))
+        val de = DebugExp(True, Some(a), Some(a), isInternal = false)
         val obl = ProofObligation(state, v, False, de, AssertionInIsabelle(assert))
         DebugExporter.exportIsabelle(obl)
         // Generate Isabelle file

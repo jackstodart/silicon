@@ -75,17 +75,17 @@ class MaskHeapFunctionEncoding(symbolConverter: SymbolConverter, identifierFacto
 
   override def definitionalAxiom(data: FunctionData, body: Term, predicateTriggers: Seq[App]): Term = {
     val predTriggers = predicateTriggers.map {
-      case App(f, args) =>
+      case App(f, args, heapLabel) =>
         // Prefer a Carbon-style pattern that does not constrain the shape of the
         // application's heap: the definition materializes at the trigger's heap,
         // and the frame axiom bridges to the application's heap via snapshot
         // equality. Only usable if the pattern still covers all quantified vars.
-        val decoupled = Trigger(Seq(data.triggerFunctionApplication, App(f, args)))
+        val decoupled = Trigger(Seq(data.triggerFunctionApplication, App(f, args, heapLabel)))
         val covered = decoupled.p.flatMap(_.freeVariables).toSet
         if (data.arguments.forall(covered.contains))
           decoupled
         else
-          Trigger(Seq(data.limitedFunctionApplication, App(f, args)))
+          Trigger(Seq(data.limitedFunctionApplication, App(f, args, heapLabel)))
     }
     val predAxiom = Forall(data.arguments, body, predTriggers)
     val directAxiom = Forall(data.arguments, body, Seq(Trigger(data.functionApplication)))
@@ -97,7 +97,7 @@ class MaskHeapFunctionEncoding(symbolConverter: SymbolConverter, identifierFacto
 
   override def translateFunctionApp(fun: Applicable, snap: Term, args: Seq[Term], func: ast.Function, program: ast.Program): Term = {
     def createApp(trm: Term): Term = trm match {
-      case mt: HeapMapTerm => App(fun, mt.heaps.values.toSeq ++ args)
+      case mt: HeapMapTerm => App(fun, mt.heaps.values.toSeq ++ args, None)
       case Ite(cond, e1, e2) => Ite(cond, createApp(e1), createApp(e2))
       case _ =>
         val resources = maskHeapSupporter.getResourceSeq(func.pres, program)
@@ -111,7 +111,7 @@ class MaskHeapFunctionEncoding(symbolConverter: SymbolConverter, identifierFacto
             }
             SnapToHeap(s, r, srt)
         }
-        App(fun, resHeaps ++ args)
+        App(fun, resHeaps ++ args, None)
     }
     createApp(snap)
   }
@@ -156,13 +156,13 @@ class MaskHeapFunctionEncoding(symbolConverter: SymbolConverter, identifierFacto
     })
 
   private def frameAxiom(data: FunctionData): Term = {
-    val frameFuncApp = App(frameFunction(data), frameInfo(data).funcFrame +: data.formalArgs.values.toSeq)
+    val frameFuncApp = App(frameFunction(data), frameInfo(data).funcFrame +: data.formalArgs.values.toSeq, None)
     val body = BuiltinEquals(data.limitedFunctionApplication, frameFuncApp)
     Forall(data.arguments, body, Trigger(data.limitedFunctionApplication))
   }
 
   private def preconditionFrameAxiom(data: FunctionData): Term = {
-    val frameFuncApp = App(preconditionFrameFunction(data), frameInfo(data).funcFrame +: data.formalArgs.values.toSeq)
+    val frameFuncApp = App(preconditionFrameFunction(data), frameInfo(data).funcFrame +: data.formalArgs.values.toSeq, None)
     val body = BuiltinEquals(data.preconditionFunctionApplication, frameFuncApp)
     Forall(data.arguments, body, Trigger(data.preconditionFunctionApplication))
   }
@@ -187,7 +187,7 @@ class MaskHeapFunctionEncoding(symbolConverter: SymbolConverter, identifierFacto
       case True => thenTerm
       case False => elsTerm
       case _ if thenTerm == elsTerm => thenTerm
-      case _ => App(condFrameFunc, Seq(cond, thenTerm, elsTerm))
+      case _ => App(condFrameFunc, Seq(cond, thenTerm, elsTerm), None)
     }
   }
 
@@ -233,7 +233,7 @@ class MaskHeapFunctionEncoding(symbolConverter: SymbolConverter, identifierFacto
         val condFunc = Fun(condName, data.arguments.map(_.sort), sorts.Snap)
         val res = (condFunc, forall)
         fi.qpCondFuncs += res
-        frameFragment(App(condFunc, data.arguments))
+        frameFragment(App(condFunc, data.arguments, None))
       case ast.Implies(e0, e1) =>
         frameFragment(condFrame(translateExp(e0), computeFrameHelper(data, fi, e1, name, resources), Unit))
       case ast.And(e0, e1) =>
@@ -302,8 +302,8 @@ class MaskHeapFunctionEncoding(symbolConverter: SymbolConverter, identifierFacto
       val lookup1 = HeapLookup(heap1, argTerm1)
       val lookup2 = HeapLookup(heap2, argTerm2)
       val sameVals: Term = Forall(qvars, Implies(And(cond1, cond2), lookup1 === lookup2), Trigger(Seq(lookup1, lookup2)))
-      val app1: Term = App(func._1, heaps1 ++ restArgs)
-      val app2: Term = App(func._1, heaps2 ++ restArgs)
+      val app1: Term = App(func._1, heaps1 ++ restArgs, None)
+      val app2: Term = App(func._1, heaps2 ++ restArgs, None)
       val res = Forall(heaps1 ++ heaps2 ++ restArgs, Implies(sameVals, BuiltinEquals(app1, app2)), Trigger(Seq(app1, app2)))
       result.append(res)
     }
