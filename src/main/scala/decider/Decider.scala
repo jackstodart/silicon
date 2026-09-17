@@ -7,14 +7,15 @@
 package viper.silicon.decider
 
 import com.typesafe.scalalogging.Logger
-import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.{DebugExp, DebugGroup, DebugGroupNode, DebugNode}
 import viper.silicon._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.debugger.{AnyDebugNode, PreDebugAssumption, PreDebugGroup}
 import viper.silicon.interfaces._
 import viper.silicon.interfaces.decider._
 import viper.silicon.logger.records.data.{DeciderAssertRecord, DeciderAssumeRecord, ProverAssertRecord}
 import viper.silicon.state._
-import viper.silicon.state.terms.{Term, _}
+import viper.silicon.state.terms._
 import viper.silicon.utils.ast.{extractPTypeFromExp, simplifyVariableName}
 import viper.silicon.verifier.{Verifier, VerifierComponent}
 import viper.silver.ast
@@ -54,18 +55,28 @@ trait Decider {
   def setCurrentBranchCondition(t: Term, te: (ast.Exp, Option[ast.Exp])): Unit
   def setPathConditionMark(): Mark
 
+  def startDebugSubExp(): Unit
   def finishDebugSubExp(description : String): Unit
 
-  def startDebugSubExp(): Unit
+  def assume(t: Term, debugExp: Option[PreDebugAssumption],
+             enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit
 
-  def assume(t: Term, e: ast.Exp, finalExp: ast.Exp): Unit
-  def assume(t: Term, e: Option[ast.Exp], finalExp: Option[ast.Exp]): Unit
-  def assume(t: Term, debugExp: Option[DebugExp]): Unit
-  def assume(terms: Seq[Term], debugExps: Option[Seq[DebugExp]]): Unit
-  def assumeDefinition(t: Term, debugExp: Option[DebugExp]): Unit
-  def assume(assumptions: Iterable[(Term, Option[DebugExp])]): Unit
-  def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugExp])], enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit
-  def assume(terms: Iterable[Term], debugExp: Option[DebugExp], enforceAssumption: Boolean): Unit
+  // Collects the terms into a DebugGroup
+  def assume(terms: Iterable[Term],
+             debugNodes: Option[Iterable[PreDebugAssumption]],
+             group: Option[PreDebugGroup],
+             enforceAssumption: Boolean): Unit
+  // Creates generic assumptions under the group
+  def assume(terms: Iterable[Term],
+             group: Option[PreDebugGroup],
+             isInternal: Boolean,
+             enforceAssumption: Boolean): Unit
+  // Separately assumes terms and adds the debugGroup
+  def assume(terms: Iterable[Term],
+             debugGroup: Option[DebugGroupNode[_]],
+             enforceAssumption: Boolean): Unit
+
+  def assumeDefinition(t: Term, debugExp: Option[PreDebugAssumption]): Unit
 
   def check(t: Term, timeout: Int): Boolean
 
@@ -83,6 +94,8 @@ trait Decider {
   def fresh(v: ast.AbstractLocalVar): (Var, Option[ast.LocalVarWithVersion])
   def freshARP(id: String = "$k"): (Var, Term, Option[ast.LocalVarWithVersion])
   def appliedFresh(id: String, sort: Sort, appliedArgs: Seq[Term]): App
+
+  def createAlias(t: Term, s: State): Term
 
   def generateModel(): Unit
   def getModel(): Model
@@ -251,87 +264,78 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
 
     def setCurrentBranchCondition(t: Term, te: (ast.Exp, Option[ast.Exp])): Unit = {
       pathConditions.setCurrentBranchCondition(t, te)
-      assume(t, Option.when(te._2.isDefined)(te._1), te._2)
+      val dAssm = Option.when(te._2.isDefined)(
+        DebugExp.awaitTerm("Branch condition", te._1, te._2.get, isInternal = false)
+      )
+      assume(t, dAssm)
     }
 
     def setPathConditionMark(): Mark = pathConditions.mark()
 
     /* Assuming facts */
 
-    def startDebugSubExp(): Unit = {
-      if (debugMode) {
-        pathConditions.startDebugSubExp()
+    def startDebugSubExp(): Unit =
+      if (debugMode) pathConditions.startDebugSubExp()
+
+    def finishDebugSubExp(description: String): Unit =
+      if (debugMode) pathConditions.finishDebugSubExp(description)
+
+    def addDebugNode(debugNode: AnyDebugNode): Unit = pathConditions.addDebugNode(debugNode)
+
+    def assume(term: Term, debugExp: Option[PreDebugAssumption],
+               enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit = {
+      if (enforceAssumption || !isKnownToBeTrue(term)) {
+        assumeWithoutSmokeChecks(InsertionOrderedSet(term), isDefinition)
+        if (debugMode) addDebugNode(debugExp.get(term))
       }
     }
 
-    def finishDebugSubExp(description: String): Unit = {
+    // Assume terms as a group when debugOn
+    def assume(terms: Iterable[Term],
+               debugNodes: Option[Iterable[PreDebugAssumption]],
+               group: Option[PreDebugGroup],
+               enforceAssumption: Boolean): Unit = {
       if (debugMode) {
-        pathConditions.finishDebugSubExp(description)
-      }
-    }
-
-    def addDebugExp(e: DebugExp): Unit = {
-      if (debugMode) {
-        pathConditions.addDebugExp(e)
-      }
-    }
-
-    def assume(t: Term, e : ast.Exp, finalExp : ast.Exp): Unit = {
-      assume(assumptions=InsertionOrderedSet((t, Some(DebugExp.createInstance(e, finalExp)))), false, false)
-    }
-
-    def assume(t: Term, e: Option[ast.Exp], finalExp: Option[ast.Exp]): Unit = {
-      if (finalExp.isDefined) {
-        assume(assumptions=InsertionOrderedSet((t, Some(DebugExp.createInstance(e.get, finalExp.get)))), false, false)
+        val termNodes = terms.zip(debugNodes.get)
+        val filteredTermNodes = if (enforceAssumption) termNodes else termNodes filterNot { tn => isKnownToBeTrue(tn._1) }
+        if (filteredTermNodes.nonEmpty) assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTermNodes.map(tn => tn._1)))
+        val children = InsertionOrderedSet(filteredTermNodes.map[AnyDebugNode](tn => tn._2(tn._1)))
+        addDebugNode(group.get(children))
       } else {
-        assume(assumptions=InsertionOrderedSet((t, None)), false, false)
+        val filteredTerms = if (enforceAssumption) terms else terms filterNot isKnownToBeTrue
+        if (filteredTerms.nonEmpty) assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTerms))
       }
     }
 
-    def assume(t: Term, debugExp: Option[DebugExp]): Unit = {
-      assume(InsertionOrderedSet(Seq((t, debugExp))), false)
-    }
-
-    def assumeDefinition(t: Term, debugExp: Option[DebugExp]): Unit = {
-      assume(InsertionOrderedSet(Seq((t, debugExp))), enforceAssumption=false, isDefinition=true)
-    }
-
-    def assume(assumptions: Iterable[(Term, Option[DebugExp])]): Unit =
-      assume(InsertionOrderedSet(assumptions), false)
-
-    def assume(assumptions: InsertionOrderedSet[(Term, Option[DebugExp])], enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit = {
-      val filteredAssumptions =
-        if (enforceAssumption) assumptions
-        else assumptions filterNot (a => isKnownToBeTrue(a._1))
-
-
-      if (debugMode) {
-        filteredAssumptions foreach (a => addDebugExp(a._2.get.withTerm(a._1)))
-      }
-
-      if (filteredAssumptions.nonEmpty) assumeWithoutSmokeChecks(filteredAssumptions map (_._1), isDefinition=isDefinition)
-    }
-
-    def assume(assumptions: Seq[Term], debugExps: Option[Seq[DebugExp]]): Unit = {
-      assumeWithoutSmokeChecks(InsertionOrderedSet(assumptions))
-      if (debugMode) {
-        debugExps.get foreach (e => addDebugExp(e))
+    // Creates generic assumptions under the group
+    def assume(terms: Iterable[Term],
+               group: Option[PreDebugGroup],
+               isInternal: Boolean,
+               enforceAssumption: Boolean): Unit = {
+      val filteredTerms = if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue)
+      if (filteredTerms.nonEmpty) {
+        assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTerms))
+        if (debugMode) {
+          val children = filteredTerms.map(DebugExp(_, None, None, isInternal))
+          addDebugNode(group.get(InsertionOrderedSet(children)))
+        }
       }
     }
 
-    def assume(terms: Iterable[Term], debugExp: Option[DebugExp], enforceAssumption: Boolean): Unit = {
-      val filteredTerms =
-        if (enforceAssumption) terms
-        else terms filterNot isKnownToBeTrue
-
-      if (debugMode && filteredTerms.nonEmpty) {
-        addDebugExp(debugExp.get.withTerm(And(filteredTerms)))
-      }
-
+    // Separately terms and adds the debugGroup
+    def assume(terms: Iterable[Term],
+               debugGroup: Option[DebugGroupNode[_]],
+               enforceAssumption: Boolean): Unit = {
+      val filteredTerms = if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue)
       if (filteredTerms.nonEmpty) assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTerms))
+      if (debugMode) addDebugNode(debugGroup.get)
     }
 
-    def debuggerAssume(terms: Iterable[Term], de: DebugExp) = {
+    def assumeDefinition(t: Term, debugExp: Option[PreDebugAssumption]): Unit = {
+      assume(t, debugExp, enforceAssumption = false, isDefinition = true)
+    }
+
+    def debuggerAssume(terms: Iterable[Term], de: AnyDebugNode) = {
       terms.foreach(t => {
         if (!_debuggerAssumedTerms.contains(t)) {
           _debuggerAssumedTerms += t
@@ -497,6 +501,21 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       _declaredFreshFunctions = _declaredFreshFunctions + decl /* [BRANCH-PARALLELISATION] */
 
       fun
+    }
+
+    def createAlias(t: Term, s: State): Term = {
+      t match {
+        /* No aliases are introduced while a wand is being packaged (packagingWandSnapshots
+         * is non-empty): terms may then contain the wand's snapshot root, which ends up as a
+         * quantified variable in the MWSF definition. A macro whose body mentions the root
+         * would refer to the global constant rather than the bound variable. */
+        case hvr: HasVarRepr if hvr.varRepr.isEmpty && s.quantifiedVariables.isEmpty && s.packagingWandSnapshots.isEmpty && s.isMethodVerification =>
+          val md = freshMacro("tmpTerm", Seq(), t)
+          val mcr = Macro(md.id, Seq(), md.body.sort)
+          hvr.varRepr = Some(App(mcr, Seq()))
+          t
+        case _ => t
+      }
     }
 
 

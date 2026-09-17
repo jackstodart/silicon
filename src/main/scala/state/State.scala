@@ -23,13 +23,14 @@ import viper.silicon.supporters.PredicateData
 import viper.silicon.supporters.functions.{FunctionData, FunctionRecorder, NoopFunctionRecorder}
 import viper.silicon.utils.ast.BigAnd
 import viper.silicon.verifier.Verifier
-import viper.silicon.{Map, Stack}
+import viper.silicon.{Map, SiliconRunner, Stack}
 import viper.silver.utility.Sanitizer
 
 final case class State(g: Store = Store(),
                        h: Heap = Heap(),
                        program: ast.Program,
                        currentMember: Option[ast.Member],
+                       currentBlock: Option[(String, Integer)], // (block label, path id)
                        predicateData: Map[String, PredicateData],
                        functionData: Map[String, FunctionData],
                        oldHeaps: OldHeaps = Map.empty,
@@ -46,6 +47,7 @@ final case class State(g: Store = Store(),
 
                        constrainableARPs: InsertionOrderedSet[Var] = InsertionOrderedSet.empty,
                        quantifiedVariables: Stack[(Var, Option[ast.AbstractLocalVar])] = Nil,
+                       packagingWandSnapshots: Stack[(Var, Option[ast.AbstractLocalVar])] = Nil,
                        retrying: Boolean = false,
                        underJoin: Boolean = false,
                        functionRecorder: FunctionRecorder = NoopFunctionRecorder,
@@ -77,6 +79,7 @@ final case class State(g: Store = Store(),
                        smCache: SnapshotMapCache = SnapshotMapCache.empty,
                        pmCache: PmCache = Map.empty,
                        smDomainNeeded: Boolean = false,
+                       qpTag: Option[Int] = None,
                        /* TODO: Isn't this data stable, i.e. fully known after a preprocessing step? If so, move it to the appropriate supporter. */
                        predicateSnapMap: Map[String, terms.Sort] = Map.empty,
                        predicateFormalVarMap: Map[String, Seq[terms.Var]] = Map.empty,
@@ -84,6 +87,7 @@ final case class State(g: Store = Store(),
                        /* ast.Field, ast.Predicate, or MagicWandIdentifier */
                        heapDependentTriggers: InsertionOrderedSet[Any] = InsertionOrderedSet.empty,
                        moreCompleteExhale: Boolean = false,
+                       moreCompleteExhaleQP: Boolean = false,
                        moreJoins: JoinMode = JoinMode.Off)
     extends Mergeable[State] {
 
@@ -132,9 +136,11 @@ final case class State(g: Store = Store(),
     currentMember.isEmpty || !currentMember.get.isInstanceOf[ast.Function] || Verifier.config.respectFunctionPrePermAmounts()
   }
 
+  def setCurrentBlock(b: (String, Integer)) = copy(currentBlock = Some(b))
+
   val isLastRetry: Boolean = retryLevel == 0
 
-  val recordIntermediateHeaps: Boolean = temporaryHeapRecord.isDefined
+  val isRecordingHeaps: Boolean = temporaryHeapRecord.isDefined
 
   def incCycleCounter(m: ast.Predicate) =
     if (recordVisited) copy(visited = m :: visited)
@@ -174,7 +180,7 @@ final case class State(g: Store = Store(),
     functionRecorder.arguments.fold(Seq.empty[(Var, Option[ast.AbstractLocalVar])])(d => d)
 
   def relevantQuantifiedVariables(filterPredicate: Var => Boolean): Seq[(Var, Option[ast.AbstractLocalVar])] = (
-       functionRecorderQuantifiedVariables()
+       functionRecorderQuantifiedVariables() ++ packagingWandSnapshots.filter(x => filterPredicate(x._1))
     ++ quantifiedVariables.filter(x => filterPredicate(x._1))
   )
 
@@ -187,8 +193,9 @@ final case class State(g: Store = Store(),
     Sanitizer.replaceFreeVariablesInExpression(e, varMapping.map(vm => vm._1 -> vm._2.get), Set())
   }
 
+  // Unlike the filtered overload (used for inverse functions), this also includes packagingWandSnapshots.
   lazy val relevantQuantifiedVariables: Seq[(Var, Option[ast.AbstractLocalVar])] =
-    relevantQuantifiedVariables(_ => true)
+    functionRecorderQuantifiedVariables() ++ packagingWandSnapshots ++ quantifiedVariables
 
   override val toString = s"${this.getClass.getSimpleName}(...)"
 }
@@ -198,7 +205,7 @@ case object InhalePre extends HeapCause
 case object ExhalePost extends HeapCause
 case object InhaleInv extends HeapCause
 case object ExhaleInv extends HeapCause
-case object MergeContext extends HeapCause
+case object StateMerge extends HeapCause
 case object CreateLabel extends HeapCause
 case object StateConsolidation extends HeapCause
 case class ExecStmt(stmt: ast.Stmt) extends HeapCause
@@ -225,6 +232,7 @@ object State {
     s1 match {
       /* Decompose state s1 */
       case State(g1, h1, program, member,
+                 block,
                  predicateData,
                  functionData,
                  oldHeaps1,
@@ -235,6 +243,7 @@ object State {
                  methodCfg1, invariantContexts1,
                  constrainableARPs1,
                  quantifiedVariables1,
+                 packagingWandSnapshots1,
                  retrying1,
                  underJoin1,
                  functionRecorder1,
@@ -245,14 +254,15 @@ object State {
                  permissionScalingFactor1, permissionScalingFactorExp1, isEvalInOld,
                  reserveHeaps1, reserveCfgs1, conservedPcs1, recordPcs1, exhaleExt1, isInPackage1,
                  ssCache1, assertReadAccessOnly1,
-                 qpFields1, qpPredicates1, qpMagicWands1, permResources1, smCache1, pmCache1, smDomainNeeded1,
+                 qpFields1, qpPredicates1, qpMagicWands1, permResources1, smCache1, pmCache1, smDomainNeeded1, qpTag1,
                  predicateSnapMap1, predicateFormalVarMap1, retryLevel, useHeapTriggers,
-                 moreCompleteExhale, moreJoins) =>
+                 moreCompleteExhale, moreCompleteExhaleQP, moreJoins) =>
 
         /* Decompose state s2: most values must match those of s1 */
         s2 match {
           case State(`g1`, `h1`,
                      `program`, `member`,
+                     `block`,
                      `predicateData`, `functionData`,
                      oldHeaps2,
                      debugOldHeaps2,
@@ -262,6 +272,7 @@ object State {
                      `methodCfg1`, `invariantContexts1`,
                      constrainableARPs2,
                      quantifiedVariables2,
+                     packagingWandSnapshots2,
                      `retrying1`,
                      `underJoin1`,
                      functionRecorder2,
@@ -270,11 +281,11 @@ object State {
                      triggerExp2,
                      `partiallyConsumedHeap1`,
                      `permissionScalingFactor1`, `permissionScalingFactorExp1`, `isEvalInOld`,
-                     `reserveHeaps1`, `reserveCfgs1`, conservedPcs2, `recordPcs1`, `exhaleExt1`, `isInPackage1`,
+                     `reserveHeaps1`, `reserveCfgs1`, conservedPcs2, `recordPcs1`, `exhaleExt1`,`isInPackage1`,
                      ssCache2, `assertReadAccessOnly1`,
-                     `qpFields1`, `qpPredicates1`, `qpMagicWands1`, `permResources1`, smCache2, pmCache2, `smDomainNeeded1`,
+                     `qpFields1`, `qpPredicates1`, `qpMagicWands1`, `permResources1`, smCache2, pmCache2, `smDomainNeeded1`, qpTag1,
                      `predicateSnapMap1`, `predicateFormalVarMap1`, `retryLevel`, `useHeapTriggers`,
-                     moreCompleteExhale2, `moreJoins`) =>
+                     moreCompleteExhale2, moreCompleteExhaleQP2, `moreJoins`) =>
 
             val oldHeaps3 = oldHeaps1 ++ oldHeaps2
             val debugOldHeaps3 = mergeMaps(debugOldHeaps1, (), debugOldHeaps2, ())(
@@ -284,7 +295,11 @@ object State {
             )
             val temporaryHeapRecord3 = (temporaryHeapRecord1, temporaryHeapRecord2) match {
               case (Some((label1, cause1, pcs1, heaps1)), Some((label2, cause2, _, heaps2))) =>
-                if (label1 == label2 && cause1 == cause2) Some(label1, cause1, pcs1, heaps1 ++ heaps2) else None
+                if (label1 == label2 && cause1 == cause2) Some(label1, cause1, pcs1, heaps1 ++ heaps2) else {
+                  // This case should not occur if heaps have been recorded correctly
+                  SiliconRunner.logger.warn(s"Attempted to merge states with different temporary heap records: $label1 and $label2")
+                  None
+                }
               case (Some(tmp1), None) => Some(tmp1)
               case (None, Some(tmp2)) => Some(tmp2)
               case (None, None) => None
@@ -294,12 +309,14 @@ object State {
             val possibleTriggers3 = possibleTriggers1 ++ possibleTriggers2
             val constrainableARPs3 = constrainableARPs1 ++ constrainableARPs2
             val quantifiedVariables3 = (quantifiedVariables1 ++ quantifiedVariables2).distinct
+            val packagingWandSnapshots3 = (packagingWandSnapshots1 ++ packagingWandSnapshots2).distinct
 
             val smCache3 = smCache1.union(smCache2)
             val pmCache3 = pmCache1 ++ pmCache2
 
             val ssCache3 = ssCache1 ++ ssCache2
             val moreCompleteExhale3 = moreCompleteExhale || moreCompleteExhale2
+            val moreCompleteExhaleQP3 = moreCompleteExhaleQP || moreCompleteExhaleQP2
 
             assert(conservedPcs1.length == conservedPcs2.length)
             val conservedPcs3 = conservedPcs1
@@ -314,10 +331,12 @@ object State {
                     triggerExp = triggerExp3,
                     constrainableARPs = constrainableARPs3,
                     quantifiedVariables = quantifiedVariables3,
+                    packagingWandSnapshots = packagingWandSnapshots3,
                     ssCache = ssCache3,
                     smCache = smCache3,
                     pmCache = pmCache3,
                     moreCompleteExhale = moreCompleteExhale3,
+                    moreCompleteExhaleQP = moreCompleteExhaleQP3,
                     conservedPcs = conservedPcs3)
 
           case _ =>
@@ -392,17 +411,35 @@ object State {
   // and h2 under cond2.
   // Assumes that cond1 is the negation of cond2.
   def mergeHeap(h1: Heap, cond1: Term, cond1Exp: Option[ast.Exp], h2: Heap, cond2: Term, cond2Exp: Option[ast.Exp]): Heap = {
-    val (unconditionalHeapChunks, h1HeapChunksToConditionalize) = h1.values.partition(c1 => h2.values.exists(_ == c1))
-    val h2HeapChunksToConditionalize = h2.values.filter(c2 => !unconditionalHeapChunks.exists(_ == c2))
+    val (maskChunks1, generalChunks1) = h1.values.partition(_.isInstanceOf[BasicMaskHeapChunk])
+    val (maskChunks2, generalChunks2) = h2.values.partition(_.isInstanceOf[BasicMaskHeapChunk])
+
+    val (unconditionalHeapChunks, h1HeapChunksToConditionalize) = generalChunks1.partition(c1 => generalChunks2.exists(_ == c1))
+    val h2HeapChunksToConditionalize = generalChunks2.filter(c2 => !unconditionalHeapChunks.exists(_ == c2))
     val h1ConditionalizedHeapChunks = conditionalizeChunks(h1HeapChunksToConditionalize, cond1, cond1Exp)
     val h2ConditionalizedHeapChunks = conditionalizeChunks(h2HeapChunksToConditionalize, cond2, cond2Exp)
-    Heap(unconditionalHeapChunks) + Heap(h1ConditionalizedHeapChunks) + Heap(h2ConditionalizedHeapChunks)
+    val generalResult = Heap(unconditionalHeapChunks) + Heap(h1ConditionalizedHeapChunks) + Heap(h2ConditionalizedHeapChunks)
+
+    val map1 = maskChunks1.collect { case c: BasicMaskHeapChunk => (c.resourceID, c.resource) -> c }.toMap
+    val map2 = maskChunks2.collect { case c: BasicMaskHeapChunk => (c.resourceID, c.resource) -> c }.toMap
+    val mergedMaskChunks = (map1.keySet ++ map2.keySet).map { key =>
+      (map1.get(key), map2.get(key)) match {
+        case (Some(c1), Some(c2)) if c1 == c2 => c1
+        case (Some(c1), Some(c2)) => c1.copy(Ite(cond1, c1.mask, c2.mask), Ite(cond1, c1.heap, c2.heap))
+        case (Some(c1), None) => c1
+        case (None, Some(c2)) => c2
+        case _ => sys.error("unreachable")
+      }
+    }
+
+    generalResult + Heap(mergedMaskChunks)
   }
 
   def merge(s1: State, pc1: RecordedPathConditions, s2: State, pc2: RecordedPathConditions): State = {
     s1 match {
       /* Decompose state s1 */
       case State(g1, h1, program, member,
+      block,
       predicateData, functionData,
       oldHeaps1,
       debugOldHeaps1,
@@ -412,6 +449,7 @@ object State {
       methodCfg1, invariantContexts1,
       constrainableARPs1,
       quantifiedVariables1,
+      packagingWandSnapshots1,
       retrying1,
       underJoin1,
       functionRecorder1,
@@ -422,13 +460,14 @@ object State {
       permissionScalingFactor1, permissionScalingFactorExp1, isEvalInOld,
       reserveHeaps1, reserveCfgs1, conservedPcs1, recordPcs1, exhaleExt1, isInPackage1,
       ssCache1, assertReadAccessOnly1,
-      qpFields1, qpPredicates1, qpMagicWands1, permResources1, smCache1, pmCache1, smDomainNeeded1,
+      qpFields1, qpPredicates1, qpMagicWands1, permResources1, smCache1, pmCache1, smDomainNeeded1, qpTag1,
       predicateSnapMap1, predicateFormalVarMap1, retryLevel, useHeapTriggers,
-      moreCompleteExhale, moreJoins) =>
+      moreCompleteExhale, moreCompleteExhaleQP, moreJoins) =>
 
         /* Decompose state s2: most values must match those of s1 */
         s2 match {
           case State(g2, h2, `program`, `member`,
+          `block`,
           `predicateData`, `functionData`,
           oldHeaps2,
           debugOldHeaps2,
@@ -438,6 +477,7 @@ object State {
           `methodCfg1`, invariantContexts2,
           constrainableARPs2,
           `quantifiedVariables1`,
+          `packagingWandSnapshots1`,
           `retrying1`,
           `underJoin1`,
           functionRecorder2,
@@ -446,11 +486,11 @@ object State {
           triggerExp2,
           partiallyConsumedHeap2,
           `permissionScalingFactor1`, `permissionScalingFactorExp1`, `isEvalInOld`,
-          reserveHeaps2, `reserveCfgs1`, conservedPcs2, `recordPcs1`, `exhaleExt1`, `isInPackage1`,
+          reserveHeaps2, `reserveCfgs1`, conservedPcs2, `recordPcs1`, `exhaleExt1`,`isInPackage1`,
           ssCache2, `assertReadAccessOnly1`,
-          `qpFields1`, `qpPredicates1`, `qpMagicWands1`, `permResources1`, smCache2, pmCache2, smDomainNeeded2,
+          `qpFields1`, `qpPredicates1`, `qpMagicWands1`, `permResources1`, smCache2, pmCache2, smDomainNeeded2, qpTag1,
           `predicateSnapMap1`, `predicateFormalVarMap1`, `retryLevel`, `useHeapTriggers`,
-          moreCompleteExhale2, `moreJoins`) =>
+          moreCompleteExhale2, moreCompleteExhaleQP2, `moreJoins`) =>
 
             val debugOldHeaps3 = mergeMaps(debugOldHeaps1, (), debugOldHeaps2, ())(
               (record, _) => Some(record))(
@@ -459,7 +499,11 @@ object State {
               )
             val temporaryHeapRecord3 = (temporaryHeapRecord1, temporaryHeapRecord2) match {
               case (Some((label1, cause1, pcs1, heaps1)), Some((label2, cause2, _, heaps2))) =>
-                if (label1 == label2 && cause1 == cause2) Some(label1, cause1, pcs1, heaps1 ++ heaps2) else None
+                if (label1 == label2 && cause1 == cause2) Some(label1, cause1, pcs1, heaps1 ++ heaps2) else {
+                  // This case should not occur if heaps have been recorded correctly
+                  SiliconRunner.logger.warn(s"Attempted to merge states with different temporary heap records: $label1 and $label2")
+                  None
+                }
               case (Some(tmp1), None) => Some(tmp1)
               case (None, Some(tmp2)) => Some(tmp2)
               case (None, None) => None

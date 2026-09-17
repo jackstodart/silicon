@@ -6,12 +6,12 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.{DebugExp, PathCondition}
+import viper.silicon.debugger.{DebugExp, DebugGroup, DebugGroupNode}
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.decider.RecordedPathConditions
 import viper.silicon.interfaces.{Success, VerificationResult}
 import viper.silicon.logger.records.structural.JoiningRecord
-import viper.silicon.state.State
+import viper.silicon.state.{State, StateMerge}
 import viper.silicon.state.terms.{And, Or, Term}
 import viper.silicon.utils.ast.{BigAnd, BigOr}
 import viper.silicon.verifier.Verifier
@@ -92,6 +92,7 @@ object joiner extends JoiningRules {
         Success()
       } else {
         val (sJoined, dataJoined) = merge(entries)
+        val sJoined2 = if (debugOn) v.recordHeap(sJoined, "nil", StateMerge, v.decider.pcs.duplicate()) else sJoined
 
         var feasibleBranches: List[Term] = Nil
         var feasibleBranchesExp: Option[List[ast.Exp]] = Option.when(debugOn)(Nil)
@@ -99,19 +100,18 @@ object joiner extends JoiningRules {
 
         entries foreach (entry => {
           val pcs = entry.pathConditions.conditionalized
-          val pcsExp = Option.when(debugOn)(entry.pathConditions.conditionalizedExp)
           val comment = "Joined path conditions"
+          val debugPcs = Option.when[DebugGroupNode[_]](debugOn)(DebugGroup(comment, entry.pathConditions.conditionalizedExp))
           v.decider.prover.comment(comment)
-          v.decider.assume(pcs, Option.when(debugOn)(DebugExp.createInstance(
-            PathCondition(comment), InsertionOrderedSet(pcsExp.get))), enforceAssumption = false)
+          v.decider.assume(pcs, debugPcs, enforceAssumption = false)
           feasibleBranches = And(entry.pathConditions.branchConditions) :: feasibleBranches
           feasibleBranchesExp = feasibleBranchesExp.map(fbe => BigAnd(entry.pathConditions.branchConditionExps.map(_._1)) :: fbe)
           feasibleBranchesExpNew = feasibleBranchesExpNew.map(fbe => BigAnd(entry.pathConditions.branchConditionExps.map(_._2.get)) :: fbe)
         })
         // Assume we are in a feasible branch
-        v.decider.assume(Or(feasibleBranches), Option.when(debugOn)(DebugExp.createInstance(
-          PathCondition("Feasible Branches"), feasibleBranchesExp.map(BigOr(_)), feasibleBranchesExpNew.map(BigOr(_)), InsertionOrderedSet.empty)))
-        Q(sJoined, dataJoined, v)
+        v.decider.assume(Or(feasibleBranches), Option.when(debugOn)(
+          DebugExp.awaitTerm("Feasible Branches", BigOr(feasibleBranchesExp.get), BigOr(feasibleBranchesExpNew.get), isInternal = false)))
+        Q(sJoined2, dataJoined, v)
       }
     }
   }

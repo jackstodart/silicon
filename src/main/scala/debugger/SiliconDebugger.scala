@@ -1,6 +1,7 @@
 package viper.silicon.debugger
 
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.decider.{Cvc5ProverStdIO, RecordedPathConditions, Z3ProverStdIO}
 import viper.silicon.interfaces.state.Chunk
 import viper.silicon.interfaces.{Failure, SiliconDebuggingFailureContext, Success, VerificationResult}
@@ -9,12 +10,11 @@ import viper.silicon.rules.evaluator
 import viper.silicon.state.State.TemporaryRecord
 import viper.silicon.state._
 import viper.silicon.state.terms.{Term, True}
-import viper.silicon.utils.ast.simplifyVariableName
+import viper.silicon.utils.ast.{flattenOperator, simplifyVariableName}
 import viper.silicon.verifier.{MainVerifier, Verifier, WorkerVerifier}
 import viper.silver.ast
 import viper.silver.ast._
 import viper.silver.ast.utility.Simplifier
-import viper.silver.frontend.FrontendStateCache
 import viper.silver.parser._
 import viper.silver.reporter.{NoopReporter, Reporter}
 import viper.silver.verifier.errors.ContractNotWellformed
@@ -24,24 +24,33 @@ import java.nio.file.Paths
 import scala.collection.mutable
 import scala.io.StdIn.readLine
 
+package object debugger {
+  type AnyDebugNode = DebugNode[_]
+  // These are constructors which are used in decider.assume, where terms are later attached to DebugAssumptions
+  type PreDebugAssumption = Term => DebugAssumption[_]
+  type PreDebugGroup = InsertionOrderedSet[DebugNode[_]] => DebugGroupNode[_]
+}
+
 case class ProofObligation(s: State,
                            v: Verifier,
                            proverEmits: Seq[String],
                            preambleAssumptions: Seq[DebugAxiom],
                            branchConditions: Seq[Term],
                            branchConditionExps: Seq[(ast.Exp, ast.Exp)],
-                           assumptionsExp: InsertionOrderedSet[DebugExp],
+                           assumptionsExp: InsertionOrderedSet[AnyDebugNode],
                            assertion: Term,
                            eAssertion: DebugExp,
                            timeout: Option[Int],
-                           printConfig: DebugExpPrintConfiguration,
+                           printConfig: DebugPrintConfiguration,
                            originalErrorReason: ErrorReason,
                            resolver: DebugResolver,
-                           translator: DebugTranslator
-                          ){
+                           translator: DebugTranslator) {
 
   def removeAssumptions(ids: Seq[Int]): ProofObligation = {
-    val newAssumptionsExp = assumptionsExp.filter(a => !ids.contains(a.id)).map(c => c.removeChildrenById(ids))
+    val newAssumptionsExp = assumptionsExp.filter(a => !ids.contains(a.id)).map[DebugNode[_]] {
+      case assumption: DebugAssumption[_] => assumption
+      case group: DebugGroupNode[_] => group.removeChildrenById(ids)
+    }
     this.copy(assumptionsExp = newAssumptionsExp)
   }
 
@@ -68,7 +77,7 @@ case class ProofObligation(s: State,
       case ExhalePost => "exhale postcondition"
       case InhaleInv => "inhale loop invariants"
       case ExhaleInv => "exhale loop invariants"
-      case MergeContext => "merge framed heap"
+      case StateMerge => "merge framed heap or branches"
       case CreateLabel => "heap label"
       case StateConsolidation => "state consolidation"
       case ExecStmt(stmt) => s"\"$stmt\""
@@ -111,9 +120,10 @@ case class ProofObligation(s: State,
   private def tempHeapString(tempRecord: Option[TemporaryRecord]): String = {
     tempRecord match {
       case None => ""
-      case Some((label, cause, pcs, heaps)) =>
+      case Some((label, cause, _, heaps)) =>
         s"Current intermediate heaps:\n" +
-          s"\tCause: ${causeToString(cause)}\n" +
+          s"\tParent: $label\n" +
+          s"\tCause: ${causeToString(cause)}\n\n" +
           heaps.map { case (l, r) => intermediateHeapString(l, r) + "\n" }.mkString("")
     }
   }
@@ -122,7 +132,8 @@ case class ProofObligation(s: State,
     if (!printConfig.printOldHeaps)
       s"Heap:\n${heapChunksString(s.h)}\n"
     else {
-      s"Current Heap:\n${heapChunksString(s.h)}\n" +
+      val currLabel = v.getDebugHeapLabel(s).map(" (" + _ + ")").getOrElse("")
+      s"Current Heap$currLabel:\n${heapChunksString(s.h)}\n" +
         s.debugOldHeaps.map { case (label, dh) => debugHeapString(label, dh) }.mkString("") +
         tempHeapString(s.temporaryHeapRecord)
     }
@@ -131,11 +142,15 @@ case class ProofObligation(s: State,
   private def simplify[N <: Node](n: N): N = Simplifier.simplify(n, assumeWelldefinedness = true)
 
   private def branchConditionString: String = {
-    if (printConfig.printInternalTermRepresentation)
-      s"Branch Conditions:\n\t\t${branchConditions.filter(bc => bc != True).mkString("\n\t\t")}\n\n"
-    else
-      s"Branch Conditions:\n\t\t${branchConditionExps.map(bc => simplify(bc._2))
-        .filter(bc => bc != ast.TrueLit()()).mkString("\n\t\t")}\n\n"
+    if (printConfig.printInternalTermRepresentation) {
+      val bcs = branchConditions.filter(bc => bc != True)
+      val bcString = if (bcs.nonEmpty) bcs.mkString("\n\t\t") else "(none)"
+      s"Branch Conditions:\n\t\t$bcString\n\n"
+    } else {
+      val bcs = branchConditionExps.map(bc => simplify(bc._2)).filter(bc => bc != ast.TrueLit()())
+      val bcString = if (bcs.nonEmpty) bcs.mkString("\n\t\t") else "(none)"
+      s"Branch Conditions:\n\t\t$bcString\n\n"
+    }
   }
 
   private def chunkString(c: Chunk): String = {
@@ -158,35 +173,36 @@ case class ProofObligation(s: State,
         s"acc(${instantiated.toString}, ${simplify(mwc.permExp.get)})"
       case qfc: QuantifiedFieldChunk =>
         if (qfc.singletonRcvrExp.isDefined) {
-          val receiver = simplify(qfc.singletonRcvrExp.get)
+          val receiver = simplify(qfc.singletonRcvrExp.head)
           val perm = simplify(qfc.permExp.get.replace(qfc.quantifiedVarExps.get.head.localVar, receiver))
           s"acc($receiver.${qfc.id}, $perm)"
         } else {
-          val qvarsString = "forall " + qfc.invs.get.qvarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
-          val letInString = qfc.quantifiedVarExps.get.zip(qfc.invs.get.invertibleExps.get).map(v => s"let ${v._1.name} == (${simplify(v._2)}) in").mkString(" ")
-          s"$qvarsString :: ${qfc.conditionExp.get} ==> $letInString acc(${qfc.quantifiedVarExps.get.head.name}.${qfc.id}, ${simplify(qfc.permValueExp.get)})"
+          val varsString = qfc.quantifiedVarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
+          val qvarsString = "forall " + qfc.invs.head.qvarExps.head.map(v => s"${v.name}: ${v.typ}").mkString(", ")
+          val varsEqualString = qfc.quantifiedVarExps.get.zip(qfc.invs.head.invertibleExps.get).map(v => s"${v._1.name} == ${simplify(v._2)}").mkString(" && ")
+          s"forall $varsString :: $qvarsString :: $varsEqualString ==> acc(${qfc.quantifiedVarExps.get.head.name}.${qfc.id}, ${simplify(qfc.permExp.get)})"
         }
       case qpc: QuantifiedPredicateChunk =>
         if (qpc.singletonArgExps.isDefined) {
-          s"acc(${qpc.id}(${qpc.singletonArgExps.get.map(e => simplify(e)).mkString(", ")}), ${simplify(qpc.permExp.get)})"
+          s"acc(${qpc.id}(${qpc.singletonArgExps.head.map(e => simplify(e)).mkString(", ")}), ${simplify(qpc.permExp.get)})"
         } else {
           val varsString = qpc.quantifiedVarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
-          val qvarsString = "forall " + qpc.invs.get.qvarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
-          val varsEqualString = qpc.quantifiedVarExps.get.zip(qpc.invs.get.invertibleExps.get).map(v => s"${v._1.name} == ${simplify(v._2)}").mkString(" && ")
+          val qvarsString = "forall " + qpc.invs.head.qvarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
+          val varsEqualString = qpc.quantifiedVarExps.get.zip(qpc.invs.head.invertibleExps.get).map(v => s"${v._1.name} == ${simplify(v._2)}").mkString(" && ")
           s"forall $varsString :: $qvarsString :: $varsEqualString ==> acc(${qpc.id}(${qpc.quantifiedVarExps.get.map(_.name).mkString(", ")}), ${simplify(qpc.permExp.get)})"
         }
       case qwc: QuantifiedMagicWandChunk =>
         val shape = qwc.id.ghostFreeWand
         if (qwc.singletonArgExps.isDefined) {
-          val instantiated = shape.replace(shape.subexpressionsToEvaluate(s.program).zip(qwc.singletonArgExps.get).map(e => e._1 -> simplify(e._2)).toMap)
-          val permReplaced = simplify(qwc.permExp.get.replace(qwc.quantifiedVarExps.get.zip(qwc.singletonArgExps.get).map(e => e._1.localVar -> e._2).toMap))
+          val instantiated = shape.replace(shape.subexpressionsToEvaluate(s.program).zip(qwc.singletonArgExps.head).map(e => e._1 -> simplify(e._2)).toMap)
+          val permReplaced = simplify(qwc.permExp.get.replace(qwc.quantifiedVarExps.get.zip(qwc.singletonArgExps.head).map(e => e._1.localVar -> e._2).toMap))
 
           s"acc(${instantiated.toString}, $permReplaced)"
         } else{
           val varsString = qwc.quantifiedVarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
-          val qvarsString = "forall " + qwc.invs.get.qvarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
-          val varsEqualString = qwc.quantifiedVarExps.get.zip(qwc.invs.get.invertibleExps.get).map(v => s"${v._1.name} == ${simplify(v._2)}").mkString(" && ")
-          val instantiated = shape.replace(shape.subexpressionsToEvaluate(s.program).zip(qwc.invs.get.invertibleExps.get).map(e => e._1 -> simplify(e._2)).toMap)
+          val qvarsString = "forall " + qwc.invs.head.qvarExps.get.map(v => s"${v.name}: ${v.typ}").mkString(", ")
+          val varsEqualString = qwc.quantifiedVarExps.get.zip(qwc.invs.head.invertibleExps.get).map(v => s"${v._1.name} == ${simplify(v._2)}").mkString(" && ")
+          val instantiated = shape.replace(shape.subexpressionsToEvaluate(s.program).zip(qwc.invs.head.invertibleExps.get).map(e => e._1 -> simplify(e._2)).toMap)
           s"forall $varsString :: $qvarsString :: $varsEqualString ==> acc($instantiated, ${simplify(qwc.permExp.get)})"
         }
     }
@@ -194,9 +210,12 @@ case class ProofObligation(s: State,
   }
 
   private def assumptionString: String = {
-    val filteredAssumptions = assumptionsExp.filter(d => !d.isInternal || printConfig.isPrintInternalEnabled)
+    val filteredAssumptions = if (printConfig.isPrintInternalEnabled) assumptionsExp
+    else assumptionsExp.filter(d => !d.isInternal)
+
     if (filteredAssumptions.nonEmpty) {
-      s"Assumptions: ${filteredAssumptions.foldLeft[String]("")((s, de) => s + de.toString(printConfig))}\n\n"
+      "Assumptions: \n" +
+        filteredAssumptions.foldLeft[String]("")((s, de) => s + de.toString(printConfig) + "\n") + "\n"
     } else {
       ""
     }
@@ -220,9 +239,9 @@ case class ProofObligation(s: State,
 
   private def assertionString: String = {
     if (eAssertion.finalExp.isDefined){
-      s"Assertion:\n\t$eAssertion\n\n"
+      s"Assertion:\n$eAssertion\n\n"
     } else {
-      eAssertion.description(printConfig.printInternalTermRepresentation).get
+      eAssertion.description.get
     }
   }
 
@@ -230,15 +249,6 @@ case class ProofObligation(s: State,
     "\n" + originalErrorInfo + branchConditionString + storeString + heapString +
       axiomsString + declarationsString + assumptionString + assertionString
   }
-}
-
-object ProofObligation {
-  def apply(s: State, v: Verifier, assertion: Term, eAssertion: DebugExp, reason: ErrorReason): ProofObligation =
-    new ProofObligation(s, v, v.decider.prover.getAllEmits(), v.decider.prover.preambleAssumptions,
-      v.decider.pcs.branchConditions, v.decider.pcs.branchConditionExps.map(bce => bce._1 -> bce._2.get),
-      v.decider.pcs.assumptionExps, assertion, eAssertion, None, new DebugExpPrintConfiguration, reason,
-      new DebugResolver(FrontendStateCache.pprogram, FrontendStateCache.resolver.names),
-      new DebugTranslator(FrontendStateCache.pprogram, FrontendStateCache.translator.getMembers()))
 }
 
 class SiliconDebugger(verificationResults: List[VerificationResult],
@@ -303,6 +313,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
         println(s"Debugging results are not available. No failure context found.")
         return None
       }
+
       val failureContext = failureContexts.head
       if (failureContext.state.isEmpty || failureContext.verifier.isEmpty) {
         println(s"State or verifier not found.")
@@ -312,7 +323,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       val obl = Some(ProofObligation(failureContext.state.get, failureContext.verifier.get, failureContext.proverDecls, failureContext.preambleAssumptions,
         failureContext.branchConditions, failureContext.branchConditionExps, failureContext.assumptions,
         failureContext.failedAssertion, failureContext.failedAssertionExp, None,
-        new DebugExpPrintConfiguration, currResult.message.reason,
+        new DebugPrintConfiguration, currResult.message.reason,
         new DebugResolver(this.pprogram, this.resolver.names), new DebugTranslator(this.pprogram, translator.getMembers())))
       println(s"Current obligation:\n${obl.get}")
       obl
@@ -447,19 +458,24 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
     indexOpt match {
       case Some(id) =>
         val toSearch = obl.assumptionsExp.toSeq
-        var found: Option[DebugExp] = None
+        var found: Option[AnyDebugNode] = None
         var i = 0
         while (found.isEmpty && i < toSearch.size) {
-          found = toSearch(i).getExpWithId(id, new mutable.HashSet())
+          toSearch(i) match {
+            case ass: DebugAssumption[_] => if (ass.id == id) found = Some(ass)
+            case group: DebugGroupNode[_] => found = group.getNodeWithId(id)
+          }
           i += 1
         }
-        if (found.isDefined) {
-          val filteredChildren = found.get.children.filter(d => !d.isInternal || obl.printConfig.isPrintInternalEnabled)
-          if (filteredChildren.nonEmpty) {
-            println(s"${filteredChildren.foldLeft[String]("")((s, de) => s + de.toString(obl.printConfig))}\n\n")
-          }
-        } else {
-          println("Assumption not found")
+
+        found match {
+          case None => println("Assumption not found")
+          case Some(_: DebugAssumption[_]) => println("Assumption has no children")
+          case Some(ass: DebugGroupNode[_]) =>
+            val filteredChildren = if (obl.printConfig.isPrintInternalEnabled) ass.children else ass.children.filter(!_.isInternal)
+            if (filteredChildren.nonEmpty) {
+              println(s"${filteredChildren.foldLeft[String]("")((s, de) => s + de.toString(obl.printConfig))}\n\n")
+            }
         }
       case None =>
         println("Invalid input")
@@ -484,7 +500,8 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       val assumptionE = translateStringToExp(userInput, obl)
       evalAssumption(assumptionE, obl, free, obl.v) match {
         case Some((resS, resT, resE, evalAssumptions)) =>
-          val allAssumptions = obl.assumptionsExp ++ evalAssumptions + DebugExp.createInstance(assumptionE, resE).withTerm(resT)
+          val newDE = DebugExp(None, isInternal = false, resT, Some(assumptionE), Some(resE))
+          val allAssumptions = obl.assumptionsExp ++ evalAssumptions + newDE
           obl.copy(s = resS, assumptionsExp = allAssumptions)
         case None =>
           obl
@@ -511,7 +528,8 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       })
       verificationResult match {
         case Success() =>
-          obl.copy(assumptionsExp = resV.decider.pcs.assumptionExps, assertion = resT, eAssertion = DebugExp.createInstance(resE, resE), v = resV)
+          val eAssertion = DebugExp(None, isInternal = false, resT, Some(resE), Some(resE))
+          obl.copy(assumptionsExp = resV.decider.pcs.assumptionExps, assertion = resT, eAssertion = eAssertion, v = resV)
         case _ =>
           throw new UnknownError("Error while evaluating expression: " + verificationResult.toString)
       }
@@ -562,7 +580,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
     translatePExp(pexp)
   }
 
-  private def evalAssumption(e: ast.Exp, obl: ProofObligation, isFree: Boolean, v: Verifier): Option[(State, Term, ast.Exp, InsertionOrderedSet[DebugExp])] = {
+  private def evalAssumption(e: ast.Exp, obl: ProofObligation, isFree: Boolean, v: Verifier): Option[(State, Term, ast.Exp, InsertionOrderedSet[AnyDebugNode])] = {
     var resT: Term = null
     var resS: State = null
     var resE: ast.Exp = null

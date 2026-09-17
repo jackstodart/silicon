@@ -8,6 +8,7 @@ package viper.silicon.interfaces
 
 import viper.silicon.debugger.{DebugAxiom, DebugExp}
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.interfaces.state.Chunk
 import viper.silicon.reporting._
 import viper.silicon.state.terms.{BooleanLiteral, FunctionDecl, IntLiteral, MacroDecl, Term, Var}
@@ -142,10 +143,10 @@ case class SiliconDebuggingFailureContext(branchConditions: Seq[Term],
                                           state: Option[State],
                                           verifier: Option[Verifier],
                                           proverDecls: Seq[String],
-                                          preambleAssumptions: Seq[DebugAxiom] ,
+                                          preambleAssumptions: Seq[DebugAxiom],
                                           macroDecls: Vector[MacroDecl],
                                           functionDecls: Set[FunctionDecl],
-                                          assumptions: InsertionOrderedSet[DebugExp],
+                                          assumptions: InsertionOrderedSet[AnyDebugNode],
                                           failedAssertion: Term,
                                           failedAssertionExp: DebugExp) extends FailureContext {
 
@@ -158,7 +159,10 @@ trait SiliconCounterexample extends Counterexample {
   def withStore(s: Store) : SiliconCounterexample
 }
 
-case class SiliconNativeCounterexample(internalStore: Store, heap: Iterable[Chunk], oldHeaps: Map[String,Iterable[Chunk]], model: Model) extends SiliconCounterexample {
+case class SiliconNativeCounterexample(internalStore: Store,
+                                       heap: Iterable[Chunk],
+                                       oldHeaps: Map[String,Iterable[Chunk]],
+                                       model: Model) extends SiliconCounterexample {
   override def withStore(s: Store): SiliconCounterexample = {
     SiliconNativeCounterexample(s, heap, oldHeaps, model)
   }
@@ -268,7 +272,7 @@ case class SiliconMappedCounterexample(internalStore: Store,
 
   private def renameSnap(entry: ValueEntry): ExtractedModelEntry = {
     if (!heapNames.contains(entry)) {
-      heapNames += (entry -> ("heap_" + heapNames.size.toString))
+      heapNames += (entry -> ("hp_" + heapNames.size.toString))
     }
     UnprocessedModelEntry(ConstantEntry(
             heapNames.get(entry).orNull))
