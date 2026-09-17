@@ -546,10 +546,10 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
 
     val comment = "Nested auxiliary terms: globals"
     v.decider.prover.comment(comment)
-    v.decider.assume(auxGlobals, None, None, enforceAssumption = false)
-    if (debugOn) v.decider.addDebugNode(DebugGroup(comment, auxGlobalsExp.get))
+    v.decider.assume(auxGlobals, Option.when(debugOn)(DebugGroup(comment, auxGlobalsExp.get)), enforceAssumption = false)
 
     val comment2 = "Nested auxiliary terms: non-globals"
+    val debugNonGlobals = Option.when(debugOn)(DebugGroup(comment2, auxNonGlobalsExp.get))
     v.decider.prover.comment(comment2)
     optTrigger match {
       case None =>
@@ -557,12 +557,11 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
         v.decider.assume(
           auxNonGlobals.map(_.copy(
             vars = effectiveTriggersQVars,
-            triggers = effectiveTriggers)), None, None, enforceAssumption = false)
+            triggers = effectiveTriggers)), debugNonGlobals, enforceAssumption = false)
       case Some(_) =>
         /* Explicit triggers were provided. */
-        v.decider.assume(auxNonGlobals, None, None, enforceAssumption = false)
+        v.decider.assume(auxNonGlobals, debugNonGlobals, enforceAssumption = false)
     }
-    if (debugOn) v.decider.addDebugNode(DebugGroup(comment2, auxNonGlobalsExp.get))
 
     val nonNegImplication = Implies(tCond, perms.IsNonNegative(tPerm))
     val nonNegImplicationExp = eCond.map(c => ast.Implies(c, ast.PermGeCmp(ePerm.get, ast.NoPerm()())())(c.pos, c.info, c.errT))
@@ -911,16 +910,15 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
 
     val commentGlobals = "Nested auxiliary terms: globals"
     v.decider.prover.comment(commentGlobals)
-    v.decider.assume(auxGlobals, None, None, enforceAssumption = false)
-    if (debugOn) v.decider.addDebugNode(DebugGroup(commentGlobals, auxGlobalsExp.get))
+    v.decider.assume(auxGlobals, Option.when(debugOn)(DebugGroup(commentGlobals, auxGlobalsExp.get)), enforceAssumption = false)
 
     val commentNonGlobals = "Nested auxiliary terms: non-globals"
     v.decider.prover.comment(commentNonGlobals)
     val auxNonGlobalsWithEffectiveTriggers = auxNonGlobals.map(_.copy(
       vars = effectiveTriggersQVars,
       triggers = effectiveTriggers))
-    v.decider.assume(auxNonGlobalsWithEffectiveTriggers, None, None, enforceAssumption = false)
-    if (debugOn) v.decider.addDebugNode(DebugGroup(commentNonGlobals, auxNonGlobalsExp.get))
+    v.decider.assume(auxNonGlobalsWithEffectiveTriggers,
+      Option.when(debugOn)(DebugGroup(commentNonGlobals, auxNonGlobalsExp.get)), enforceAssumption = false)
 
     val nonNegImplication = Implies(tCond, perms.IsNonNegative(tPerm))
     val nonNegImplicationExp = eCond.map(c => ast.Implies(c, ast.PermGeCmp(ePerm.get, ast.NoPerm()())())(c.pos, c.info, c.errT))

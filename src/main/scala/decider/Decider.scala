@@ -57,7 +57,6 @@ trait Decider {
 
   def startDebugSubExp(): Unit
   def finishDebugSubExp(description : String): Unit
-  def addDebugNode(debugNode: AnyDebugNode): Unit
 
   def assume(t: Term, debugExp: Option[PreDebugAssumption],
              enforceAssumption: Boolean = false, isDefinition: Boolean = false): Unit

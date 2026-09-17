@@ -6,8 +6,9 @@
 
 package viper.silicon.interfaces
 
-import viper.silicon.debugger.{DebugAxiom, DebugExp, DebugNode}
+import viper.silicon.debugger.{DebugAxiom, DebugExp}
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.interfaces.state.Chunk
 import viper.silicon.reporting._
 import viper.silicon.state.terms.{BooleanLiteral, FunctionDecl, IntLiteral, MacroDecl, Term, Var}
@@ -145,7 +146,7 @@ case class SiliconDebuggingFailureContext(branchConditions: Seq[Term],
                                           preambleAssumptions: Seq[DebugAxiom],
                                           macroDecls: Vector[MacroDecl],
                                           functionDecls: Set[FunctionDecl],
-                                          assumptions: InsertionOrderedSet[DebugNode[_]],
+                                          assumptions: InsertionOrderedSet[AnyDebugNode],
                                           failedAssertion: Term,
                                           failedAssertionExp: DebugExp) extends FailureContext {
 
@@ -158,7 +159,10 @@ trait SiliconCounterexample extends Counterexample {
   def withStore(s: Store) : SiliconCounterexample
 }
 
-case class SiliconNativeCounterexample(internalStore: Store, heap: Iterable[Chunk], oldHeaps: Map[String,Iterable[Chunk]], model: Model) extends SiliconCounterexample {
+case class SiliconNativeCounterexample(internalStore: Store,
+                                       heap: Iterable[Chunk],
+                                       oldHeaps: Map[String,Iterable[Chunk]],
+                                       model: Model) extends SiliconCounterexample {
   override def withStore(s: Store): SiliconCounterexample = {
     SiliconNativeCounterexample(s, heap, oldHeaps, model)
   }
