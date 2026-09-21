@@ -25,6 +25,11 @@ object DebugCounter {
   def next(): Int = idCounter.getAndIncrement()
 }
 
+
+/* -------------------------------------------------------------------------------------------- *
+ * Traits                                                                                       *
+ * -------------------------------------------------------------------------------------------- */
+
 /** A node is either a single assumption of a particular type, or a DebugGroupNode with children.
   * Group nodes should not have terms or expressions themselves, but only with respect to their children.
   */
@@ -70,7 +75,10 @@ sealed trait DebugAssumption[Self <: DebugAssumption[Self]] extends DebugNode[Se
     Option.when(this.term.contains(t))(this)
 
   def toString(currDepth: Int, maxDepth: Int, config: DebugPrintConfiguration): String =
-    if (!config.printInternalTermRepresentation && isInternal) "" else ("\t" * currDepth) + s"\t[$id] ${display(config)}"
+    ("\t" * currDepth) + s"\t[$id] ${display(config)}"
+
+  override def toString(config: DebugPrintConfiguration): String =
+    s"\t[$id] ${display(config)}"
 
   // display is only the content of the node
   def display(config: DebugPrintConfiguration): String
@@ -148,17 +156,17 @@ sealed trait DebugGroupNode[Self <: DebugGroupNode[Self]] extends DebugNode[Self
 
 // Generic assumption type
 class DebugExp(val id: Int,
-               val description : Option[String],
-               override val isInternal : Boolean,
-               val term : Term,
-               override val originalExp : Option[Exp],
-               override val finalExp : Option[Exp]) extends DebugAssumption[DebugExp] {
-  override lazy val isGlobal: Boolean = PathConditions.isGlobal(term)
-
+               val description: Option[String],
+               override val isInternal: Boolean,
+               val term: Term,
+               override val originalExp: Option[Exp],
+               override val finalExp: Option[Exp]) extends DebugAssumption[DebugExp] {
   override def display(config: DebugPrintConfiguration): String = {
-    if (config.printInternalTermRepresentation) term.toString
+    val descriptionStr = description.map(_ + ": ").getOrElse("")
+    val assumptionStr = if (config.printInternalTermRepresentation) term.toString
     else if (finalExp.isDefined) finalExp.get.toString
     else description.getOrElse("Internal assumption")
+    descriptionStr + assumptionStr
   }
 }
 
@@ -190,6 +198,32 @@ object DebugExp {
     term => DebugExp(Some(description), isInternal, term, Some(originalExp), Some(finalExp))
 }
 
+class DebugPrecondition(val id: Int,
+                        val term: Term,
+                        val funExp: ast.FuncApp,
+                        override val finalExp: Option[ast.FuncApp]) extends DebugAssumption[DebugPrecondition] {
+  override def description: Option[String] = Some(s"Precondition of ${funExp.funcname}(${funExp.args.mkString(", ")}) holds")
+
+  override def isInternal: Boolean = true
+
+  override def originalExp: Option[Exp] = Some(funExp)
+
+  override def display(config: DebugPrintConfiguration): String = {
+    if (config.printInternalTermRepresentation) s"${description.get}: ${term.toString}"
+    else description.get
+  }
+}
+
+object DebugPrecondition {
+  def apply(term: Term, fun: ast.FuncApp, funNew: Option[ast.FuncApp]): DebugPrecondition =
+    new DebugPrecondition(DebugCounter.next(), term, fun, funNew)
+
+  def awaitTerm(fun: ast.FuncApp, eArgsNew: Option[Seq[Exp]]): Term => DebugPrecondition = {
+    val funNew = eArgsNew.map(args => fun.copy(args = args)(fun.pos, fun.info, fun.typ, fun.errT))
+    term => DebugPrecondition(term, fun, funNew)
+  }
+}
+
 
 /* -------------------------------------------------------------------------------------------- *
  * Groups                                                                                       *
@@ -197,8 +231,10 @@ object DebugExp {
 
 // Generic group of assumptions
 class DebugGroup(val id: Int,
-                 val description: Option[String],
+                 val groupDescription: String,
                  val children: InsertionOrderedSet[AnyDebugNode]) extends DebugGroupNode[DebugGroup] {
+  override def description: Option[String] = Some(groupDescription)
+
   override val isInternal: Boolean = children.forall(_.isInternal)
 
   lazy val terms: Option[InsertionOrderedSet[Term]] =
@@ -210,17 +246,17 @@ class DebugGroup(val id: Int,
   }
 
   override def withChildren(newChildren: InsertionOrderedSet[AnyDebugNode]): DebugGroup =
-    new DebugGroup(id, description, newChildren)
+    new DebugGroup(id, groupDescription, newChildren)
 
   override def headerString(config: DebugPrintConfiguration): String = description.getOrElse("Group") + ":"
 }
 
 object DebugGroup {
   def apply(description: String, children: InsertionOrderedSet[AnyDebugNode]): DebugGroup =
-    new DebugGroup(DebugCounter.next(), Some(description), children)
+    new DebugGroup(DebugCounter.next(), description, children)
 
   def apply(description: String, children: Iterable[AnyDebugNode]): DebugGroup =
-    new DebugGroup(DebugCounter.next(), Some(description), InsertionOrderedSet(children))
+    new DebugGroup(DebugCounter.next(), description, InsertionOrderedSet(children))
 
   def awaitChildren(description: String): InsertionOrderedSet[AnyDebugNode] => DebugGroup =
     children => DebugGroup(description, children)
@@ -366,12 +402,12 @@ class DebugPrintConfiguration {
 
   override def toString: String = {
     s"  isPrintInternalEnabled = $isPrintInternalEnabled\n" +
+      s"  printInternalTermReps  = $printInternalTermRepresentation\n" +
       s"  nChildrenToShow        = $nChildrenToShow\n" +
       s"  printHierarchyLevel    = $printHierarchyLevel\n" +
       s"  hierarchy per id       = $nodeToHierarchyLevelMap\n" +
-      s"  isPrintAxiomsEnabled   = $isPrintAxiomsEnabled\n" +
-      s"  printInternalTermReps  = $printInternalTermRepresentation\n" +
-      s"  printOldHeaps          = $printOldHeaps\n"
+      s"  printOldHeaps          = $printOldHeaps\n" +
+      s"  isPrintAxiomsEnabled   = $isPrintAxiomsEnabled\n"
   }
 }
 

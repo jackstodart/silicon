@@ -7,7 +7,7 @@
 package viper.silicon.rules
 
 import viper.silicon
-import viper.silicon.debugger.{DebugExp, DebugGroup, DebugNode}
+import viper.silicon.debugger.{DebugExp, DebugGroup, DebugNode, DebugPrecondition}
 import viper.silicon.Config.JoinMode
 import viper.silver.ast
 import viper.silver.verifier.{CounterexampleTransformer, PartialVerificationError, VerifierWarning}
@@ -656,9 +656,7 @@ object evaluator extends EvaluationRules {
             consumes(s2a, pres, true, _ => pvePre, v2)((s3, snap, v3) => {
               val (stateArgs, snapToRecord) = v3.heapSupporter.functionAppSnapArgs(s2a, func, tArgs, snap.get, v3)
               val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)), stateArgs ++ tArgs)
-              val preExp = Option.when(debugOn)({
-                DebugExp.awaitTerm(s"precondition of ${func.name}(${eArgsNew.get.mkString(", ")}) holds", isInternal = true)
-              })
+              val preExp = Option.when(debugOn)(DebugPrecondition.awaitTerm(fapp, eArgsNew))
               v3.decider.assume(preFApp, preExp)
               val funcAnn = func.info.getUniqueInfo[AnnotationInfo]
               val tFApp = funcAnn match {
