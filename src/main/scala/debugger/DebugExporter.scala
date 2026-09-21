@@ -385,7 +385,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     translateStore()
     translateHeaps()
     strings += "  (* Assumptions *)"
-    obl.assumptionsExp.foreach(translateDebugExp(_))
+    obl.assumptionsExp.foreach(translateDebugNode(_))
 
     // val assertionTerm = obl.eAssertion.term.getOrElse(obl.assertion)
     strings += "  (* Proof goal *)"
@@ -475,11 +475,10 @@ class Translator(val obl: ProofObligation, val filename: String) {
             val eqString = s"${qfc.id.name} ${safeString(domLabel)} $rcvrString = $default"
             strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$permCondString$eqString\""
           case None =>
-            /*
-            val rcvr = (for (inv <- qfc.invs; exps <- inv.invertibleExps; e <- exps.headOption)
-              yield translateExp(e, parenthesisLevel = 100)) // .getOrElse("missingInvExp")
-            // val permCondition = Simplifier.simplify(qfc.conditionExp.get) // , permCondSimpExp(qfc.permValueExp.get))())
-            val quantifiedVars = qfc.invs.map(_.qvarExps.getOrElse(Seq())) // .getOrElse(Seq())
+            val rcvr = (for (inv <- qfc.invs.headOption; exps <- inv.invertibleExps; e <- exps.headOption)
+              yield translateExp(e, parenthesisLevel = 100)).getOrElse("missingInvExp")
+            val permCondition = Simplifier.simplify(qfc.conditionExp.get) // , permCondSimpExp(qfc.permValueExp.get))())
+            val quantifiedVars = qfc.invs.headOption.map(_.qvarExps.getOrElse(Seq())).getOrElse(Seq())
             val varString = quantifiedVars.map(v => s" (${safeString(v.name)}::${translateType(v.typ)})").mkString("")
             val freeRef = safeString(qfc.quantifiedVarExps.get.head.name)
             val condString = translateExp(qfc.conditionExp.get, oldHeapLabel = Some(heapLabel)) + s" $META_ARR"
@@ -494,8 +493,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
             }
             val chunkString = s"\\<forall>$varString. $condString\n    let r = $rcvr in $permCond$field = $default"
             strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunkString\""
-
-             */
         }
       case qpc: QuantifiedPredicateChunk =>
         val condString = translateTerm(terms.And(qpc.condition, permCondSimp(qpc.permValue)))
@@ -579,7 +576,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         val newRewrites = rewrites.addRenames(varRenames)
         val varString = varRenames.map(_._2).mkString(" ")
         wrap(s"${quantifierToString(q)}$varString. ${translateTerm(body, 10, newRewrites)}", 10)
-      // Arithmeti
+      // Arithmetic
       case terms.Plus(left, right) => recOp(left, "+", right, 65)
       case terms.Minus(left, right) => recOp(left, "-", right, 65)
       case terms.Times(left, right) => recOp(left, "*", right, 70)
@@ -1008,73 +1005,40 @@ class Translator(val obl: ProofObligation, val filename: String) {
     varMap.toMap
   }
 
-  private def translateDebugExp(de: AnyDebugNode, prefix: String = "", suffix: String = "",
+  private def translateDebugNode(debugNode: AnyDebugNode, prefix: String = "", suffix: String = "",
                                 rewrites: Rewrites = basicRewrites,
                                 inAux: Boolean = false): Unit = {
-    /*
-    de.category match {
-      case LoopInvariant() =>
-        strings += "  (* Begin loop invariant *)"
-        for (child <- de.children) {
-          translateDebugExp(child)
+    debugNode match {
+      case debugExp: DebugExp if debugExp.isInternal =>
+        if (descriptionContains(debugExp, "precondition")) { // << case insensitive
+          val assumptionString = translateTerm(debugExp.term, rewrites = rewrites)
+          strings += s"  assumes ${debugExp.id}: \"$prefix$assumptionString$suffix\""
         }
+      case debugExp: DebugExp if !debugExp.isInternal =>
+        if (descriptionContains(debugExp, "perm")) {} // do nothing
+        else if (descriptionContains(debugExp, "feasible")) {} // do nothing
+        else if (inAux && descriptionContains(debugExp, "branch")) {} // do nothing
+        else {
+          val assumptionString = translateExp(debugExp.finalExp.getOrElse(debugExp.originalExp.get), rewrites = rewrites)
+          strings += s"  assumes ${debugExp.id}: \"$prefix$assumptionString$suffix\""
+        }
+      case quantifier: DebugQuantifier =>
+        val varRenames = quantifier.qvars.map(v => (v.toString, v.toString.takeWhile(_ != '@')))
+        val newRewrites = basicRewrites.addRenames(varRenames)
+        val qvarString = "\\<forall>" + varRenames.map(_._2).mkString(" ") + ". "
+        quantifier.children.foreach { translateDebugNode(_, prefix + qvarString, suffix, newRewrites, inAux = inAux) }
+      case implication: DebugImplication =>
+        val LHS = if (implication.isInternal) translateTerm(implication.term, rewrites = rewrites)
+          else translateExp(implication.finalExp.get, rewrites = rewrites)
+        implication.children.foreach { translateDebugNode(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix, rewrites, inAux = inAux) }
+      case invariant: DebugInvariant =>
+        strings += s"  (* Begin loop invariant at ${invariant.loopPos} *)"
+        invariant.children foreach  { translateDebugNode(_, prefix, suffix, rewrites, inAux) }
         strings += "  (* End loop invariant *)"
-      case FunctionPrecondition(name, _) =>
-        if (program.findFunction(name).pres.nonEmpty) {
-          val assmString = s"$prefix${translateTerm(de.term.get, rewrites = rewrites)}$suffix"
-          if (!printedAssumptions.contains(assmString)) {
-            printedAssumptions += assmString
-            strings += s"  assumes ${de.id}: \"$assmString\""
-          }
-        }
-      case _: SnapshotShape
-           | _: UnfoldedPredicate => () // Do nothing
-      case _ =>
-        de match {
-          case ide: ImplicationDebugExp =>
-            if (ide.term.isDefined) {
-              val filtered = filterPure(ide.term.get)
-              if (filtered.isDefined) {
-                val LHS = translateTerm(filtered.get, rewrites = rewrites)
-                ide.children.foreach { translateDebugExp(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix, rewrites, inAux = inAux) }
-              }
-            }
-          case qde: QuantifiedDebugExp =>
-            val varRenames = qde.qvars.map(v => (v.toString, v.toString.takeWhile(_ != '@')))
-            val newRewrites = basicRewrites.addRenames(varRenames)
-            val qvarString = "\\<forall>" + varRenames.map(_._2).mkString(" ") + ". "
-            qde.children.foreach { translateDebugExp(_, prefix + qvarString, suffix, newRewrites, inAux = inAux) }
-          case _ =>
-            if (!de.isInternal_) {
-              if (de.description(false).getOrElse("").contains("unfolding")) {
-                // do nothing
-              } else if (de.description(false).getOrElse("").contains("folded")) {
-                // do nothing
-              } else if (de.finalExp.isDefined && notPermExp(de.finalExp.get) && !inAux) {
-                val assmString = s"$prefix${translateExp(de.finalExp.get)}$suffix"
-                if (!printedAssumptions.contains(assmString)) {
-                  printedAssumptions += assmString
-                  strings += s"  assumes ${de.id}: \"$assmString\""
-                }
-              } else if (de.description(false).isDefined && de.description(false).get.contains("Joined")) {
-                de.children.foreach { translateDebugExp(_, prefix, suffix, inAux = inAux) }
-              } else if (de.description(false).getOrElse("").contains("auxiliary")) {
-                de.children.foreach { translateDebugExp(_, prefix, suffix, inAux = true) }
-              } else {
-                de.children.foreach { translateDebugExp(_, prefix, suffix, inAux = inAux) }
-              }
-              /*else if (de.term.isDefined) {
-                if (notSnap(de.term.get)) {
-                  val filtered = filterPure(de.term.get)
-                  if (filtered.isDefined)
-                    strings += s"  assumes ${de.id}: \"$prefix${translateTerm(filtered.get)}$suffix\""
-                }
-              } */
-            } else {
-              de.children.foreach { translateDebugExp(_, prefix, suffix, rewrites = rewrites) }
-            }
-        }
-    } */
+      case group: DebugGroup =>
+        val isAuxGroup = inAux || group.description.getOrElse("").contains("aux")
+        group.children foreach  { translateDebugNode(_, prefix, suffix, rewrites, inAux = isAuxGroup) }
+    }
   }
 }
 
@@ -1448,6 +1412,13 @@ object ExportUtils {
           ast.And(fnPre, args2)(e.pos, e.info, e.errT)
         }
       case other => bigAnd(other.subExps.map(rec), other.pos, other.info, other.errT)
+    }
+  }
+
+  def descriptionContains(debugNode: AnyDebugNode, string: String): Boolean = {
+    debugNode.description match {
+      case Some(desc) => desc.toLowerCase().contains(string.toLowerCase())
+      case None => false
     }
   }
 

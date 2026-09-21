@@ -25,6 +25,11 @@ object DebugCounter {
   def next(): Int = idCounter.getAndIncrement()
 }
 
+
+/* -------------------------------------------------------------------------------------------- *
+ * Traits                                                                                       *
+ * -------------------------------------------------------------------------------------------- */
+
 /** A node is either a single assumption of a particular type, or a DebugGroupNode with children.
   * Group nodes should not have terms or expressions themselves, but only with respect to their children.
   */
@@ -70,7 +75,10 @@ sealed trait DebugAssumption[Self <: DebugAssumption[Self]] extends DebugNode[Se
     Option.when(this.term.contains(t))(this)
 
   def toString(currDepth: Int, maxDepth: Int, config: DebugPrintConfiguration): String =
-    if (!config.printInternalTermRepresentation && isInternal) "" else ("\t" * currDepth) + s"\t[$id] ${display(config)}"
+    ("\t" * currDepth) + s"\t[$id] ${display(config)}"
+
+  override def toString(config: DebugPrintConfiguration): String =
+    s"\t[$id] ${display(config)}"
 
   // display is only the content of the node
   def display(config: DebugPrintConfiguration): String
@@ -156,9 +164,11 @@ class DebugExp(val id: Int,
   override lazy val isGlobal: Boolean = PathConditions.isGlobal(term)
 
   override def display(config: DebugPrintConfiguration): String = {
-    if (config.printInternalTermRepresentation) term.toString
-    else if (finalExp.isDefined) finalExp.get.toString
-    else description.getOrElse("Internal assumption")
+    val descriptionStr = description.map(_ + ": ").getOrElse("")
+    val assumptionStr = if (config.printInternalTermRepresentation) term.toString
+      else if (finalExp.isDefined) finalExp.get.toString
+      else description.getOrElse("Internal assumption")
+    descriptionStr + assumptionStr
   }
 }
 

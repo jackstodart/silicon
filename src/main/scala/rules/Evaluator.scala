@@ -579,6 +579,7 @@ object evaluator extends EvaluationRules {
 //          bookkeeper.functionApplications += 1
           val joinFunctionArgs = tArgs //++ c2a.quantifiedVariables.filterNot(tArgs.contains)
           val debugLabel = v1.getDebugOldLabel(s1a, fapp.pos)
+          val heapLabel = v1.getDebugHeapLabel(s1a)
 
           val funcAppNew = eArgsNew.map(args => ast.FuncApp(funcName, args)(fapp.pos, fapp.info, fapp.typ, fapp.errT))
           val joinExp = Option.when(debugOn)({
@@ -655,12 +656,10 @@ object evaluator extends EvaluationRules {
                                s2.assertReadAccessOnly /* should currently always be false */ else true)
             consumes(s2a, pres, true, _ => pvePre, v2)((s3, snap, v3) => {
               val (stateArgs, snapToRecord) = v3.heapSupporter.functionAppSnapArgs(s2a, func, tArgs, snap.get, v3)
-              val heapLabel = v3.getDebugHeapLabel(s3)
               val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)),
                 stateArgs ++ tArgs, heapLabel)
-              val preExp = Option.when(debugOn)({
-                DebugExp.awaitTerm(s"precondition of ${func.name}(${eArgsNew.get.mkString(", ")}) holds", isInternal = true)
-              })
+              val preExp = Option.when(debugOn)(
+                DebugExp.awaitTerm(s"precondition of ${func.name}(${eArgsNew.get.mkString(", ")}) holds", isInternal = true))
               v3.decider.assume(preFApp, preExp)
               val funcAnn = func.info.getUniqueInfo[AnnotationInfo]
               val tFApp = funcAnn match {

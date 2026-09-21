@@ -380,7 +380,7 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
                 var permExp: ast.Exp = ast.CurrentPerm(ast.FieldAccess(chunkReceiverExp, field)())(chunkReceiverExp.pos, chunkReceiverExp.info, chunkReceiverExp.errT)
                 permExp = ast.DebugLabelledOld(permExp, v.getDebugOldLabel(sf, ast.NoPosition))()
                 val exp = ast.Forall(chunk.quantifiedVarExps.get, Seq(), ast.PermLeCmp(permExp, ast.FullPerm()())())()
-                Some(DebugExp.awaitTerm(exp, exp))
+                Some(DebugExp.awaitTerm("Permission bounds", exp, exp, isInternal = false))
               } else { None }
               v.decider.assume(
                 Forall(chunk.quantifiedVars, PermAtMost(currentPermAmount, FullPerm), triggers, "qp-fld-prm-bnd"), debugExp)
