@@ -642,6 +642,13 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       case _ =>
     }
 
+    println(s"Enter the new value for printInternalTermRepresentation:")
+    readLine().toLowerCase match {
+      case "true" | "1" | "t" => obl.printConfig.printInternalTermRepresentation = true
+      case "false" | "0" | "f" => obl.printConfig.printInternalTermRepresentation = false
+      case _ =>
+    }
+
     println(s"Enter the new value for nChildrenToShow:")
     readLine().toIntOption match {
       case Some(value) => obl.printConfig.nChildrenToShow = value
@@ -651,24 +658,17 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
     println(s"Enter the new value for printHierarchyLevel:")
     obl.printConfig.setPrintHierarchyLevel(readLine())
 
-    println(s"Enter the new value for isPrintAxiomsEnabled:")
-    readLine().toLowerCase match {
-      case "true" | "1" | "t" => obl.printConfig.isPrintAxiomsEnabled = true
-      case "false" | "0" | "f" => obl.printConfig.isPrintAxiomsEnabled = false
-      case _ =>
-    }
-
-    println(s"Enter the new value for printInternalTermRepresentation:")
-    readLine().toLowerCase match {
-      case "true" | "1" | "t" => obl.printConfig.printInternalTermRepresentation = true
-      case "false" | "0" | "f" => obl.printConfig.printInternalTermRepresentation = false
-      case _ =>
-    }
-
     println(s"Enter the new value for printOldHeaps:")
     readLine().toLowerCase match {
       case "true" | "1" | "t" => obl.printConfig.printOldHeaps = true
       case "false" | "0" | "f" => obl.printConfig.printOldHeaps = false
+      case _ =>
+    }
+
+    println(s"Enter the new value for isPrintAxiomsEnabled:")
+    readLine().toLowerCase match {
+      case "true" | "1" | "t" => obl.printConfig.isPrintAxiomsEnabled = true
+      case "false" | "0" | "f" => obl.printConfig.isPrintAxiomsEnabled = false
       case _ =>
     }
   }
