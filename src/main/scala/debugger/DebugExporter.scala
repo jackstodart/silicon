@@ -11,12 +11,13 @@ import viper.silicon.interfaces.state.Chunk
 import viper.silicon.{Map, resources}
 import viper.silicon.resources.{FieldID, PredicateID}
 import viper.silicon.state._
+import viper.silicon.state.terms.sorts.FieldValueFunction
 import viper.silicon.state.terms.{Sort, Term, sorts}
 import viper.silicon.verifier.Verifier
 import viper.silver.ast
 import viper.silver.ast.utility.Functions.allSubexpressions
 import viper.silver.ast.utility.Simplifier
-import viper.silver.ast.{Exp, PermExp, Program}
+import viper.silver.ast.{Exp, PermExp, PermGeCmp, PermGtCmp, PermLeCmp, PermLtCmp, Program}
 import viper.silver.utility.Common.Rational
 
 import java.nio.charset.StandardCharsets
@@ -106,6 +107,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
     // follows fold/unfold parents
     def equiParent(label: String): String = {
+      if (label == "debug@1")
+        println("Hello")
       val heapRecord = state.debugOldHeaps(label)
       if (isFold(heapRecord.cause)) equiParent(heapRecord.parentLabel) else label
     }
@@ -467,7 +470,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
               case _: ast.TrueLit => ""
               case _ => translateExp(permCond, oldHeapLabel = Some(domLabel)) + " \\<longrightarrow> "
             }
-            val rcvrString = translateExp(rcvr2)
+            val rcvrString = translateExp(rcvr2, parenthesisLevel = 100)
             val default = quantFieldChunks.get(qfc.fvf) match {
               case Some((_, str)) => str + " " + rcvrString
               case None => translateTerm(qfc.fvf) + " " + rcvrString
@@ -475,23 +478,25 @@ class Translator(val obl: ProofObligation, val filename: String) {
             val eqString = s"${qfc.id.name} ${safeString(domLabel)} $rcvrString = $default"
             strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$permCondString$eqString\""
           case None =>
-            val rcvr = (for (inv <- qfc.invs.headOption; exps <- inv.invertibleExps; e <- exps.headOption)
-              yield translateExp(e, parenthesisLevel = 100)).getOrElse("missingInvExp")
-            val permCondition = Simplifier.simplify(qfc.conditionExp.get) // , permCondSimpExp(qfc.permValueExp.get))())
             val quantifiedVars = qfc.invs.headOption.map(_.qvarExps.getOrElse(Seq())).getOrElse(Seq())
-            val varString = quantifiedVars.map(v => s" (${safeString(v.name)}::${translateType(v.typ)})").mkString("")
+            val newRenamings = quantifiedVars.map(v => (v.name, v.name.takeWhile(_ != '@')))
+            val newRewrites = basicRewrites.addRenames(newRenamings)
+            val rcvr = (for (inv <- qfc.invs.headOption; exps <- inv.invertibleExps; e <- exps.headOption)
+              yield translateExp(e, parenthesisLevel = 100, newRewrites)).getOrElse("missingInvExp")
+            val permCondition = Simplifier.simplify(qfc.conditionExp.get) // , permCondSimpExp(qfc.permValueExp.get))())
+            val varString = quantifiedVars.map(v => s"(${v.name.takeWhile(_ != '@')}::${translateType(v.typ)})").mkString(" ")
             val freeRef = safeString(qfc.quantifiedVarExps.get.head.name)
-            val condString = translateExp(qfc.conditionExp.get, oldHeapLabel = Some(heapLabel)) + s" $META_ARR"
+            val condString = translateExp(qfc.conditionExp.get, oldHeapLabel = Some(heapLabel), rewrites = newRewrites) + s" $META_ARR"
             val permCond = permCondSimpExp(qfc.permValueExp.get) match {
               case ast.TrueLit() => ""
-              case e => translateExp(e, oldHeapLabel = Some(domLabel)) + " \\<longrightarrow> "
+              case e => translateExp(e, oldHeapLabel = Some(domLabel), rewrites = newRewrites) + " \\<longrightarrow> "
             }
             val field = s"${qfc.id.name} ${safeString(domLabel)} $freeRef"
             val default = quantFieldChunks.get(qfc.fvf) match {
               case Some((_, snapString)) => s"$snapString $freeRef"
-              case None => s"${qfc.id}_${translateTerm(qfc.fvf)} $freeRef"
+              case None => s"${qfc.id}_${translateTerm(qfc.fvf, rewrites = newRewrites)} $freeRef"
             }
-            val chunkString = s"\\<forall>$varString. $condString\n    let r = $rcvr in $permCond$field = $default"
+            val chunkString = s"\\<And>$varString. $condString\n    let r = $rcvr in $permCond$field = $default"
             strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunkString\""
         }
       case qpc: QuantifiedPredicateChunk =>
@@ -553,20 +558,29 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.Null => "Null"
       case terms.Unit => "UNIT"
       case terms.App(applicable, args, heapLabel) =>
-        // TODO: if it is spurious precondition then remove it
-        val og_fn = applicable.id.name.takeWhile(_ != '%')
-        obl.s.program.findFunctionOptionally(og_fn) match {
-          case None => safeId(applicable.id) + args.map(" " + rec(_, 100)).mkString("")
-          case Some(f) =>
-            if (applicable.id.name.contains("%precondition") && f.pres.isEmpty) "True"
-            else if (f.isPure) s"${safeId(applicable.id)}" + args.tail.map(" " + rec(_, 100)).mkString("")
-            else {
-              val heapLabelString = heapLabel match {
-                case Some(label) => safeString(heapLabelMap(label))
-                case None => "NO_HEAP"
+        if (applicable.resultSort.isInstanceOf[FieldValueFunction]) {
+          // In this case there are no args and the whole term is the snapshot, which returns a function
+          quantFieldChunks(term)._2
+        } else {
+          // TODO: if it is spurious precondition then remove it
+          val og_fn = applicable.id.name.takeWhile(_ != '%')
+          obl.s.program.findFunctionOptionally(og_fn) match {
+            case None =>
+              // E.g. domain functions
+              if (args.isEmpty) safeId(applicable.id)
+              else wrap(safeId(applicable.id) + args.map(" " + rec(_, 100)).mkString(""), 100)
+            case Some(f) =>
+              if (applicable.id.name.contains("%precondition") && f.pres.isEmpty) "True"
+              else if (f.isPure)
+                wrap(s"${safeId(applicable.id)}" + args.tail.map(" " + rec(_, 100)).mkString(""), 100)
+              else {
+                val heapLabelString = heapLabel match {
+                  case Some(label) => safeString(heapLabelMap(label))
+                  case None => "NO_HEAP"
+                }
+                wrap(s"${safeId(applicable.id)} $heapLabelString " + args.tail.map(rec(_, 100)).mkString(" "), 100)
               }
-              s"${safeId(applicable.id)} $heapLabelString " + args.tail.map(rec(_, 100)).mkString(" ")
-            }
+          }
         }
       // Stuff
       case terms.IntLiteral(i) => if (options.annotateIntLits) s"($i::int)" else i.toString()
@@ -645,7 +659,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.MultisetCardinality(mset) => wrap(s"size\\<^sub>Z ${rec(mset, 100)}", 100)
       case terms.MultisetCount(mset, elem) => wrap(s"count\\<^sub>Z ${rec(mset, 100)} ${rec(elem, 100)}", 100)
       // Maps
-      // TODO: Use HOL-Finite_Map instead, fix everything
       case terms.EmptyMap(keySort, valueSort) => wrap(s"fmempty::(${translateSort(keySort)}, ${translateSort(valueSort)}) fmap", 1)
       case terms.MapLookup(base, key) => wrap(rec(base, 100) + "@@" + rec(key, 100), 100)
       case terms.MapCardinality(map) => wrap("fmap_card " + rec(map, 100), 100)
@@ -657,9 +670,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.First(snap) => if (options.collapseSnaps) rec(snap, parenthesisLevel) else "F" + rec(snap, parenthesisLevel)
       case terms.Second(snap) => if (options.collapseSnaps) rec(snap, parenthesisLevel) else "S" + rec(snap, parenthesisLevel)
       // Quantified Permissions
-      case terms.Lookup(field, fvf, at) =>
-        if (options.collapseSnaps) wrap(s"$field' ${rec(fvf, 100)} ${rec(at, 100)}", 100)
-        else s"${field}_${rec(fvf, 0)} ${rec(at, 100)}"
+      case terms.Lookup(_, fvf, at) =>
+        s"${rec(fvf, 0)} ${rec(at, 100)}"
       case terms.PermLookup(field, pm, at) => "undefined"
       case terms.Domain(field, fvf) => wrap(s"fvf_domain ${field}_${rec(fvf, 0)}", 100)
       case terms.HasDomain(field, fvf, _) => wrap(s"has_domain ${field}_${rec(fvf, 100)}", 100)
@@ -801,7 +813,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
         if (variablePrime) baseName + "'" else baseName
       case ast.Result(_) => wrap(resultString.getOrElse("result"), 100)
       case ast.LocalVarWithVersion(name, _) =>
-        if (variablePrime) safeString(name) + "'" else basicRewrites.varRenames.getOrElse(name, safeString(name))
+        if (variablePrime) safeString(name) + "'"
+        else rewrites.varRenames.getOrElse(name, safeString(name))
 
       case ast.FullPerm() => "1"
       case ast.NoPerm() => "0"
@@ -860,112 +873,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
-  // Some custom logic for terms that can be partially filtered
-  private def filterPure(term: Term): Option[Term] = {
-    term match {
-      case t: terms.Quantification =>
-        val filteredBody = filterPure(t.body)
-        if (filteredBody.isDefined) Some(t.copy(body = filteredBody.get)) else None
-      case terms.And(ts) =>
-        val pure = ts.flatMap(filterPure)
-        if (pure.isEmpty) None else Some(terms.And(pure))
-      case t => Some(t).filter(isPure)
-    }
-  }
-
-  def isPure(term: Term): Boolean = {
-    term match {
-      case _: terms.Var => true
-      // Functions and Applications
-      case terms.Let(bindings, body) => bindings.forall(vt => isPure(vt._2)) && isPure(body)
-      case terms.Null => true
-      case terms.Unit => false
-      //case terms.HeapDepApp(_, _, _) => true
-      case terms.App(_, _, _) => true
-      // Stuff
-      case _: terms.IntLiteral => true
-      case _: terms.BooleanLiteral => true
-      case t: terms.Quantification => isPure(t.body)
-      // Arithmetic
-      case terms.Plus(left, right) => isPure(left) && isPure(right)
-      case terms.Minus(left, right) => isPure(left) && isPure(right)
-      case terms.Times(left, right) => isPure(left) && isPure(right)
-      case terms.Div(left, right) => isPure(left) && isPure(right)
-      case terms.Mod(left, right) => isPure(left) && isPure(right)
-      // Logic
-      case terms.Not(p) => isPure(p)
-      case terms.Or(ts) => ts.forall(isPure)
-      case terms.And(ts) => ts.forall(isPure)
-      case terms.Implies(left, right) => isPure(left) && isPure(right)
-      case terms.Iff(left, right) => isPure(left) && isPure(right)
-      case terms.Ite(t0, t1, t2) => isPure(t0) && isPure(t1) && isPure(t2)
-      case terms.BuiltinEquals(left, right) => isPure(left) && isPure(right)
-      case terms.CustomEquals(left, right) => isPure(left) && isPure(right)
-      //Comparison
-      case terms.Less(left, right) => isPure(left) && isPure(right)
-      case terms.AtMost(left, right) => isPure(left) && isPure(right)
-      case terms.Greater(left, right) => isPure(left) && isPure(right)
-      case terms.AtLeast(left, right) => isPure(left) && isPure(right)
-      // Sequences
-      case terms.SeqRanged(p0, p1) => isPure(p0) && isPure(p1)
-      case _: terms.SeqNil => true
-      case terms.SeqSingleton(e) => isPure(e)
-      case terms.SeqAppend(left, right) => isPure(left) && isPure(right)
-      case terms.SeqDrop(seq, n) => isPure(seq) && isPure(n)
-      case terms.SeqTake(seq, n) => isPure(seq) && isPure(n)
-      case terms.SeqLength(seq) => isPure(seq)
-      case terms.SeqAt(seq, idx) => isPure(seq) && isPure(idx)
-      case terms.SeqIn(seq, elem) => isPure(seq) && isPure(elem)
-      case _: terms.SeqInTrigger => false
-      case terms.SeqUpdate(seq, idx, value) => isPure(seq) && isPure(idx) && isPure(value)
-      // Sets
-      case _: terms.EmptySet => true
-      case terms.SingletonSet(elem) => isPure(elem)
-      case terms.SetAdd(left, right) => isPure(left) && isPure(right)
-      case terms.SetUnion(left, right) => isPure(left) && isPure(right)
-      case terms.SetIntersection(left, right) => isPure(left) && isPure(right)
-      case terms.SetSubset(left, right) => isPure(left) && isPure(right)
-      case terms.SetDisjoint(left, right) => isPure(left) && isPure(right)
-      case terms.SetDifference(left, right) => isPure(left) && isPure(right)
-      case terms.SetIn(elem, set) => isPure(elem) && isPure(set)
-      case terms.SetCardinality(set) => isPure(set)
-      // Multisets
-      case _: terms.EmptyMultiset => true
-      case terms.SingletonMultiset(elem) => isPure(elem)
-      case terms.MultisetAdd(s, elem) => isPure(s) && isPure(elem)
-      /*
-      case terms.MultisetUnion(left, right) => isPure(left) && isPure(right)
-      case terms.MultisetCardinality(mset) => "size\\<^sub>Z " + maybeBracket(mset)
-      case terms.MultisetCount(mset, elem) => "count\\<^sub>Z " + maybeBracket(mset) + " " + maybeBracket(elem)
-      // Maps
-      case terms.EmptyMap(_, _) => "Map.empty"
-      case terms.MapLookup(base, key) => maybeBracket(base) + "@@" + maybeBracket(key)
-      case terms.MapCardinality(map) => "card\\<^sub>Z (dom " + maybeBracket(map) + ")"
-      case terms.MapUpdate(map, key, value) => maybeBracket(map) + "(" + rec(key) + "\\<mapsto>" + rec(value) + ")"
-      case terms.MapDomain(map) => "dom " + maybeBracket(map)
-      case terms.MapRange(map) => "ran " + maybeBracket(map)
-       */
-      // Snapshots
-      case _: terms.Combine => true
-      case t: terms.First => true
-      case t: terms.Second => true
-      // Quantified Permissions
-      case _: terms.Lookup => true
-      case _: terms.PermLookup => false
-
-      // Domains
-      // TODO: Finish
-      case _: terms.Domain => false
-      case _: terms.HasDomain => false
-      case _: terms.FieldTrigger => false
-      // Magic Wands
-      // TODO
-      case _: terms.SortWrapper => true
-
-      case _ => false
-    }
-  }
-
   private lazy val freeVars: InsertionOrderedSet[terms.Var] = {
     /*
     def deToVars(de: DebugExp): InsertionOrderedSet[terms.Var] = {
@@ -1008,19 +915,32 @@ class Translator(val obl: ProofObligation, val filename: String) {
   private def translateDebugNode(debugNode: AnyDebugNode, prefix: String = "", suffix: String = "",
                                 rewrites: Rewrites = basicRewrites,
                                 inAux: Boolean = false): Unit = {
+    if (debugNode.description.isDefined && debugNode.description.get.contains("singleton-FVF"))
+      println(debugNode.id)
     debugNode match {
       case debugExp: DebugExp if debugExp.isInternal =>
-        if (descriptionContains(debugExp, "precondition")) { // << case insensitive
-          val assumptionString = translateTerm(debugExp.term, rewrites = rewrites)
-          strings += s"  assumes ${debugExp.id}: \"$prefix$assumptionString$suffix\""
+        if (debugExp.description.exists(_.contains("singleton-FVF"))) {
+          strings += s"  assumes ${debugExp.id}: \"${translateTerm(debugExp.term)}\""
         }
+        // do nothing TODO: do I need to keep the quantified precs?
       case debugExp: DebugExp if !debugExp.isInternal =>
         if (descriptionContains(debugExp, "perm")) {} // do nothing
         else if (descriptionContains(debugExp, "feasible")) {} // do nothing
         else if (inAux && descriptionContains(debugExp, "branch")) {} // do nothing
         else {
-          val assumptionString = translateExp(debugExp.finalExp.getOrElse(debugExp.originalExp.get), rewrites = rewrites)
-          strings += s"  assumes ${debugExp.id}: \"$prefix$assumptionString$suffix\""
+          debugExp.finalExp match {
+            case Some(_: PermLeCmp) | Some(_: PermLtCmp) | Some(_: PermGeCmp) | Some(_: PermGtCmp) => {} // do nothing
+            case _ =>
+              val assumptionString = translateExp(debugExp.finalExp.getOrElse(debugExp.originalExp.get), rewrites = rewrites)
+              strings += s"  assumes ${debugExp.id}: \"$prefix$assumptionString$suffix\""
+          }
+        }
+      case debugPre: DebugPrecondition =>
+        val function = program.findFunction(debugPre.funExp.funcname)
+        if (function.pres.nonEmpty) {
+          val preconditionString = s"${debugPre.funExp.funcname}_pre ${safeString(debugPre.heapLabel)} " +
+            debugPre.finalArgs.get.map(translateExp(_, parenthesisLevel = 100, rewrites = rewrites)).mkString(" ")
+          strings += s"  assumes ${debugPre.id}: \"$prefix$preconditionString$suffix\""
         }
       case quantifier: DebugQuantifier =>
         val varRenames = quantifier.qvars.map(v => (v.toString, v.toString.takeWhile(_ != '@')))

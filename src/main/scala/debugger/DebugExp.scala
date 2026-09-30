@@ -201,7 +201,8 @@ object DebugExp {
 class DebugPrecondition(val id: Int,
                         val term: Term,
                         val funExp: ast.FuncApp,
-                        override val finalExp: Option[ast.FuncApp]) extends DebugAssumption[DebugPrecondition] {
+                        val finalArgs: Option[Seq[Exp]],
+                        val heapLabel: String) extends DebugAssumption[DebugPrecondition] {
   override def description: Option[String] = Some(s"Precondition of ${funExp.funcname}(${funExp.args.mkString(", ")}) holds")
 
   override def isInternal: Boolean = true
@@ -215,13 +216,11 @@ class DebugPrecondition(val id: Int,
 }
 
 object DebugPrecondition {
-  def apply(term: Term, fun: ast.FuncApp, funNew: Option[ast.FuncApp]): DebugPrecondition =
-    new DebugPrecondition(DebugCounter.next(), term, fun, funNew)
+  def apply(term: Term, funExp: ast.FuncApp, finalArgs: Option[Seq[Exp]], heapLabel: String): DebugPrecondition =
+    new DebugPrecondition(DebugCounter.next(), term, funExp, finalArgs, heapLabel)
 
-  def awaitTerm(fun: ast.FuncApp, eArgsNew: Option[Seq[Exp]]): Term => DebugPrecondition = {
-    val funNew = eArgsNew.map(args => fun.copy(args = args)(fun.pos, fun.info, fun.typ, fun.errT))
-    term => DebugPrecondition(term, fun, funNew)
-  }
+  def awaitTerm(fun: ast.FuncApp, finalArgs: Option[Seq[Exp]], heapLabel: String): Term => DebugPrecondition =
+    term => DebugPrecondition(term, fun, finalArgs, heapLabel)
 }
 
 

@@ -617,7 +617,8 @@ object State {
     pre.copy(functionRecorder = post.functionRecorder,
              possibleTriggers = post.possibleTriggers,
              smCache = post.smCache,
-             constrainableARPs = post.constrainableARPs)
+             constrainableARPs = post.constrainableARPs,
+             temporaryHeapRecord = post.temporaryHeapRecord)
   }
 
   def conflictFreeUnionOrAbort[K, V](m1: Map[K, V], m2: Map[K, V]): Map[K,V] =

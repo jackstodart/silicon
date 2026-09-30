@@ -658,7 +658,7 @@ object evaluator extends EvaluationRules {
               val (stateArgs, snapToRecord) = v3.heapSupporter.functionAppSnapArgs(s2a, func, tArgs, snap.get, v3)
               val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)),
                 stateArgs ++ tArgs, heapLabel)
-              val preExp = Option.when(debugOn)(DebugPrecondition.awaitTerm(fapp, eArgsNew))
+              val preExp = Option.when(debugOn)(DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel.getOrElse("missing heap label")))
               v3.decider.assume(preFApp, preExp)
               val funcAnn = func.info.getUniqueInfo[AnnotationInfo]
               val tFApp = funcAnn match {
