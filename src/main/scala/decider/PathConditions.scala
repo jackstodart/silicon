@@ -113,7 +113,7 @@ private class PathConditionStackLayer
   def nonGlobalDefiningAssumptionDebugExps: InsertionOrderedSet[AnyDebugNode] = _nonGlobalDefiningAssumptionDebugExps
   /* Only the debug expressions that have been finalised in this layer; see openDebugExps for the
    * (not yet finished) contents of debugExpStack. */
-  def nonGlobalAssumptionDebugExps: InsertionOrderedSet[DebugExp] = _nonGlobalAssumptionDebugExps
+  def nonGlobalAssumptionDebugExps: InsertionOrderedSet[AnyDebugNode] = _nonGlobalAssumptionDebugExps
   def declarations: InsertionOrderedSet[Decl] = _declarations
 
   def assumptions: InsertionOrderedSet[Term] = globalAssumptions ++ nonGlobalAssumptions
