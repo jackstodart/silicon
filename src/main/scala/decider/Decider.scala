@@ -322,13 +322,14 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       }
     }
 
-    // Separately terms and adds the debugGroup
+    // Separately assumes terms and adds the debugGroup
     def assume(terms: Iterable[Term],
                debugGroup: Option[DebugGroupNode[_]],
                enforceAssumption: Boolean): Unit = {
       val filteredTerms = if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue)
       if (filteredTerms.nonEmpty) assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTerms))
-      if (debugMode) addDebugNode(debugGroup.get)
+      if (debugMode && debugGroup.get.children.nonEmpty)
+        addDebugNode(debugGroup.get)
     }
 
     def assumeDefinition(t: Term, debugExp: Option[PreDebugAssumption]): Unit = {
