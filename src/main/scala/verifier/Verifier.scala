@@ -64,6 +64,8 @@ trait Verifier {
     heapRecorder.recordIntermediateHeap(s, this, decider.pcs.duplicate(), Some(cause))
   def finishKeyHeap(s: State): State =
     heapRecorder.finishKeyHeap(s, this, decider.pcs.duplicate())
+  def mergeHeapRecord(s: State, kv: (String, HeapRecord)): State =
+    heapRecorder.mergeHeapRecord(s, kv._1, kv._2)
 
   def reportFurtherErrors(): Boolean = (Verifier.config.numberOfErrorsToReport() > errorsReportedSoFar.get()
     || Verifier.config.numberOfErrorsToReport() == 0);
@@ -89,6 +91,8 @@ class DebugHeapRecorder {
       case Some(label) => Left(label)
       case None =>
         val counter = debugHeapCounter.getAndIncrement()
+        if (counter == 10)
+          println("Here")
         Right(s"debug@$counter")
     }
   }
@@ -197,6 +201,16 @@ class DebugHeapRecorder {
       case Right(newLabel) =>
         val keyHeap = HeapRecord(h, parentLabel, cause, branchCondDiff(oldPCS, newPCS), interHeaps)
         s.copy(debugOldHeaps = s.debugOldHeaps + (newLabel -> keyHeap), temporaryHeapRecord = None)
+    }
+  }
+
+  def mergeHeapRecord(s: State, label: String, record: HeapRecord): State = {
+    s.debugOldHeaps.get(label) match {
+      case Some(sRecord) if sRecord == record => s
+      case Some(sRecord) =>
+        val newRecord = sRecord.copy(intermediateHeaps = record.intermediateHeaps ++ sRecord.intermediateHeaps)
+        s.copy(debugOldHeaps = s.debugOldHeaps + (label -> newRecord))
+      case None => s.copy(debugOldHeaps = s.debugOldHeaps + (label -> record))
     }
   }
 }

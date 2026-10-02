@@ -276,8 +276,7 @@ object executor extends ExecutionRules {
             val gBody = Store(wvs.foldLeft(sLocal.g.values)((map, x) => {
               val xNew = v.decider.fresh(x)
               map.updated(x, xNew)}))
-            val sBody0 = sLocal.copy(g = gBody, h = v.heapSupporter.getEmptyHeap(s.program, v))
-            val sBody = if (debugOn) v.startKeyHeap(sBody0, "nil", InhaleInv) else sBody0
+            val sBody = sLocal.copy(g = gBody, h = v.heapSupporter.getEmptyHeap(s.program, v))
 
             val edges = sLocal.methodCfg.outEdges(block)
             val (outEdges, otherEdges) = edges partition(_.kind == cfg.Kind.Out)
@@ -291,26 +290,35 @@ object executor extends ExecutionRules {
             var phase1data: Vector[PhaseData] = Vector.empty
 
             (executionFlowController.locally(sBody, v)((s0, v0) => {
-                v0.decider.prover.comment("Loop head block: Check well-definedness of invariant")
-                val mark = v0.decider.setPathConditionMark()
-                produces(s0, freshSnap, invs, ContractNotWellformed, v0)((s1, v1) => {
-                  phase1data = phase1data :+ (s1,
-                                              v1.decider.pcs.after(mark),
-                                              v1.decider.freshFunctions /* [BRANCH-PARALLELISATION] */,
-                                              v1.decider.freshMacros    /* [BRANCH-PARALLELISATION] */)
-                  Success()
-                })})
+              v0.decider.prover.comment("Loop head block: Check well-definedness of invariant")
+              val mark = v0.decider.setPathConditionMark()
+              val s0a = if (debugOn) v.startKeyHeap(s0, "nil", InhaleInv) else s0
+              produces(s0a, freshSnap, invs, ContractNotWellformed, v0)((s1, v1) => {
+                val s1a = if (debugOn) v1.finishKeyHeap(s1) else s1
+                phase1data = phase1data :+ (s1a,
+                                            v1.decider.pcs.after(mark),
+                                            v1.decider.freshFunctions /* [BRANCH-PARALLELISATION] */,
+                                            v1.decider.freshMacros    /* [BRANCH-PARALLELISATION] */)
+                Success()
+              })})
             combine executionFlowController.locally(sLocal, v)((s0, v0) => {
                 v0.decider.prover.comment("Loop head block: Establish invariant")
                 val s0a = if (debugOn)
                   v0.startKeyHeap(s0, v0.getDebugHeapLabel(s0).getOrElse("missingHeap"), ExhaleInv) else s0
                 consumes(s0a, invs, false, LoopInvariantNotEstablished, v0)((sLeftover, _, v1) => {
+                  val sLeftover2 = if (debugOn) v1.finishKeyHeap(sLeftover) else sLeftover
+                  val exhaleHeapRecord = Option.when(debugOn)({
+                    val label = v1.getDebugHeapLabel(sLeftover2).get
+                    (label, sLeftover2.debugOldHeaps(label))
+                  })
+
                   v1.decider.prover.comment("Loop head block: Execute statements of loop head block (in invariant state)")
                   phase1data.foldLeft(Success(): VerificationResult) {
                     case (result, _) if !result.continueVerification => result
                     case (intermediateResult, (s1, pcs, ff1, fm1)) => /* [BRANCH-PARALLELISATION] ff1, m1 */
-                      val s2 = s1.copy(invariantContexts = sLeftover.h +: s1.invariantContexts)
-                      intermediateResult combine executionFlowController.locally(s2, v1)((s3, v2) => {
+                      val s1a = s1.copy(invariantContexts = sLeftover2.h +: s1.invariantContexts)
+                      val s1b = if (debugOn) v1.mergeHeapRecord(s1a, exhaleHeapRecord.get) else s1a
+                      intermediateResult combine executionFlowController.locally(s1b, v1)((s2, v2) => {
                         v2.decider.declareAndRecordAsFreshFunctions(ff1 -- v2.decider.freshFunctions) /* [BRANCH-PARALLELISATION] */
                         v2.decider.declareAndRecordAsFreshMacros(fm1.filter(!v2.decider.freshMacros.contains(_)))  /* [BRANCH-PARALLELISATION] */
                         val debugGroup = Option.when(debugOn)(DebugInvariant(loopPos, pcs.assumptionExps))
@@ -319,21 +327,20 @@ object executor extends ExecutionRules {
                         if (v2.decider.checkSmoke())
                           Success()
                         else {
-                          val s3a = if (debugOn) v2.finishKeyHeap(s3) else s3
-                          execs(s3a, stmts, v2)((s4, v3) => {
+                          execs(s2, stmts, v2)((s3, v3) => {
                             val edgeCondWelldefinedness = {
                               v1.decider.prover.comment("Loop head block: Check well-definedness of edge conditions")
                               edgeConditions.foldLeft(Success(): VerificationResult) {
                                 case (result, _) if !result.continueVerification => result
                                 case (intermediateResult, eCond) =>
-                                  intermediateResult combine executionFlowController.locally(s4, v3)((s5, v4) => {
-                                    eval(s5, eCond, WhileFailed(eCond), v4)((_, _, _, _) =>
+                                  intermediateResult combine executionFlowController.locally(s3, v3)((s4, v4) => {
+                                    eval(s4, eCond, WhileFailed(eCond), v4)((_, _, _, _) =>
                                       Success())
                                   })
                               }
                             }
                             v3.decider.prover.comment("Loop head block: Follow loop-internal edges")
-                            edgeCondWelldefinedness combine follows(s4, sortedEdges, WhileFailed, v3, joinPoint, pathId)(Q)})
+                            edgeCondWelldefinedness combine follows(s3, sortedEdges, WhileFailed, v3, joinPoint, pathId)(Q)})
                         }})}})}))
 
           case _ =>
@@ -407,7 +414,7 @@ object executor extends ExecutionRules {
 
       case ast.Label(name, _) =>
         val s1 = s.copy(oldHeaps = s.oldHeaps + (name -> magicWandSupporter.getEvalHeap(s, v)))
-        val s2 = if (debugOn) v.recordHeap(s, name, oldLabel, CreateLabel, oldPCS) else s1
+        val s2 = if (debugOn) v.recordHeap(s1, name, oldLabel, CreateLabel, oldPCS) else s1
         Q(s2, v)
 
       case ast.LocalVarDeclStmt(decl) =>
