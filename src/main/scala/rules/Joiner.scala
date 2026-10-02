@@ -7,12 +7,11 @@
 package viper.silicon.rules
 
 import viper.silicon.debugger.{DebugExp, DebugGroup, DebugGroupNode}
-import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.decider.RecordedPathConditions
 import viper.silicon.interfaces.{Success, VerificationResult}
 import viper.silicon.logger.records.structural.JoiningRecord
-import viper.silicon.state.{State, StateMerge}
 import viper.silicon.state.terms.{And, Or, Term}
+import viper.silicon.state.{State, StateMerge}
 import viper.silicon.utils.ast.{BigAnd, BigOr}
 import viper.silicon.verifier.Verifier
 import viper.silver.ast
