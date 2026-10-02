@@ -91,8 +91,6 @@ class DebugHeapRecorder {
       case Some(label) => Left(label)
       case None =>
         val counter = debugHeapCounter.getAndIncrement()
-        if (counter == 10)
-          println("Here")
         Right(s"debug@$counter")
     }
   }

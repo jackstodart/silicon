@@ -618,6 +618,7 @@ object State {
              possibleTriggers = post.possibleTriggers,
              smCache = post.smCache,
              constrainableARPs = post.constrainableARPs,
+             debugOldHeaps = post.debugOldHeaps,
              temporaryHeapRecord = post.temporaryHeapRecord)
   }
 
