@@ -479,7 +479,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
             strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$permCondString$eqString\""
           case None =>
             val quantifiedVars = qfc.invs.headOption.map(_.qvarExps.getOrElse(Seq())).getOrElse(Seq())
-            val newRenamings = quantifiedVars.map(v => (v.name, v.name.takeWhile(_ != '@')))
+            val newRenamings = quantifiedVars.map(v => (v.name, v.name.takeWhile(c => c != '@' && c != '$')))
             val newRewrites = basicRewrites.addRenames(newRenamings)
             val rcvr = (for (inv <- qfc.invs.headOption; exps <- inv.invertibleExps; e <- exps.headOption)
               yield translateExp(e, parenthesisLevel = 100, newRewrites)).getOrElse("missingInvExp")

@@ -327,9 +327,11 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
                debugGroup: Option[DebugGroupNode[_]],
                enforceAssumption: Boolean): Unit = {
       val filteredTerms = if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue)
-      if (filteredTerms.nonEmpty) assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTerms))
-      if (debugMode && debugGroup.get.children.nonEmpty)
-        addDebugNode(debugGroup.get)
+      if (filteredTerms.nonEmpty) {
+        assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTerms))
+        if (debugMode && debugGroup.get.children.nonEmpty)
+          addDebugNode(debugGroup.get)
+      }
     }
 
     def assumeDefinition(t: Term, debugExp: Option[PreDebugAssumption]): Unit = {

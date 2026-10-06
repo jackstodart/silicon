@@ -291,9 +291,14 @@ class DebugImplication(val id: Int,
 }
 
 object DebugImplication {
-  def apply(description: Option[String], isInternal: Boolean, term: Term, originalExp: Option[Exp], finalExp: Option[Exp],
-            children: InsertionOrderedSet[AnyDebugNode]): DebugImplication =
-    new DebugImplication(DebugCounter.next(), description, isInternal, term, originalExp, finalExp, children)
+  def apply(description: Option[String], isInternal: Boolean, term: Term,
+            originalExp: Option[Exp], finalExp: Option[Exp],
+            children: InsertionOrderedSet[AnyDebugNode]
+           ): DebugImplication = {
+    val originalExpSimp = originalExp.map(Simplifier.simplify(_, assumeWelldefinedness = true))
+    val finalExpSimp = finalExp.map(Simplifier.simplify(_, assumeWelldefinedness = true))
+    new DebugImplication(DebugCounter.next(), description, isInternal, term, originalExpSimp, finalExpSimp, children)
+  }
 }
 
 class DebugQuantifier(val id: Int,

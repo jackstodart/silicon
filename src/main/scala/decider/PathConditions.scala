@@ -6,7 +6,7 @@
 
 package viper.silicon.decider
 
-import viper.silicon.debugger.{DebugExp, DebugGroup, DebugImplication, DebugNode, DebugQuantifier}
+import viper.silicon.debugger.{DebugAssumption, DebugExp, DebugGroup, DebugImplication, DebugQuantifier}
 import viper.silicon.Stack
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.debugger.AnyDebugNode
@@ -326,11 +326,20 @@ private trait LayeredPathConditionStackLike {
         case None =>
       }
 
-      if (layer.nonGlobalAssumptionDebugExps.nonEmpty && !implicationLHSExp.equals(TrueLit()()))
+      // Remove the branch condition itself, which would be c => c.
+      val layerConditionals = layer.branchCondition match {
+        case Some(bc) => layerNonGlobals.filterNot {
+          case a: DebugAssumption[_] => a.term == bc
+          case _ => false
+        }
+        case None => layerNonGlobals
+      }
+
+      if (layerConditionals.nonEmpty && !implicationLHSExp.equals(TrueLit()()))
         conditionalTerms :+= DebugImplication(None, false, implicationLHS,
-          Some(implicationLHSExp), Some(implicationLHSExpNew), layerNonGlobals)
+          Some(implicationLHSExp), Some(implicationLHSExpNew), layerConditionals)
       else
-        conditionalTerms ++= layerNonGlobals
+        conditionalTerms ++= layerConditionals
     }
 
     unconditionalTerms ++ conditionalTerms
