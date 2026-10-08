@@ -52,11 +52,12 @@ object DebugExporter {
         Files.createFile(filepath)
       }
 
-      // Write to file
-      val writer = Files.newBufferedWriter(filepath, StandardCharsets.UTF_8)
       val filename = filepath.getFileName.toString.split('.')(0)
       val t = new Translator(obl, filename)
       t.translateObligation()
+
+      // Write to file
+      val writer = Files.newBufferedWriter(filepath, StandardCharsets.UTF_8)
       t.strings.foreach(s => writer.write(s + "\n"))
       writer.close()
       print(" Success!\n")
@@ -350,7 +351,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
     strings += "  (* Assumptions *)"
     obl.assumptionsExp.toSeq.sortBy(_.id).foreach(translateDebugNode(_))
 
-    // val assertionTerm = obl.eAssertion.term.getOrElse(obl.assertion)
     strings += "  (* Proof goal *)"
     obl.eAssertion.finalExp match {
       case Some(exp) => strings += "  shows \"" + translateExp(exp) + "\""
@@ -904,8 +904,10 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case debugPre: DebugPrecondition =>
         val function = program.findFunction(debugPre.funExp.funcname)
         if (function.pres.nonEmpty) {
-          val domHeapLabel = safeString(heapLabelMap.getOrElse(debugPre.heapLabel, debugPre.heapLabel))
-          val preconditionString = s"${debugPre.funExp.funcname}_pre $domHeapLabel " +
+          val domHeapLabel = if (!function.isPure)
+            safeString(heapLabelMap.getOrElse(debugPre.heapLabel, debugPre.heapLabel)) + " "
+          else ""
+          val preconditionString = s"${debugPre.funExp.funcname}_pre $domHeapLabel" +
             debugPre.finalArgs.get.map(translateExp(_, parenthesisLevel = 100, rewrites = rewrites)).mkString(" ")
           strings += s"  assumes ${debugPre.id}: \"$prefix$preconditionString$suffix\""
         }
@@ -1427,8 +1429,6 @@ object ExportUtils {
 
     // follows fold/unfold parents
     def equiParent(label: String): String = {
-      if (label == "debug@1")
-        println("Hello")
       val heapRecord = debugHeaps(label)
       if (isFold(heapRecord.cause)) equiParent(heapRecord.parentLabel) else label
     }
