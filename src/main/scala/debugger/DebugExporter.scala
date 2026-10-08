@@ -32,9 +32,17 @@ import scala.jdk.CollectionConverters._
 // Main wrapper object
 object DebugExporter {
   def exportIsabelle(obl: ProofObligation): Unit = {
+
+    val exp = obl.eAssertion.finalExp.get
+    println(s"Isabelle assertion: $exp at ${exp.pos}" )
+
     println(s"Enter a file name:")
     val userInput = readLine()
     if (userInput.equals("q") || userInput.equals("Q")) return
+    if (userInput.isEmpty) {
+      println("No filename entered")
+      return
+    }
 
     try {
       val filepath = Paths.get(userInput)
@@ -881,8 +889,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
   private def translateDebugNode(debugNode: AnyDebugNode, prefix: String = "", suffix: String = "",
                                 rewrites: Rewrites = basicRewrites,
                                 inAux: Boolean = false): Unit = {
-    if (debugNode.description.isDefined && debugNode.description.get.contains("singleton-FVF"))
-      println(debugNode.id)
+    // if (debugNode.description.isDefined && debugNode.description.get.contains("singleton-FVF"))
+    //   println(debugNode.id)
     debugNode match {
       case debugExp: DebugExp if debugExp.isInternal =>
         if (debugExp.description.exists(_.contains("singleton-FVF"))) {

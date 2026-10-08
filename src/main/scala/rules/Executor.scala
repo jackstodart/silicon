@@ -522,17 +522,21 @@ object executor extends ExecutionRules {
         val pve = AssertFailed(assert)
         val proveExternally = assert.info.hasAnnotation(isabelleAnnotation)
         val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(assert)) else s
-        val s0a = if (proveExternally) s.copy(inExternalProverMode = true) else s0
 
         if (s.exhaleExt) v.heapSupporter.checkEmptyExhaleExtState(s)
-        consume(s0a, a, false, pve, v)((s1, _, v1) => {
-          if (proveExternally) {
-            val finalExp = ast.DebugLabelledOld(a, oldLabel)(a.pos, a.info, a.errT)
-            val de = DebugExp(True, Some(a), Some(finalExp), isInternal = false)
-            val obl = ProofObligation(state, v, False, de, AssertionInIsabelle(assert))
-            DebugExporter.exportIsabelle(obl)
-            exec2(state, ast.Inhale(a)(assert.pos, assert.info, assert.errT), v)(Q)
-          } else {
+        if (proveExternally) {
+          /* Consume but don't  */
+          val r = executionFlowController.locally(s0.copy(inExternalProverMode = true), v)((s1, v1) =>
+            consume(s1, a, false, pve, v1)((s2, _, v2) => {
+              val finalExp = ast.DebugLabelledOld(a, oldLabel)(a.pos, a.info, a.errT)
+              val de = DebugExp(True, Some(a), Some(finalExp), isInternal = false)
+              val obl = ProofObligation(s2, v2, False, de, AssertionInIsabelle(assert))
+              DebugExporter.exportIsabelle(obl)
+              Success()
+            }))
+          r combine exec2(state, ast.Inhale(a)(assert.pos, assert.info, assert.errT), v)(Q)
+        } else {
+          consume(s0, a, false, pve, v)((s1, _, v1) => {
             val s1a = if (s.exhaleExt) s1.copy(h = s1.reserveHeaps.head)
             else s1.copy(h = s.h, reserveHeaps = s.reserveHeaps)
             /* When exhaleExt is set magicWandSupporter.transfer is used to transfer permissions to
@@ -541,8 +545,8 @@ object executor extends ExecutionRules {
              */
             val s1b = if (debugOn) v1.finishKeyHeap(s1a) else s1a
             Q(s1b, v1)
-          }
-        })
+          })
+        }
 
       // Calling hack407_R() results in Silicon efficiently havocking all instances of resource R.
       // See also Silicon issue #407.
