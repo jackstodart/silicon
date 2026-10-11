@@ -441,7 +441,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
             val permCond = permCondSimpExp(perm)
             val permCondString = permCond match {
               case _: ast.TrueLit => ""
-              case _ => translateExp(permCond, oldHeapLabel = Some(domLabel)) + " \\<longrightarrow> "
+              case _ => translateExp(permCond, oldHeapLabel = Some(domLabel)) + " \\<Longrightarrow> "
             }
             val rcvrString = translateExp(rcvr2, parenthesisLevel = 100)
             val default = quantFieldChunks.get(qfc.fvf) match {
@@ -713,7 +713,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         val rPLevel = if (right.isInstanceOf[ast.And]) 34 else 35
         wrap(rec(left, lPLevel) + " \\<and> " + rec(right, rPLevel), 35)
       case ast.Implies(left, right) =>
-        val translation = translateExp(left, parenthesisLevel, rewrites, isFrameAxiom = false, variablePrime, resultString) +
+        val translation = translateExp(left, parenthesisLevel, rewrites, isFrameAxiom = false, variablePrime, resultString, oldHeapLabel) +
           " \\<longrightarrow> " + rec(right, 25)
         wrap(translation, 25)
       case ast.MagicWand(left, right) => rec(left, 50) + " \\<longrightarrow> " + rec(right, 50) // TODO: remove?
@@ -934,6 +934,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         strings += s"  (* Begin loop invariant at ${invariant.loopPos} *)"
         invariant.children.toSeq.sortBy(_.id) foreach { translateDebugNode(_, prefix, suffix, rewrites, inAux) }
         strings += "  (* End loop invariant *)"
+      case group: DebugGroup if group.groupDescription.contains("unfolding of") => // do nothing
       case group: DebugGroup =>
         val isAuxGroup = inAux || group.description.getOrElse("").contains("aux")
         group.children.toSeq.sortBy(_.id) foreach { translateDebugNode(_, prefix, suffix, rewrites, inAux = isAuxGroup) }

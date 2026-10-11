@@ -419,8 +419,8 @@ object magicWandSupporter extends SymbolicExecutionRules {
           v1.decider.setCurrentBranchCondition(And(branchConditions), (exp, expNew))
 
           // Recreate all path conditions in the Z3 proof script that we recorded for that branch
-          val children: Option[Iterable[PreDebugAssumption]] = ??? // Option.when(debugOn)(conservedPcs._2.get.map)
-          v1.decider.assume(conservedPcs._1, children, Option.when(debugOn)(DebugGroup.awaitChildren("Joined path conditions for magic wand")), enforceAssumption = false)
+          val debugGroup = Option.when(debugOn)(DebugGroup("Joined path conditions for magic wand", conservedPcs._2.get))
+          v1.decider.assume(conservedPcs._1, debugGroup, enforceAssumption = false)
 
           // Execute the continuation Q
           Q(s2, magicWandChunk, v1)
