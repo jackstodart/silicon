@@ -18,7 +18,7 @@ import viper.silicon.verifier.Verifier
 import viper.silver.ast
 import viper.silver.ast.utility.Functions.allSubexpressions
 import viper.silver.ast.utility.Simplifier
-import viper.silver.ast.{Exp, PermExp, PermGeCmp, PermGtCmp, PermLeCmp, PermLtCmp, Program}
+import viper.silver.ast.{Exp, LocalVar, PermExp, PermGeCmp, PermGtCmp, PermLeCmp, PermLtCmp, Program}
 import viper.silver.utility.Common.Rational
 
 import java.nio.charset.StandardCharsets
@@ -40,7 +40,7 @@ object DebugExporter {
     val userInput = readLine()
     if (userInput.equals("q") || userInput.equals("Q")) return
     if (userInput.isEmpty) {
-      println("No filename entered")
+      println("No filename entered, export skipped.")
       return
     }
 
@@ -276,8 +276,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
   private def defineFunction(fn: ast.Function): Unit = {
     val argString = (if (fn.isPure) "" else "h ") + fn.formalArgs.map(_.name).mkString(" ")
-    val argStringWTypes = (if (fn.isPure) "" else "(h::Heap) ") +
-      fn.formalArgs.map(a => s"(${a.name}::${translateType(a.typ)})").mkString(" ")
+    var argStringWTypes = argStringWithTypes(fn.formalArgs, !fn.isPure)
 
     // Translate function body
     if (fn.body.isDefined) {
@@ -452,12 +451,11 @@ class Translator(val obl: ProofObligation, val filename: String) {
             strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$permCondString$eqString\""
           case None =>
             val quantifiedVars = qfc.invs.headOption.map(_.qvarExps.getOrElse(Seq())).getOrElse(Seq())
-            val newRenamings = quantifiedVars.map(v => (v.name, v.name.takeWhile(c => c != '@' && c != '$')))
+            val newRenamings = quantifiedVars.map(v => (v.name, cleanName(v)))
             val newRewrites = basicRewrites.addRenames(newRenamings)
             val rcvr = (for (inv <- qfc.invs.headOption; exps <- inv.invertibleExps; e <- exps.headOption)
               yield translateExp(e, parenthesisLevel = 100, newRewrites)).getOrElse("missingInvExp")
-            val permCondition = Simplifier.simplify(qfc.conditionExp.get) // , permCondSimpExp(qfc.permValueExp.get))())
-            val varString = quantifiedVars.map(v => s"(${v.name.takeWhile(_ != '@')}::${translateType(v.typ)})").mkString(" ")
+            val varString = argStringWithTypes(quantifiedVars, includeHeap = false)
             val freeRef = safeString(qfc.quantifiedVarExps.get.head.name)
             val condString = translateExp(qfc.conditionExp.get, oldHeapLabel = Some(heapLabel), rewrites = newRewrites) + s" $META_ARR"
             val permCond = permCondSimpExp(qfc.permValueExp.get) match {
@@ -750,7 +748,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
       case ast.FuncApp(funcname, args) =>
         // Add implicit heap argument for heap-dep functions
-        val og_fn = funcname.takeWhile(_ != '%')
+        val og_fn = funcname.takeWhile(c => c != '$' && c != '%')
         val maybeHeap = obl.s.program.findFunctionOptionally(og_fn) match {
           case None => ""
           case Some(fn) => if (fn.isPure) "" else " " + domOldHeapLabel
@@ -775,7 +773,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.Let(variable, exp, body) =>
         s"let ${safeString(variable.name)} = ${rec(exp, 10)} in ${rec(body, 10)}"
       case ast.Forall(vars, _, exp) =>
-        val varRenames = vars.map(v => (v.name, v.name.takeWhile(_ != '@')))
+        val varRenames = vars.map(v => (v.name, cleanName(v)))
         val newRewrites = rewrites.addRenames(varRenames)
         val varString = varRenames.map(_._2).mkString(" ")
         val bodyString = translateExp(exp, 10, newRewrites, isFrameAxiom, variablePrime, resultString, oldHeapLabel)
@@ -920,7 +918,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
           strings += s"  assumes ${debugPre.id}: \"$prefix$preconditionString$suffix\""
         }
       case quantifier: DebugQuantifier =>
-        val varRenames = quantifier.qvars.map(v => (v.toString, v.toString.takeWhile(_ != '@')))
+        val varRenames = quantifier.qvars.map(v => (v.toString, v.toString.takeWhile(c => c != '@' && c != '$')))
         val newRewrites = basicRewrites.addRenames(varRenames)
         val qvarString = "\\<forall>" + varRenames.map(_._2).mkString(" ") + ". "
         quantifier.children.toSeq.sortBy(_.id) foreach {
@@ -1036,16 +1034,6 @@ object ExportUtils {
   def permIsPositive(e: Exp): Boolean = {
     posExpCond(e) match {
       case _: ast.TrueLit => true
-    }
-  }
-
-  def booleanExpSimp(c: Term): Term = {
-    c match {
-      case terms.Ite(c, p0, terms.False) => booleanSimp(terms.And(c, p0))
-      case terms.Ite(c, terms.False, p0) => booleanSimp(terms.And())
-      case terms.Ite(c, p0, terms.True) => booleanSimp(terms.Implies(c, p0))
-      case terms.And(ps) => terms.And(ps.map(booleanSimp))
-      case _ => c
     }
   }
 
@@ -1181,6 +1169,13 @@ object ExportUtils {
     }
   }
 
+  def cleanName(v: ast.LocalVarDecl): String =
+    v.name.takeWhile(c => c != '@' && c != '$')
+
+  def argStringWithTypes(vars: Seq[ast.LocalVarDecl], includeHeap: Boolean): String =
+    (if (includeHeap) "(h::Heap) " else "") +
+      vars.map(v => s"(${cleanName(v)}::${translateType(v.typ)})").mkString(" ")
+
   def translateType(t: ast.Type): String = {
     t match {
       case ast.Int => "int"
@@ -1224,19 +1219,6 @@ object ExportUtils {
     !isabelleKeywords.contains(name)
   }
 
-  private def containsPrecondition(e: Exp, p: Program): Boolean = {
-    e match {
-      case ast.FuncApp(funcname, args) =>
-        val thisFunHasPres = p.findFunctionOptionally(funcname) match {
-          case None => false
-          case Some(fn) => fn.pres.nonEmpty
-        }
-        val argsHavePres = args.exists(containsPrecondition(_, p))
-        thisFunHasPres || argsHavePres
-      case _ => e.subExps.exists(containsPrecondition(_, p))
-    }
-  }
-
   def getPrecPropagationExp(fn: ast.Function, p: Program): Option[Exp] = {
     fn.body match {
       case None => None
@@ -1256,11 +1238,6 @@ object ExportUtils {
             }
         }
     }
-  }
-
-  // Expects the expression to be a variable
-  def varToVar(v: ast.LocalVarDecl): ast.LocalVar = {
-    ast.LocalVar(v.name, v.typ)()
   }
 
   /** Follows the same logic as silver.FunctionPreconditionTransformer.transform
