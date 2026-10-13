@@ -1567,10 +1567,6 @@ object PermMin extends CondFlyweightTermFactory[(Term, Term), PermMin] {
   override def apply(v0: (Term, Term)) = v0 match {
     case (t0, t1) if t0 == t1 => t0
     case (p0: PermLiteral, p1: PermLiteral) => if (p0.literal > p1.literal) p1 else p0
-    case (p0, FullPerm) => p0
-    case (FullPerm, p1) => p1
-    case (_, NoPerm) => NoPerm
-    case (NoPerm, _) => NoPerm
     case _ => createIfNonExistent(v0)
   }
 
