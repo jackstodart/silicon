@@ -238,13 +238,8 @@ case class ProofObligation(s: State,
     }
   }
 
-  private def assertionString: String = {
-    if (eAssertion.finalExp.isDefined){
-      s"Assertion:\n$eAssertion\n\n"
-    } else {
-      eAssertion.description.get
-    }
-  }
+  private def assertionString: String =
+    s"Assertion\n${eAssertion.toString(printConfig)}\n\n"
 
   override def toString: String = {
     "\n" + originalErrorInfo + branchConditionString + storeString + heapString +

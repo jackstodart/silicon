@@ -1240,7 +1240,7 @@ object ExportUtils {
     }
   }
 
-  /** Follows the same logic as silver.FunctionPreconditionTransformer.transform
+  /** Follows the same logic as silicon.FunctionPreconditionTransformer.transform
     *
     * This expects to only be called on function bodies, and so e should be pure.
     * It also only returns the body of the axiom, it might need to be guarded by the
@@ -1301,9 +1301,9 @@ object ExportUtils {
 
   // Note, will remove Trues
   private def bigAnd(es: Seq[Exp], pos: ast.Position, info: ast.Info, errT: ast.ErrorTrafo): Exp = {
-    val filtered = es.collect{ case e: ast.TrueLit => e }
+    val filtered = es.filterNot(_.isInstanceOf[ast.TrueLit])
     if (filtered.isEmpty) ast.TrueLit()(pos, info, errT)
-    else if (filtered.length == 1) es.head
+    else if (filtered.length == 1) filtered.head
     else {
       ast.And(filtered.head, bigAnd(filtered.tail, pos, info, errT))(pos, info, errT)
     }
