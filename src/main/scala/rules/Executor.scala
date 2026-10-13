@@ -26,7 +26,6 @@ import viper.silicon.utils.{freshSnap, toSf}
 import viper.silicon.verifier.Verifier
 import viper.silver.ast.AnnotationInfo
 import viper.silver.cfg.{ConditionalEdge, StatementBlock}
-
 import scala.annotation.unused
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -323,7 +322,7 @@ object executor extends ExecutionRules {
                         v2.decider.declareAndRecordAsFreshMacros(fm1.filter(!v2.decider.freshMacros.contains(_)))  /* [BRANCH-PARALLELISATION] */
                         val debugGroup = Option.when(debugOn)(DebugInvariant(loopPos, pcs.assumptionExps))
                         v2.decider.assume(pcs.assumptions, debugGroup, enforceAssumption = false)
-                        v2.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
+                        v2.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterInhale)
                         if (v2.decider.checkSmoke())
                           Success()
                         else {
@@ -472,14 +471,11 @@ object executor extends ExecutionRules {
           }
         }
         val ts = viper.silicon.state.utils.computeReferenceDisjointnesses(s, tRcvr)
-        val esNew2 = eRcvrNew.map(rcvr => viper.silicon.state.utils.computeReferenceDisjointnessesExp(s, rcvr))
-        val esNew = eRcvrNew.map(rcvr => BigAnd(viper.silicon.state.utils.computeReferenceDisjointnessesExp(s, rcvr)))
+        val esNew = eRcvrNew.map(rcvr => viper.silicon.state.utils.computeReferenceDisjointnessesExp(s, rcvr))
         addFieldPerms(s, fields, v)((s1, v1) => {
           val s1a = s1.copy(g = s1.g + (x, (tRcvr, eRcvrNew)))
           val s1b = if (debugOn) v1.recordHeap(s1a, oldLabel, ExecStmt(stmt), oldPCS) else s1a
-          val children = esNew2.map(_.map(e => DebugExp.awaitTerm(e, e)))
-          v1.decider.assume(ts, children, Option.when(debugOn)(DebugGroup.awaitChildren("Reference disjointness")),
-            enforceAssumption = false)
+          v1.decider.assume(ts, esNew, Option.when(debugOn)(DebugGroup.awaitChildren("Reference disjointness")))
           Q(s1b, v1)
         })
 
@@ -649,7 +645,7 @@ object executor extends ExecutionRules {
             val s2a = s2.copy(g = s2.g + gOuts, oldHeaps = newOldHeaps)
             produces(s2a, freshSnap, meth.posts, _ => pveCallTransformed, v2)((s3, v3) => {
               v3.symbExLog.closeScope(postCondId)
-              v3.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
+              v3.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterInhale)
               val gLhs = Store(lhs.zip(outs)
                               .map(p => (p._1, s3.g.values(p._2))).toMap)
               val s3a = s3.copy(g = s1.g + gLhs,

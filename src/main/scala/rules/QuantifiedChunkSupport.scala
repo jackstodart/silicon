@@ -71,7 +71,7 @@ case class InverseFunctions(condition: Term,
   def inversesOf(arguments: Seq[Term]): Seq[App] =
     /* TODO: Memoisation might be worthwhile, e.g. because often used with `?r` */
     qvarsToInverses.values.map(inv =>
-      App(inv, additionalArguments ++ arguments, None)
+      App(inv, additionalArguments ++ arguments)
     ).to(Seq)
 
   def qvarsToInversesOf(argument: Term): Map[Var, App] =
@@ -80,7 +80,7 @@ case class InverseFunctions(condition: Term,
   def qvarsToInversesOf(arguments: Seq[Term]): Map[Var, App] =
     /* TODO: Memoisation might be worthwhile, e.g. because often used with `?r` */
     qvarsToInverses.map {
-      case (x, inv) => x -> App(inv, additionalArguments ++ arguments, None)
+      case (x, inv) => x -> App(inv, additionalArguments ++ arguments)
     }.to(Map)
 
   override lazy val toString: String = indentedToString("")
@@ -974,13 +974,9 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             val inv = inverseFunctions.copy(axiomInversesOfInvertibles = Forall(ax.vars, ax.body, effectiveTriggers, s"$qid-invOfFct"))
             val comment = "Definitional axioms for inverse functions"
             v.decider.prover.comment(comment)
-            val definitionalAxiomMark = v.decider.setPathConditionMark()
-            v.decider.assume(inv.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
-              Option.when(debugOn)(DebugGroup.awaitChildren(comment)), isInternal = true, enforceAssumption = false)
-            v.decider.assume(inv.definitionalAxioms, Option.when(debugOn)(DebugGroup.awaitChildren(comment)), isInternal = true, enforceAssumption = false)
-            val conservedPcs =
-              if (s.recordPcs) (s.conservedPcs.head :+ v.decider.pcs.after(definitionalAxiomMark)) +: s.conservedPcs.tail
-              else s.conservedPcs
+            v.decider.assumeDefinition(inv.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
+              Option.when(debugOn)(DebugGroup.awaitChildren(comment)))
+            v.decider.assumeDefinition(inv.definitionalAxioms, Option.when(debugOn)(DebugGroup.awaitChildren(comment)))
 
             val resourceDescription = Resources.resourceDescriptions(ch.resourceID)
             val interpreter = new QuantifiedPropertyInterpreter
@@ -1033,7 +1029,6 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             val s1 =
               s.copy(h = h1,
                      functionRecorder = fr2.recordFieldInv(inv),
-                     conservedPcs = conservedPcs,
                      smCache = smCache1)
             Q(s1, v)
           case false => {
@@ -1063,11 +1058,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
     val smDef2 = SnapshotMapDefinition(resource, sm, Seq(smValueDef), Seq())
     val comment = "Definitional axioms for singleton-SM's value"
     v.decider.prover.comment(comment)
-    val definitionalAxiomMark = v.decider.setPathConditionMark()
-    v.decider.assumeDefinition(smValueDef, Option.when(debugOn)(DebugExp.awaitTerm(comment, true)))
-    val conservedPcs =
-      if (s.recordPcs) (s.conservedPcs.head :+ v.decider.pcs.after(definitionalAxiomMark)) +: s.conservedPcs.tail
-      else s.conservedPcs
+    v.decider.assumeDefinition(smValueDef, Option.when(debugOn)(DebugExp.awaitTerm(comment, isInternal = true)))
     val ch = quantifiedChunkSupporter.createSingletonQuantifiedChunk(formalQVars, formalQVarsExp, resource, tArgs, eArgs, tPerm, ePerm, sm, Some(s.qpTag.getOrElse(v.counter(this).next())), s.program)
 
     val s1 = if (mergeAndTrigger) {
@@ -1091,13 +1082,11 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
       }
 
       s.copy(h = h1,
-        conservedPcs = conservedPcs,
         functionRecorder = fr1.recordFvfAndDomain(smDef2),
         smCache = smCache1)
     } else {
       s.copy(h = s.h + ch,
-             functionRecorder = s.functionRecorder.recordFvfAndDomain(smDef2),
-             conservedPcs = conservedPcs)
+             functionRecorder = s.functionRecorder.recordFvfAndDomain(smDef2))
     }
     Q(s1, v)
   }
@@ -1677,7 +1666,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             val permsTakenDecl = v.decider.freshMacro("pTaken", permsTakenArgs, permsTakenBody)
             val permsTakenMacro = Macro(permsTakenDecl.id, permsTakenDecl.args.map(_.sort), permsTakenDecl.body.sort)
             currentFunctionRecorder = currentFunctionRecorder.recordFreshMacro(permsTakenDecl)
-            val permsTakenApp = App(permsTakenMacro, permsTakenArgs, None)
+            val permsTakenApp = App(permsTakenMacro, permsTakenArgs)
             v.symbExLog.addMacro(permsTakenApp, permsTakenBody)
             permsTakenApp
           } else {
@@ -1943,14 +1932,14 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
 
     qvarsWithIndices foreach { case (qvar, idx) =>
       val fun = v.decider.fresh("inv", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), qvar.sort)
-      val inv = (ts: Seq[Term]) => App(fun, additionalInvArgs ++ ts, None)
+      val inv = (ts: Seq[Term]) => App(fun, additionalInvArgs ++ ts)
 
       inverseFunctions(idx) = fun
       inversesOfFcts(idx) = inv(invertibles)
       inversesOfCodomains(idx) = inv(codomainQVars)
 
       val imgFun = v.decider.fresh("img", (additionalInvArgs map (_.sort)) ++ invertibles.map(_.sort), sorts.Bool)
-      val img = (ts: Seq[Term]) => App(imgFun, additionalInvArgs ++ ts, None)
+      val img = (ts: Seq[Term]) => App(imgFun, additionalInvArgs ++ ts)
 
       imageFunctions(idx) = imgFun
       imagesOfFcts(idx) = img(invertibles)
@@ -2102,7 +2091,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
   private def invertiblesWithInversesApplied(invs: Seq[InverseFunctions], quantifiedVars: Seq[Var]): Seq[Term] =
     invs.flatMap(inv => {
       val qvarsAndInverses: Map[Var, Term] =
-        inv.qvarsToInverses.map { case (x, fn) => x -> (App(fn, inv.additionalArguments ++ quantifiedVars, None): Term) }.to(Map)
+        inv.qvarsToInverses.map { case (x, fn) => x -> (App(fn, inv.additionalArguments ++ quantifiedVars): Term) }.to(Map)
       inv.invertibles.map(_.replace(qvarsAndInverses))
     })
 
@@ -2320,7 +2309,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
       arguments.flatMap {
         case SeqAt(seq, _) => Some(seq)
         case MapLookup(map, _) => Some(map)
-        case App(f, _, _) => Some(AppHint(f))
+        case App(f, _) => Some(AppHint(f))
         case _ => None
       }
 

@@ -72,13 +72,13 @@ trait FunctionRecorderHandler {
     freshSymbolsAcrossAllPhases ++= freshFvfsAndDomains map (fvfDef =>
       fvfDef.sm match {
         case x: Var => ConstDecl(x)
-        case App(f: Function, _, _) => FunctionDecl(f)
+        case App(f: Function, _) => FunctionDecl(f)
         case other => sys.error(s"Unexpected SM $other of type ${other.getClass.getSimpleName}")
       })
     freshSymbolsAcrossAllPhases ++= freshPermMaps map (pmDef =>
       pmDef.pm match {
         case x: Var => ConstDecl(x)
-        case App(f: Function, _, _) => FunctionDecl(f)
+        case App(f: Function, _) => FunctionDecl(f)
         case other => sys.error(s"Unexpected permission map $other of type ${other.getClass.getSimpleName}")
       })
     freshSymbolsAcrossAllPhases ++= additionalFunctionDecls
@@ -140,10 +140,10 @@ class FunctionData(val programFunction: ast.Function,
     else
       Seq.fill(stateArgs.size + formalArgs.size)(None)
 
-  val functionApplication = App(function, stateArgs ++ formalArgs.values.toSeq, None)
-  val limitedFunctionApplication = App(limitedFunction, stateArgs ++ formalArgs.values.toSeq, None)
-  val triggerFunctionApplication = App(statelessFunction, formalArgs.values.toSeq, None)
-  val preconditionFunctionApplication = App(preconditionFunction, stateArgs ++ formalArgs.values.toSeq, None)
+  val functionApplication = App(function, stateArgs ++ formalArgs.values.toSeq)
+  val limitedFunctionApplication = App(limitedFunction, stateArgs ++ formalArgs.values.toSeq)
+  val triggerFunctionApplication = App(statelessFunction, formalArgs.values.toSeq)
+  val preconditionFunctionApplication = App(preconditionFunction, stateArgs ++ formalArgs.values.toSeq)
 
   val limitedAxiom =
     Forall(arguments,
@@ -280,7 +280,7 @@ class FunctionData(val programFunction: ast.Function,
            functionEncoding.predicateTriggerStateArg(this, predAcc, expressionTranslator)
         +: expressionTranslator.translatePrecondition(program, predAcc.args, this))
 
-      val fapp = App(triggerFunction, args, None)
+      val fapp = App(triggerFunction, args)
 
       predicate.name -> fapp
     }))

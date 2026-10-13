@@ -355,7 +355,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
               val pTakenDecl = v.decider.freshMacro("mce_pTaken", pTakenArgs, takenTerm)
               val pTakenMacro = Macro(pTakenDecl.id, pTakenDecl.args.map(_.sort), pTakenDecl.body.sort)
               currentFunctionRecorder = currentFunctionRecorder.recordFreshMacro(pTakenDecl)
-              val pTakenApp = App(pTakenMacro, pTakenArgs, None)
+              val pTakenApp = App(pTakenMacro, pTakenArgs)
               v.symbExLog.addMacro(pTakenApp, takenTerm)
               pTakenApp
             }

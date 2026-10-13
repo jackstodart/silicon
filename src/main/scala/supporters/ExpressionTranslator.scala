@@ -97,7 +97,7 @@ trait ExpressionTranslator {
         /** IMPORTANT: Keep in sync with [[viper.silicon.rules.evaluator.evalTrigger]] */
         val translatedTriggers = eTriggers map (triggerSet => Trigger(triggerSet.exps map (trigger =>
           f(trigger) match {
-            case app @ App(fun: HeapDepFun, _, _) =>
+            case app @ App(fun: HeapDepFun, _) =>
               app.copy(applicable = functionSupporter.limitedVersion(fun))
             case other => other
           }
@@ -165,7 +165,7 @@ trait ExpressionTranslator {
         val outSort = toSort(exp.typ)
         val id = if (isBuiltin) Identifier(funcName) else Identifier(funcName + Seq(outSort).mkString("[",",","]"))
         val df = Fun(id, inSorts, outSort)
-        App(df, tArgs, None)
+        App(df, tArgs)
 
       case bfa@ast.BackendFuncApp(_, args) =>
         val tArgs = args map f
@@ -173,7 +173,7 @@ trait ExpressionTranslator {
         val outSort = toSort(bfa.typ)
         val id = Identifier(bfa.interpretation)
         val sf = SMTFun(id, inSorts, outSort)
-        App(sf, tArgs, None)
+        App(sf, tArgs)
 
       case fa@ast.FuncApp(name, args) =>
         // We are assuming here that only functions with empty preconditions are used.
@@ -182,7 +182,7 @@ trait ExpressionTranslator {
         val outSort = toSort(fa.typ)
         val id = Identifier(name)
         val df = HeapDepFun(id, inSorts, outSort)
-        App(df, tArgs, None)
+        App(df, tArgs)
 
       /* Permissions */
 

@@ -34,12 +34,12 @@ sealed trait Symbol extends Node {
 sealed trait Sort extends Symbol
 
 object sorts {
-  object Snap extends Sort { val id = Identifier("Snap"); override lazy val toString = id.toString }
-  object Int  extends Sort { val id = Identifier("Int");  override lazy val toString = id.toString }
-  object Bool extends Sort { val id = Identifier("Bool"); override lazy val toString = id.toString }
-  object Ref  extends Sort { val id = Identifier("Ref");  override lazy val toString = id.toString }
-  object Perm extends Sort { val id = Identifier("Perm"); override lazy val toString = id.toString }
-  object Unit extends Sort { val id = Identifier("()");   override lazy val toString = id.toString }
+  case object Snap extends Sort { val id = Identifier("Snap"); override lazy val toString = id.toString }
+  case object Int  extends Sort { val id = Identifier("Int");  override lazy val toString = id.toString }
+  case object Bool extends Sort { val id = Identifier("Bool"); override lazy val toString = id.toString }
+  case object Ref  extends Sort { val id = Identifier("Ref");  override lazy val toString = id.toString }
+  case object Perm extends Sort { val id = Identifier("Perm"); override lazy val toString = id.toString }
+  case object Unit extends Sort { val id = Identifier("()");   override lazy val toString = id.toString }
   object MaskSort extends HeapSort(Perm)
 
   case class Seq(elementsSort: Sort) extends Sort {
@@ -80,7 +80,7 @@ object sorts {
     override lazy val toString = id.toString
   }
 
-  object MagicWandSnapFunction extends Sort {
+  case object MagicWandSnapFunction extends Sort {
     val id: Identifier = Identifier("MWSF")
     override lazy val toString: String = id.toString
   }
@@ -292,29 +292,26 @@ object Var extends CondFlyweightFactory[(Identifier, Sort, Boolean), Var, Var] {
   override def actualCreate(args: (Identifier, Sort, Boolean)): Var = new Var(args._1, args._2, args._3)
 }
 
-class App private[terms] (val applicable: Applicable, val args: Seq[Term], val heapLabel: Option[String])
-  extends Application[Applicable]
-    with ConditionalFlyweight[(Applicable, Seq[Term], Option[String]), App] {
+class App private[terms] (val applicable: Applicable, val args: Seq[Term])
+  extends Application[Applicable] with ConditionalFlyweight[(Applicable, Seq[Term]), App] {
   /*with PossibleTrigger*/
 
   utils.assertExpectedSorts(applicable, args)
 
   val sort: Sort = applicable.resultSort
-  val equalityDefiningMembers = (applicable, args, heapLabel)
-  def copy(applicable: Applicable = applicable, args: Seq[Term] = args, heapLabel: Option[String] = heapLabel) =
-    App(applicable, args, heapLabel)
+  val equalityDefiningMembers = (applicable, args)
+  def copy(applicable: Applicable = applicable, args: Seq[Term] = args) = App(applicable, args)
 
-  val maybeLabel = if (heapLabel.isDefined) s"[${heapLabel.get}]" else ""
   override lazy val toString =
     if (args.isEmpty) applicable.id.toString
-    else s"${applicable.id}$maybeLabel${args.mkString("(", ", ", ")")}"
+    else s"${applicable.id}${args.mkString("(", ", ", ")")}"
 }
 
-object App extends CondFlyweightTermFactory[(Applicable, Seq[Term], Option[String]), App] {
-  def apply(applicable: Applicable, args: Seq[Term], heapLabel: Option[String]) = createIfNonExistent((applicable, args, heapLabel))
-  def apply(applicable: Applicable, arg: Term, heapLabel: Option[String]) = createIfNonExistent((applicable, Seq(arg), heapLabel))
+object App extends CondFlyweightTermFactory[(Applicable, Seq[Term]), App] {
+  def apply(applicable: Applicable, args: Seq[Term]) = createIfNonExistent((applicable, args))
+  def apply(applicable: Applicable, arg: Term) = createIfNonExistent((applicable, Seq(arg)))
 
-  override def actualCreate(args: (Applicable, Seq[Term], Option[String])): App = new App(args._1, args._2, args._3)
+  override def actualCreate(args: (Applicable, Seq[Term])): App = new App(args._1, args._2)
 }
 
 /*
@@ -738,7 +735,7 @@ object SimplifyingForall {
   }
 }
 
-object Exists extends Quantifier {
+case object Exists extends Quantifier {
   def apply(qvar: Var, tBody: Term, triggers: Seq[Trigger]) =
     Quantification(Exists, qvar :: Nil, tBody, triggers)
 
@@ -2384,6 +2381,16 @@ class MagicWandSnapshot(val mwsf: Term) extends Term with ConditionalFlyweight[T
    * @return The snapshot of the right-hand side that preserves the values of the left-hand side.
    */
   def applyToMWSF(snapLhs: Term): Term = MWSFLookup(mwsf, snapLhs)
+
+  /**
+   * Yield the token for the given snapshot of the left-hand side.
+   * Assuming the token makes the path conditions that were recorded while packaging
+   * the wand (in particular, the definition of the MWSF) available for that left-hand side.
+   *
+   * @param snapLhs The snapshot of the left-hand side that the wand is applied to.
+   * @return The token term for this wand and left-hand side.
+   */
+  def yieldToken(snapLhs: Term): Term = MagicWandToken(mwsf, snapLhs)
 }
 
 object MagicWandSnapshot extends PreciseCondFlyweightFactory[Term, MagicWandSnapshot]  {
@@ -2417,6 +2424,35 @@ object MWSFLookup extends PreciseCondFlyweightFactory[(Term, Term), MWSFLookup] 
   /** Create an instance of [[viper.silicon.state.terms.MWSFLookup]]. */
   override def actualCreate(args: (Term, Term)): MWSFLookup =
     new MWSFLookup(args._1, args._2)
+}
+
+/**
+ * Token that guards the path conditions recorded while packaging a magic wand.
+ * Packaging a wand assumes, for every possible snapshot `lhs` of the wand's left-hand side, that
+ * `MW_token(mwsf, lhs)` implies that the branch and path conditions of one of the branches taken
+ * while packaging hold (including the definition of `mwsf` for `lhs`). Applying the wand yields
+ * the token for the concrete snapshot of the consumed left-hand side.
+ *
+ * @param mwsf Term of sort [[sorts.MagicWandSnapFunction]].
+ * @param snapLhs Term of sort [[sorts.Snap]] that represents the values of the wand's left-hand side.
+ */
+class MagicWandToken(val mwsf: Term, val snapLhs: Term) extends BooleanTerm with ConditionalFlyweightBinaryOp[MagicWandToken] {
+  override def p0: Term = mwsf
+  override def p1: Term = snapLhs
+  override lazy val toString = s"MW_token($mwsf, $snapLhs)"
+}
+
+object MagicWandToken extends PreciseCondFlyweightFactory[(Term, Term), MagicWandToken] {
+  override def apply(pair: (Term, Term)): MagicWandToken = {
+    val (mwsf, snapLhs) = pair
+    utils.assertSort(mwsf, "mwsf", sorts.MagicWandSnapFunction)
+    utils.assertSort(snapLhs, "snap", sorts.Snap)
+    createIfNonExistent(pair)
+  }
+
+  /** Create an instance of [[viper.silicon.state.terms.MagicWandToken]]. */
+  override def actualCreate(args: (Term, Term)): MagicWandToken =
+    new MagicWandToken(args._1, args._2)
 }
 
 class MagicWandChunkTerm(val chunk: MagicWandChunk) extends Term with ConditionalFlyweight[MagicWandChunk, MagicWandChunkTerm] {

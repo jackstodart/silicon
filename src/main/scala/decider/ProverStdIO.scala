@@ -331,7 +331,7 @@ abstract class ProverStdIO(uniqueId: String,
     setTimeout(timeout)
 
     val guard = fresh("grd", Nil, sorts.Bool)
-    val guardApp = App(guard, Nil, None)
+    val guardApp = App(guard, Nil)
 
     writeLine(s"(assert (=> $guardApp (not $goal)))")
     readSuccess()
@@ -388,12 +388,14 @@ abstract class ProverStdIO(uniqueId: String,
     toMap(stats)
   }
 
-  def comment(str: String): Unit = {
-    val sanitisedStr =
-      str.replaceAll("\r", "")
-         .replaceAll("\n", "\n; ")
+  def comment(str: => String): Unit = {
+    if (logfileWriter != null) {
+      val sanitisedStr =
+        str.replaceAll("\r", "")
+           .replaceAll("\n", "\n; ")
 
-    logToFile("; " + sanitisedStr)
+      logToFile("; " + sanitisedStr)
+    }
   }
 
   def fresh(name: String, argSorts: Seq[Sort], resultSort: Sort): Fun = {

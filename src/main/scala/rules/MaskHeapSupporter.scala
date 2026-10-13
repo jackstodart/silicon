@@ -463,7 +463,7 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
             resChunk.copy(newMask = newMask)
           } else {
             val freshHeap = v.decider.fresh("heap", resChunk.heap.sort, Option.when(debugOn)(PUnknown()))
-            v.decider.assume(IdenticalOnKnownLocations(resChunk.heap, freshHeap, newMask),
+            v.decider.assumeDefinition(IdenticalOnKnownLocations(resChunk.heap, freshHeap, newMask),
               Option.when(debugOn)(DebugExp.awaitTerm("Framing heap", isInternal = true)))
             resChunk.copy(newMask = newMask, newHeap = freshHeap)
           }
@@ -594,10 +594,10 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
             val lossOfInvOfLoc = loss.replace(qvarsToInvOfLoc)
 
             v.decider.prover.comment("Definitional axioms for inverse functions")
-            v.decider.assume(inverseFunctions.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
-              Option.when(debugOn)(DebugGroup.awaitChildren("Inverse Function Axioms")), isInternal = true, enforceAssumption = false)
-            v.decider.assume(inverseFunctions.definitionalAxioms,
-              Option.when(debugOn)(DebugGroup.awaitChildren("Inverse Function Axioms")), isInternal = true, enforceAssumption = false)
+            v.decider.assumeDefinition(inverseFunctions.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
+              Option.when(debugOn)(DebugGroup.awaitChildren("Inverse Function Axioms")))
+            v.decider.assumeDefinition(inverseFunctions.definitionalAxioms,
+              Option.when(debugOn)(DebugGroup.awaitChildren("Inverse Function Axioms")))
 
             val resourceToFind = resource match {
               case mw: ast.MagicWand => MagicWandIdentifier(mw, s.program)
@@ -637,7 +637,7 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
                     val qpMaskGet = HeapLookup(qpMask, argTerm)
                     val conditionalizedPermissions = Ite(condOfInvOfLoc, PermMin(rPerm, currentPerm), NoPerm)
                     val qpMaskConstraint = Forall(formalQVars, qpMaskGet === conditionalizedPermissions, Seq(Trigger(qpMaskGet)), "qpMaskdef")
-                    v.decider.assume(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = true)))
+                    v.decider.assumeDefinition(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = false)))
                     (qpMask, s.functionRecorder.recordFieldInv(inverseFunctions).recordConstrainedVar(qpMask, qpMaskConstraint))
                   }
 
@@ -713,7 +713,7 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
                   val qpMaskGet = HeapLookup(qpMask, argTerm)
                   val conditionalizedPermissions = Ite(condOfInvOfLoc, lossOfInvOfLoc, NoPerm)
                   val qpMaskConstraint = Forall(formalQVars, qpMaskGet === conditionalizedPermissions, Seq(Trigger(qpMaskGet)), "qpMaskdef")
-                  v.decider.assume(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = false)))
+                  v.decider.assumeDefinition(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = false)))
                   val newFr = s.functionRecorder.recordFieldInv(inverseFunctions).recordConstrainedVar(qpMask, qpMaskConstraint)
 
                   // simplify only if this mask will be used later
@@ -727,7 +727,7 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
                     currentChunk.copy(newMask = newMask)
                   } else {
                     val freshHeap = v.decider.fresh("heap", currentChunk.heap.sort, Option.when(debugOn)(PUnknown()))
-                    v.decider.assume(IdenticalOnKnownLocations(currentChunk.heap, freshHeap, newMask),
+                    v.decider.assumeDefinition(IdenticalOnKnownLocations(currentChunk.heap, freshHeap, newMask),
                       Option.when(debugOn)(DebugExp.awaitTerm("Framing heap", true)))
                     currentChunk.copy(newMask = newMask, newHeap = freshHeap)
                   }
@@ -947,7 +947,7 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
           receiverInjectivityCheck)
         v.decider.assert(completeReceiverInjectivityCheck) {
           case true =>
-            v.decider.assume(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = false)))
+            v.decider.assumeDefinition(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = false)))
 
             if (assumeGoodMask)
               v.decider.assume(if (resource.isInstanceOf[ast.Field]) GoodFieldMask(newMask, s.mayAssumeUpperBounds) else GoodMask(newMask),
@@ -958,22 +958,15 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
 
             val comment = "Definitional axioms for inverse functions"
             v.decider.prover.comment(comment)
-            val definitionalAxiomMark = v.decider.setPathConditionMark()
-            v.decider.assume(inv.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
-              Option.when(debugOn)(DebugGroup.awaitChildren(comment)), isInternal = true, enforceAssumption = false)
-            v.decider.assume(inv.definitionalAxioms, Option.when(debugOn)(DebugGroup.awaitChildren(comment)), isInternal = true, enforceAssumption = false)
-            val conservedPcs =
-              if (s.recordPcs) (s.conservedPcs.head :+ v.decider.pcs.after(definitionalAxiomMark)) +: s.conservedPcs.tail
-              else s.conservedPcs
+            v.decider.assumeDefinition(inv.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
+              Option.when(debugOn)(DebugGroup.awaitChildren(comment)))
+            v.decider.assumeDefinition(inv.definitionalAxioms, Option.when(debugOn)(DebugGroup.awaitChildren(comment)))
 
             val h1 = hp - currentChunk + newChunk
             v.decider.assume(permBoundConstraint, Option.when(debugOn)(DebugExp.awaitTerm("Permission upper bound", isInternal = false)))
             val newFr = s.functionRecorder.recordFieldInv(inv).recordConstrainedVar(qpMask, qpMaskConstraint)
 
-            val s1 =
-              s.copy(h = h1,
-                functionRecorder = newFr,
-                conservedPcs = conservedPcs)
+            val s1 = s.copy(h = h1, functionRecorder = newFr)
             Q(s1, v)
           case false =>
             createFailure(pve dueTo notInjectiveReason, v, s, completeReceiverInjectivityCheck, "QP receiver is injective")}
@@ -1318,9 +1311,9 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
 
   override def adaptTriggerTerms(terms: Seq[Term], s: State): Seq[Term] = {
     terms.map(t => t.transform {
-      case App(hdf: HeapDepFun, args, heapLabel) =>
+      case App(hdf: HeapDepFun, args) =>
         val (heapArgs, otherArgs) = args.partition(a => a.sort == PredHeapSort || a.sort == WandHeapSort || a.sort.isInstanceOf[sorts.HeapSort])
-        if (heapArgs.isEmpty) App(hdf, args, heapLabel)
+        if (heapArgs.isEmpty) App(hdf, args)
         else {
           val funcName = hdf.id match {
             case SuffixedIdentifier(prefix, _, _) => prefix.name
@@ -1330,8 +1323,8 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
             case Some(fd) =>
               val frameFunc = functionSupporter.frameVersion(hdf, heapArgs.length)
               val frame = fd.functionEncoding.asInstanceOf[MaskHeapFunctionEncoding].getFrameVersion(fd, otherArgs, heapArgs)
-              App(frameFunc, frame +: otherArgs, heapLabel)
-            case None => App(hdf, args, heapLabel)
+              App(frameFunc, frame +: otherArgs)
+            case None => App(hdf, args)
           }
         }
     }(_ => true))

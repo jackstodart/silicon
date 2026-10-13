@@ -529,7 +529,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         wrap(s"let $bindString in ${rec(body, 10)}", 10)
       case terms.Null => "Null"
       case terms.Unit => "UNIT"
-      case terms.App(applicable, args, heapLabel) =>
+      case terms.App(applicable, args) =>
         if (applicable.resultSort.isInstanceOf[FieldValueFunction]) {
           // In this case there are no args and the whole term is the snapshot, which returns a function
           quantFieldChunks(term)._2
@@ -546,10 +546,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
               else if (f.isPure)
                 wrap(s"${safeId(applicable.id)}" + args.tail.map(" " + rec(_, 100)).mkString(""), 100)
               else {
-                val heapLabelString = heapLabel match {
-                  case Some(label) => safeString(heapLabelMap(label))
-                  case None => "NO_HEAP"
-                }
+                val heapLabelString = ??? // TODO
                 wrap(s"${safeId(applicable.id)} $heapLabelString " + args.tail.map(rec(_, 100)).mkString(" "), 100)
               }
           }
