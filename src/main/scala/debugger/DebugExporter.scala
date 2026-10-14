@@ -300,13 +300,12 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
     // Framing axioms
     if (!fn.isPure) {
-      val argStringH1 = "h1" + argString.drop(1)
-      val argStringH2 = "h2 " + fn.formalArgs.map(_.name + "'").mkString(" ")
-      val footprint = fn.pres.filter(!_.isPure).map(translateExp(_, parenthesisLevel = 35, isFrameAxiom = true)).mkString(" \\<and> ")
+      val argString2 = "h'" + argString.drop(1)
+      val footprint = fn.pres.filter(!_.isPure).map(translateExp(_, parenthesisLevel = 10, isFrameAxiom = true)).mkString(" \\<and> ")
       strings += s"  assumes ${fn.name}_framing: \"" +
-        s"${fn.name}_pre $argStringH1 \\<and> ${fn.name}_pre $argStringH2"
+        s"${fn.name}_pre $argString \\<and> ${fn.name}_pre $argString2"
       strings += s"    \\<and> $footprint"
-      strings += s"    $META_ARR ${fn.name} $argStringH1 = ${fn.name} $argStringH2\""
+      strings += s"    $META_ARR ${fn.name} $argString = ${fn.name} $argString2\""
     }
   }
 
@@ -708,7 +707,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         val rPLevel = if (right.isInstanceOf[ast.And]) 34 else 35
         wrap(rec(left, lPLevel) + " \\<and> " + rec(right, rPLevel), 35)
       case ast.Implies(left, right) =>
-        val translation = translateExp(left, parenthesisLevel, rewrites, isFrameAxiom = false, variablePrime, resultString, oldHeapLabel) +
+        val translation = translateExp(left, 25, rewrites, isFrameAxiom = false, variablePrime, resultString, oldHeapLabel) +
           " \\<longrightarrow> " + rec(right, 25)
         wrap(translation, 25)
       case ast.MagicWand(left, right) => rec(left, 50) + " \\<longrightarrow> " + rec(right, 50) // TODO: remove?
@@ -737,7 +736,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
           val argString2 = loc.args.map(
             translateExp(_, parenthesisLevel, rewrites, isFrameAxiom, variablePrime = true, resultString)
           ).mkString(", ")
-          s"${loc.predicateName}_eq (h, $argString1) (h', $argString2)"
+          s"${loc.predicateName}_eq (h, $argString1) (h', $argString1)"
         } else {
           val argString = loc.args.map(rec(_, 100)).mkString(" ")
           wrap(s"${loc.predicateName} h $argString", 100)
@@ -768,7 +767,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.DebugLabelledOld(exp, oldLabel) =>
         translateExp(exp, parenthesisLevel, rewrites, isFrameAxiom, variablePrime, resultString, Some(oldLabel))
       case ast.Let(variable, exp, body) =>
-        s"let ${safeString(variable.name)} = ${rec(exp, 10)} in ${rec(body, 10)}"
+        wrap(s"let ${safeString(variable.name)} = ${rec(exp, 10)} in ${rec(body, 10)}", 10)
       case ast.Forall(vars, _, exp) =>
         val varRenames = vars.map(v => (v.name, cleanName(v)))
         val newRewrites = rewrites.addRenames(varRenames)
@@ -779,11 +778,11 @@ class Translator(val obl: ProofObligation, val filename: String) {
         wrap("\\<exists>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + rec(exp, 10), 10)
       case ast.LocalVar(name, _) =>
         val baseName = rewrites.varRenames.getOrElse(name, safeString(name))
-        if (variablePrime) baseName + "'" else baseName
+        baseName
       case ast.Result(_) => wrap(resultString.getOrElse("result"), 100)
       case ast.LocalVarWithVersion(name, _) =>
-        if (variablePrime) safeString(name) + "'"
-        else rewrites.varRenames.getOrElse(name, safeString(name))
+        // if (variablePrime) safeString(name) + "'"
+        rewrites.varRenames.getOrElse(name, safeString(name))
 
       case ast.FullPerm() => "1"
       case ast.NoPerm() => "0"
@@ -884,8 +883,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
   private def translateDebugNode(debugNode: AnyDebugNode, prefix: String = "", suffix: String = "",
                                 rewrites: Rewrites = basicRewrites,
                                 inAux: Boolean = false): Unit = {
-    // if (debugNode.description.isDefined && debugNode.description.get.contains("singleton-FVF"))
-    //   println(debugNode.id)
     debugNode match {
       case debugExp: DebugExp if debugExp.isInternal =>
         if (debugExp.description.exists(_.contains("singleton-FVF"))) {
@@ -1273,7 +1270,7 @@ object ExportUtils {
         val body2 = rec(body)
         body2 match {
           case _: ast.TrueLit => body2
-          case _ => ast.Exists(variables, triggers, exp = body2)(e.pos, e.info, e.errT)
+          case _ => ast.Forall(variables, triggers, exp = body2)(e.pos, e.info, e.errT)
         }
 
       case ast.FuncApp(funcname, args) =>

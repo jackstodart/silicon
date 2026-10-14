@@ -335,9 +335,11 @@ private trait LayeredPathConditionStackLike {
         case None => layerNonGlobals
       }
 
+      // The implication records the term that conditionalized assumes for this layer
       if (layerConditionals.nonEmpty && !implicationLHSExp.equals(TrueLit()()))
         conditionalTerms :+= DebugImplication(None, false, implicationLHS,
-          Some(implicationLHSExp), Some(implicationLHSExpNew), layerConditionals)
+          Some(implicationLHSExp), Some(implicationLHSExpNew), layerConditionals,
+          InsertionOrderedSet(Implies(implicationLHS, And(layer.nonGlobalAssumptions))))
       else
         conditionalTerms ++= layerConditionals
     }
@@ -399,7 +401,10 @@ private trait LayeredPathConditionStackLike {
     var globals = InsertionOrderedSet.empty[AnyDebugNode]
     var nonGlobals = InsertionOrderedSet.empty[AnyDebugNode]
 
-    for ((layer, layerNonGlobals) <- layers.zip(nonGlobalDebugExps(layers))) {
+    // The quantifications that quantified creates, one per layer, which the debug nodes record as their terms
+    val (_, layerQuantifications) = quantified(layers, quantifier, tQvars, tTriggers, name, isGlobal, ignore)
+
+    for (((layer, layerNonGlobals), quantification) <- layers.zip(nonGlobalDebugExps(layers)).zip(layerQuantifications)) {
       globals ++= layer.globalAssumptionDebugExps
 
       val branchConditionExp = layer.branchConditionExp
@@ -410,16 +415,16 @@ private trait LayeredPathConditionStackLike {
           } else {
             quantBody = InsertionOrderedSet(DebugImplication(description = None, isInternal = false, term = layer.branchCondition.get,
               originalExp = Some(branchConditionExp.get._1), finalExp = Some(branchConditionExp.get._2.get),
-              children = layerNonGlobals))
+              children = layerNonGlobals, terms = InsertionOrderedSet(quantification.body)))
           }
 
           val quantDebugExp = DebugQuantifier(description = None, isInternal = false, quantifier, qvars, tQvars,
-            triggers, tTriggers, InsertionOrderedSet(quantBody))
+            triggers, tTriggers, InsertionOrderedSet(quantBody), InsertionOrderedSet(quantification))
           nonGlobals += quantDebugExp
         } else {
           // TODO: Check why we end up here, is this just a backup?
           nonGlobals += DebugQuantifier(Some("quantifiedExp"), isInternal = false, quantifier, qvars, tQvars,
-            triggers, tTriggers, layerNonGlobals)
+            triggers, tTriggers, layerNonGlobals, InsertionOrderedSet(quantification))
         }
     }
 

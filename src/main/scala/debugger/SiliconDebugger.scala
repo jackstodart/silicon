@@ -1,6 +1,7 @@
 package viper.silicon.debugger
 
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.DebugGroupNode.termsOf
 import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.decider.{Cvc5ProverStdIO, RecordedPathConditions, Z3ProverStdIO}
 import viper.silicon.interfaces.state.Chunk
@@ -54,6 +55,12 @@ case class ProofObligation(s: State,
     }
     this.copy(assumptionsExp = newAssumptionsExp)
   }
+
+  def findAssumption(id: Int): Option[AnyDebugNode] =
+    assumptionsExp.iterator.map[Option[AnyDebugNode]] {
+      case ass: DebugAssumption[_] => Option.when(ass.id == id)(ass)
+      case group: DebugGroupNode[_] => group.getNodeWithId(id)
+    }.collectFirst { case Some(node) => node }
 
   private lazy val originalErrorInfo: String =
     s"Original Error: " +
@@ -366,7 +373,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
     obl.preambleAssumptions foreach (a => v.decider.prover.assumeAxioms(a.terms, a.description))
 
     println("Initializing prover...")
-    obl.assumptionsExp foreach (debugExp => v.decider.debuggerAssume(debugExp.getAllTerms(new mutable.HashSet()), debugExp))
+    obl.assumptionsExp foreach (debugExp => v.decider.debuggerAssume(termsOf(debugExp), debugExp))
     obl.copy(v = v)
   }
 
@@ -462,18 +469,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
     val indexOpt = userInput.trim.toIntOption
     indexOpt match {
       case Some(id) =>
-        val toSearch = obl.assumptionsExp.toSeq
-        var found: Option[AnyDebugNode] = None
-        var i = 0
-        while (found.isEmpty && i < toSearch.size) {
-          toSearch(i) match {
-            case ass: DebugAssumption[_] => if (ass.id == id) found = Some(ass)
-            case group: DebugGroupNode[_] => found = group.getNodeWithId(id)
-          }
-          i += 1
-        }
-
-        found match {
+        obl.findAssumption(id) match {
           case None => println("Assumption not found")
           case Some(_: DebugAssumption[_]) => println("Assumption has no children")
           case Some(ass: DebugGroupNode[_]) =>
@@ -491,8 +487,28 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
     println(s"Enter the assumptions you want to remove:")
     val userInput = readLine()
     val indices = userInput.split(",").map(s => s.trim.toIntOption).filter(o => o.isDefined).map(i => i.get).toSeq
-    println(s"Removing assumptions with IDs ${indices.mkString(",")}")
-    val oblTmp = obl.removeAssumptions(indices)
+
+    /* Groups record the terms that were actually assumed, so a node can only be removed if its terms were
+     * assumed as they are, rather than as part of a larger term (e.g. under an implication or quantifier). */
+    val termsBefore = DebugGroupNode.termsOf(obl.assumptionsExp)
+    val removable = indices.flatMap(id => obl.findAssumption(id) match {
+      case None =>
+        println(s"No assumption with ID $id")
+        None
+      case Some(node) if !DebugGroupNode.termsOf(Seq(node)).subsetOf(termsBefore) =>
+        println(s"Assumption $id was assumed as part of a larger assumption (e.g. under an implication or " +
+          s"quantifier) and cannot be removed on its own; remove the enclosing assumption instead")
+        None
+      case Some(node) => Some(id -> node)
+    })
+    println(s"Removing assumptions with IDs ${removable.map(_._1).mkString(",")}")
+    val oblTmp = obl.removeAssumptions(removable.map(_._1))
+
+    val termsAfter = DebugGroupNode.termsOf(oblTmp.assumptionsExp)
+    removable.foreach { case (id, node) =>
+      if (DebugGroupNode.termsOf(Seq(node)).exists(termsAfter.contains))
+        println(s"Assumption $id is also assumed by another assumption, which still assumes it")
+    }
     initVerifier(oblTmp, obl.v.decider.prover.name, lastSolverOptions)
   }
 

@@ -300,12 +300,12 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
                             isInternal: Boolean,
                             isDefinition: Boolean,
                             enforceAssumption: Boolean): Unit = {
-      val filteredTerms = if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue)
+      val filteredTerms = InsertionOrderedSet(if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue))
       if (filteredTerms.nonEmpty) {
-        assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTerms), isDefinition)
+        assumeWithoutSmokeChecks(filteredTerms, isDefinition)
         if (debugMode && debugGroup.isDefined) {
-          val children = filteredTerms.map(DebugExp(_, None, None, isInternal))
-          addDebugNode(debugGroup.get(InsertionOrderedSet(children)))
+          val children = filteredTerms.map[AnyDebugNode](DebugExp(_, None, None, isInternal))
+          addDebugNode(debugGroup.get(children).withTerms(filteredTerms))
         }
       }
     }
@@ -328,9 +328,10 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       if (debugMode) {
         val filteredTermExps = terms.zip(exps.get).filterNot(te => isKnownToBeTrue(te._1))
         if (filteredTermExps.nonEmpty) {
-          assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTermExps.map(_._1)))
+          val filteredTerms = InsertionOrderedSet(filteredTermExps.map(_._1))
+          assumeWithoutSmokeChecks(filteredTerms)
           val children = filteredTermExps.map(te => DebugExp(te._1, Some(te._2), None, isInternal = false))
-            addDebugNode(debugGroup.get(InsertionOrderedSet(children)))
+          addDebugNode(debugGroup.get(InsertionOrderedSet(children)).withTerms(filteredTerms))
         }
       }
       else
@@ -341,11 +342,12 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
     def assume(terms: Iterable[Term],
                debugGroup: Option[DebugGroupNode[_]],
                enforceAssumption: Boolean): Unit = {
-      val filteredTerms = if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue)
+      val filteredTerms = InsertionOrderedSet(if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue))
       if (filteredTerms.nonEmpty) {
-        assumeWithoutSmokeChecks(InsertionOrderedSet(filteredTerms))
+        assumeWithoutSmokeChecks(filteredTerms)
+        // Record the terms actually assumed, which can differ from those of the group's children
         if (debugMode && debugGroup.get.children.nonEmpty)
-          addDebugNode(debugGroup.get)
+          addDebugNode(debugGroup.get.withTerms(filteredTerms))
       }
     }
 
@@ -355,7 +357,7 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
 
     // Note, definitions are always assumed to be internal
     def assumeDefinition(terms: Iterable[Term], debugGroup: Option[PreDebugGroup]): Unit = {
-      assumeGroup(terms, debugGroup, isInternal = false, isDefinition = true, enforceAssumption = false)
+      assumeGroup(terms, debugGroup, isInternal = true, isDefinition = true, enforceAssumption = false)
     }
 
     // Used in the interactive debugger session
