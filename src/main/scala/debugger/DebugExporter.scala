@@ -207,11 +207,25 @@ class Translator(val obl: ProofObligation, val filename: String) {
       strings += "locale Fields ="
       val fieldLength = program.fields.map(_.name.length).max
       for (fld <- program.fields) {
-        val nameString = padString(safeString(fld.name), fieldLength)
-        strings += s"  fixes $nameString :: \"Heap $FN_ARR ref $FN_ARR ${translateType(fld.typ)}\""
+        val nameString = padString(fld.name, fieldLength)
+        val notation = s"(\"_:_\\<cdot>${fld.name}\" [1000, 1000] 999)"
+        strings += s"  fixes $nameString :: \"Heap $FN_ARR ref $FN_ARR ${translateType(fld.typ)}\" $notation"
       }
       strings += "\n"
     }
+  }
+
+  // Field lookup using the notation declared in defineFields: `heap:ref\<cdot>field`.
+  // Heap and ref must be atomic (priority 1000), so callers should translate the ref with parenthesisLevel 100.
+  private def fieldAccess(field: String, heap: String, ref: String): String =
+    s"$heap:$ref\\<cdot>$field"
+
+  // Heap labels "debug@N" are written as h with N in subscript, e.g. "debug@12" becomes "h\<^sub>1\<^sub>2".
+  // Other labels (e.g. "old", user labels) are kept as is.
+  private val DebugHeapLabel = "debug@(\\d+)".r
+  private def heapName(label: String): String = label match {
+    case DebugHeapLabel(n) => "h" + n.map(d => s"\\<^sub>$d").mkString
+    case _ => safeString(label)
   }
 
   private def translateMembers(): Unit = {
@@ -349,8 +363,15 @@ class Translator(val obl: ProofObligation, val filename: String) {
   private def generateLemma(): Unit = {
     strings += "text \\<open>Proof obligation\\<close>\n"
     strings += "locale Program ="
-    if (program.fields.nonEmpty) strings += "  Fields +"
-    strings += translationOrder.map { case (mSeq, _) => s"  ${localeName(mSeq)}" }.mkString(" +\n")
+
+    val locales = mutable.Buffer[String]()
+    if (program.fields.nonEmpty) locales += "  Fields"
+    translationOrder.foreach { case (mSeq, _) => locales += "  " + localeName(mSeq) }
+    if (locales.isEmpty)
+      strings += "  assumes True (* no program definitions *)"
+    else
+      strings += locales.mkString(" +\n") + '\n'
+
     strings += "\ncontext Program\nbegin\n\nlemma"
     translateStore()
     translateHeaps()
@@ -389,16 +410,17 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
-  // NOTE: assumes permission is positive
-  private def translateBasicFieldChunk(chunk: BasicChunk, heapLabel: String): String = {
-    assert(chunk.resourceID == FieldID, "translateBasicFieldChunk got the wrong chunk...")
+  // Returns the location of a chunk, e.g. "heap:x.f".
+  // NOTE: assumes permission is positive.
+  private def basicFieldChunkLocation(chunk: BasicChunk, heapLabel: String): String = {
+    assert(chunk.resourceID == FieldID, "basicFieldChunkLocation got the wrong chunk...")
     val ref = chunk.argsExp match {
       // I think it should always have an argsExp ???
       case Some(args) => translateExp(args.head, parenthesisLevel = 100)
       case None => translateTerm(chunk.args.head, parenthesisLevel = 100)
     }
     val domHeapLabel = heapLabelMap.getOrElse(heapLabel, "missing:"+heapLabel)
-    s"${chunk.id.name} ${safeString(domHeapLabel)} $ref"
+    fieldAccess(chunk.id.name, heapName(domHeapLabel), ref)
   }
 
   private def translateChunk(c: Chunk, heapLabel: String, idx: Int): Unit = {
@@ -413,23 +435,23 @@ class Translator(val obl: ProofObligation, val filename: String) {
             assert(basic.args.length == 1, "Method translateChunk expected FieldChunk to have exactly one arg.")
               val permCondition = permCondSimp(basic.perm)
               val condString = if (permCondition == terms.True) "" else translateTerm(permCondition) + s" $META_ARR "
-              val thisChunk = translateBasicFieldChunk(basic, domLabel)
+              val thisChunk = basicFieldChunkLocation(basic, domLabel)
               val valString = basicRewrites.fieldReplacements.get(basic.snap) match {
-                case Some(kv) => (translateBasicFieldChunk _).tupled(kv)
+                case Some(kv) => (basicFieldChunkLocation _).tupled(kv)
                 case None => translateTerm(basic.snap)
               }
               val chunk = s"$condString$thisChunk = $valString"
-              strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunk\""
+              strings += s"  assumes ${heapName(heapLabel)}_$idx: \"$chunk\""
           case PredicateID =>
-            val chunkString = safeString(basic.id.name) + s" ${safeString(domLabel)} " +
+            val chunkString = safeString(basic.id.name) + s" ${heapName(domLabel)} " +
               basic.args.map(translateTerm(_, parenthesisLevel = 100)).mkString(" ")
             val predEq = if (predSnapInOtherHeap(basic.snap)) {
               val (otherChunk, otherLabel) = predicateChunks(basic.snap)
-              val thisTuple = s"(${safeString(domLabel)}, ${basic.args.map(translateTerm(_)).mkString(", ")})"
-              val otherTuple = s"(${safeString(otherLabel)}, ${otherChunk.args.map(translateTerm(_)).mkString(", ")})"
+              val thisTuple = s"(${heapName(domLabel)}, ${basic.args.map(translateTerm(_)).mkString(", ")})"
+              val otherTuple = s"(${heapName(otherLabel)}, ${otherChunk.args.map(translateTerm(_)).mkString(", ")})"
               s" \\<and> ${basic.id.name}_eq $thisTuple $otherTuple"
             } else ""
-            strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunkString$predEq\""
+            strings += s"  assumes ${heapName(heapLabel)}_$idx: \"$chunkString$predEq\""
         }
       case qfc: QuantifiedFieldChunk =>
         qfc.singletonRcvrExp match {
@@ -446,8 +468,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
               case Some((_, str)) => str + " " + rcvrString
               case None => translateTerm(qfc.fvf) + " " + rcvrString
             }
-            val eqString = s"${qfc.id.name} ${safeString(domLabel)} $rcvrString = $default"
-            strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$permCondString$eqString\""
+            val eqString = s"${fieldAccess(qfc.id.name, heapName(domLabel), rcvrString)} = $default"
+            strings += s"  assumes ${heapName(heapLabel)}_$idx: \"$permCondString$eqString\""
           case None =>
             val quantifiedVars = qfc.invs.headOption.map(_.qvarExps.getOrElse(Seq())).getOrElse(Seq())
             val newRenamings = quantifiedVars.map(v => (v.name, cleanName(v)))
@@ -461,26 +483,26 @@ class Translator(val obl: ProofObligation, val filename: String) {
               case ast.TrueLit() => ""
               case e => translateExp(e, oldHeapLabel = Some(domLabel), rewrites = newRewrites) + " \\<longrightarrow> "
             }
-            val field = s"${qfc.id.name} ${safeString(domLabel)} $freeRef"
+            val field = fieldAccess(qfc.id.name, heapName(domLabel), freeRef)
             val default = quantFieldChunks.get(qfc.fvf) match {
               case Some((_, snapString)) => s"$snapString $freeRef"
               case None => s"${qfc.id}_${translateTerm(qfc.fvf, rewrites = newRewrites)} $freeRef"
             }
             val chunkString = s"\\<And>$varString. $condString\n    let r = $rcvr in $permCond$field = $default"
-            strings += s"  assumes ${safeString(heapLabel)}_$idx: \"$chunkString\""
+            strings += s"  assumes ${heapName(heapLabel)}_$idx: \"$chunkString\""
         }
       case qpc: QuantifiedPredicateChunk =>
         val condString = translateTerm(terms.And(qpc.condition, permCondSimp(qpc.permValue)))
         val argList = qpc.quantifiedVars.map(_.id.name)
         val quantifyString = "\\<And>" + argList.mkString(" ")
-        val predString = s"$quantifyString. $condString $META_ARR ${qpc.id.name} ${safeString(domLabel)} ${argList.mkString(" ")}"
-        strings += s"  assumes ${safeString(heapLabel)}_${idx}a: \"$predString\""
+        val predString = s"$quantifyString. $condString $META_ARR ${qpc.id.name} ${heapName(domLabel)} ${argList.mkString(" ")}"
+        strings += s"  assumes ${heapName(heapLabel)}_${idx}a: \"$predString\""
         if (predSnapInOtherHeap(qpc.snapshotMap)) {
           val (otherChunk, otherLabel) = predicateChunks(qpc.snapshotMap)
-          val thisTuple = s"($domLabel, ${argList.mkString(", ")})"
-          val otherTuple = s"($otherLabel, ARGS???)"
+          val thisTuple = s"(${heapName(domLabel)}, ${argList.mkString(", ")})"
+          val otherTuple = s"(${heapName(otherLabel)}, ARGS???)"
           val eqString = s"${qpc.id.name}(args) \\<and> ${qpc.id.name}_eq $thisTuple $otherTuple"
-          strings += s"  assumes ${safeString(heapLabel)}_${idx}b: \"$condString $META_ARR $eqString\""
+          strings += s"  assumes ${heapName(heapLabel)}_${idx}b: \"$condString $META_ARR $eqString\""
         }
     }
 
@@ -517,7 +539,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
     if (rewrites.fieldReplacements contains term) {
       val (chunk, heapLabel) = rewrites.fieldReplacements(term)
-      return wrap(translateBasicFieldChunk(chunk, heapLabel), 100)
+      return wrap(basicFieldChunkLocation(chunk, heapLabel), 100)
     }
 
     term match {
@@ -680,7 +702,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       wrap(rec(left, pLevel) + s" $op " + rec(right, pLevel), pLevel)
     }
     val domOldHeapLabel = oldHeapLabel match {
-      case Some(label) => safeString(heapLabelMap(label.takeWhile(_ != '#')))
+      case Some(label) => heapName(heapLabelMap(label.takeWhile(_ != '#')))
       case _ => "h"
     }
 
@@ -727,7 +749,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         if (isFrameAxiom) {
           val loc1 = rec(loc.rcv, 100)
           val loc2 = translateExp(loc.rcv, 100, rewrites, isFrameAxiom, variablePrime = true, resultString)
-          s"${loc.field.name} h $loc1 = ${loc.field.name} h' $loc2"
+          s"${fieldAccess(loc.field.name, "h", loc1)} = ${fieldAccess(loc.field.name, "h'", loc2)}"
         }
         else "undefined"
       case ast.PredicateAccessPredicate(loc, _) =>
@@ -754,8 +776,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
         wrap(funcname + " " + args.map(rec(_, 100)).mkString(" "), 100)
       case ast.FieldAccess(rcv, field) =>
         val heapString = (for (oldLabel <- oldHeapLabel; keyLabel <- heapLabelMap.get(oldLabel.takeWhile(_ != '#')))
-          yield safeString(keyLabel)).getOrElse("h")
-          wrap(s"${field.name} $heapString ${rec(rcv, 100)}", 100)
+          yield heapName(keyLabel)).getOrElse("h")
+          wrap(fieldAccess(field.name, heapString, rec(rcv, 100)), 100)
 
       case ast.CondExp(cond, thn, els) => "(if " + rec(cond, 10) + " then " + rec(thn, 10) +
         " else " + rec(els, 10) + ")"
@@ -905,7 +927,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         val function = program.findFunction(debugPre.funExp.funcname)
         if (function.pres.nonEmpty) {
           val domHeapLabel = if (!function.isPure)
-            safeString(heapLabelMap.getOrElse(debugPre.heapLabel, debugPre.heapLabel)) + " "
+            heapName(heapLabelMap.getOrElse(debugPre.heapLabel, debugPre.heapLabel)) + " "
           else ""
           val preconditionString = s"${debugPre.funExp.funcname}_pre $domHeapLabel" +
             debugPre.finalArgs.get.map(translateExp(_, parenthesisLevel = 100, rewrites = rewrites)).mkString(" ")
