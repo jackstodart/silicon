@@ -14,7 +14,7 @@ import viper.silicon.common.Mergeable
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.decider.{PathConditionStack, RecordedPathConditions}
 import viper.silicon.interfaces.state.GeneralChunk
-import viper.silicon.state.State.{DebugOldHeaps, OldHeaps, TemporaryRecord}
+import viper.silicon.state.State.{DebugOldHeaps, HeapLabel, OldHeaps, TemporaryRecord}
 import viper.silicon.state.terms.{Term, Var}
 import viper.silicon.interfaces.state.Chunk
 import viper.silicon.state.terms.predef.`?r`
@@ -211,19 +211,20 @@ case class ExecStmt(stmt: ast.Stmt) extends HeapCause
 case class EvalExp(exp: ast.Exp) extends HeapCause
 
 case class HeapRecord(heap: Heap,
-                      parentLabel: String,
+                      parentLabel: HeapLabel,
                       cause: HeapCause,
                       branchConds: Seq[(ast.Exp, Term)],
-                      intermediateHeaps: Map[String, IntermediateHeapRecord])
+                      intermediateHeaps: Map[HeapLabel, IntermediateHeapRecord])
 
 case class IntermediateHeapRecord(heap: Heap,
                                   intermediateCause: Option[HeapCause],
                                   newBranchConds: Seq[(ast.Exp, Term)])
 
 object State {
-  type OldHeaps = Map[String, Heap]
-  type DebugOldHeaps = Map[String, HeapRecord]
-  type TemporaryRecord = (String, HeapCause, PathConditionStack, Map[String, IntermediateHeapRecord])
+  type HeapLabel = String
+  type OldHeaps = Map[HeapLabel, Heap]
+  type DebugOldHeaps = Map[HeapLabel, HeapRecord]
+  type TemporaryRecord = (HeapLabel, HeapCause, PathConditionStack, Map[HeapLabel, IntermediateHeapRecord])
 
   val OldHeaps = Map
 

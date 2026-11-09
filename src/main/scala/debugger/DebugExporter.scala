@@ -10,7 +10,7 @@ import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.interfaces.state.Chunk
 import viper.silicon.{Map, resources}
 import viper.silicon.resources.{FieldID, PredicateID}
-import viper.silicon.state.State.{DebugOldHeaps, TemporaryRecord}
+import viper.silicon.state.State.{DebugOldHeaps, HeapLabel, TemporaryRecord}
 import viper.silicon.state._
 import viper.silicon.state.terms.sorts.FieldValueFunction
 import viper.silicon.state.terms.{Sort, Term, sorts}
@@ -78,43 +78,49 @@ object DebugExporter {
   }
 }
 
-// Things to rewrite as you translate terms
-case class Rewrites(varRenames: immutable.Map[String, String],
-                    fieldReplacements: immutable.Map[Term, (BasicChunk, String)]) {
-  def addRename(s1: String, s2: String): Rewrites =
-    Rewrites(this.varRenames + (s1 -> s2), this.fieldReplacements)
-
-  def addRenames(rs: Seq[(String, String)]): Rewrites = {
-    Rewrites(this.varRenames ++ rs.toMap, this.fieldReplacements)
-  }
-}
-
-object Rewrites {
-  def empty = Rewrites(Map.empty, Map.empty)
-}
-
 /**
- * Translates Silver expressions and Silicon terms into Isabelle syntax.
- * Takes abstraction maps and renamings to change the translation.
- */
+  * Generates an Isabelle lemma, corresponding to the proof obligation.
+  * The result is stored in `strings`, filename is only used to title the theory.
+  */
 class Translator(val obl: ProofObligation, val filename: String) {
-  var strings = ArrayBuffer[String]() // Strings to be written to .thy file
-  private var printedAssumptions = Set[String]()
-  private val program = obl.s.program
   private val state = obl.s
+  private val program = obl.s.program
+  private val store = obl.s.g
   private val domains = program.domains.filter(d => !d.name.endsWith("WellFoundedOrder"))
-  private val translationOrder: Seq[(MemberSeq, Seq[MemberSeq])] = memberTranslationSequence(program)
-  private val currentHeapLabel: String = obl.v.getDebugHeapLabel(obl.s).getOrElse("currentHeapMissing")
+  private val membersInTranslationOrder: Seq[(MemberSeq, Seq[MemberSeq])] = memberTranslationSequence(program)
+
+  var strings = ArrayBuffer[String]() // Strings to be written to .thy file
+  // Used to remove duplicates. After renaming/replacement some PCs might collide.
+  private val printedAssumptions = mutable.Set[String]()
 
   // Maps each debug heap label to its dominant heap label
   private val heapLabelMap: Map[String, String] =
     ExportUtils.heapLabelMap(state.debugOldHeaps, state.temporaryHeapRecord)
+  private val currentHeapLabel: String = obl.v.getDebugHeapLabel(obl.s).getOrElse("currentHeapMissing")
+  private val currentDomHeapLabel: String = heapLabelMap.getOrElse(currentHeapLabel, currentHeapLabel)
+  private val isabelleCurrentHeap = "h\\<^sub>c"
+  private val DebugHeapLabel = "debug@(\\d+)".r
 
-  private val (basicRewrites: Rewrites,
-               predicateChunks: immutable.Map[Term, (BasicChunk, String)],
-               quantFieldChunks: immutable.Map[Term, (QuantifiedFieldChunk, String)],
-               quantPredChunks: immutable.Map[Term, (QuantifiedPredicateChunk, String)]) = {
-    // Add local vars from the store
+  // Definitions of fresh variables Silicon introduced, keyed by the fresh variable's term.
+  // Definitions are only collected from plain groups, not from under implications or quantifiers,
+  // since there they would only hold conditionally.
+  private val freshVarDefinitions: immutable.Map[Term, FreshVarDefinition] = {
+    def collect(node: AnyDebugNode): Iterable[(Term, FreshVarDefinition)] = node match {
+      case varDef: FreshVarDefinition => Some(varDef.freshVarTerm -> varDef)
+      case group: DebugGroup => group.children.flatMap(collect)
+      case invariant: DebugInvariant => invariant.children.flatMap(collect)
+      case _ => None
+    }
+    obl.assumptionsExp.toSeq.flatMap(collect).toMap
+  }
+
+  private def isFreshVar(term: Term): Boolean =
+    freshVarDefinitions.contains(term)
+
+  // Maps SSA versions of local variables to a current store variable
+  // If x -> x_2; y -> y_3, z -> y_3
+  // Then result maps x_2 -> x; y_3 -> y
+  private val storeRenames: immutable.Map[String, String] = {
     val varRenames = mutable.Map[String, String]()
     for ((lVar, term) <- obl.s.g.termValues) {
       term match {
@@ -127,57 +133,76 @@ class Translator(val obl: ProofObligation, val filename: String) {
             varRenames(nameWithoutVersion(id.name)) = safeString(lVar.name)
           }
         case _ =>
-          // TODO: If the store var is a constant, there is no term to rewrite, but I should check this information
-          //  occurs in the assumptions, or we need to add it to the lemma
-          // println(s"Store entry is not a Var: $lVar -> $term, ${lVar.getClass}")
       }
     }
-    // Add location variables from the heap
-    val fields = mutable.Map[Term, (BasicChunk, String)]()
-    val predicates = mutable.Map[Term, (BasicChunk, String)]()
+    varRenames.toMap
+  }
+
+  // Debug heaps in the order they were created. debugOldHeaps is a Map, so its iteration order says
+  // nothing, but "debug@N" labels are numbered in creation order. Other labels ("old", user labels)
+  // name heaps that are also recorded under a "debug@N" label, so they come last.
+  private val heapsInCreationOrder: Seq[(HeapLabel, HeapRecord)] = {
+    val (debugHeaps, labelledHeaps) = state.debugOldHeaps.toSeq.partition(h => DebugHeapLabel.matches(h._1))
+    debugHeaps.sortBy { case (DebugHeapLabel(n), _) => n.toInt } ++ labelledHeaps.sortBy(_._1)
+  }
+
+  /** `fieldVarDefinitions` maps terms that are fresh variable definitions to their first heap occurrence.
+    * When printing, these terms should all be replaced by this field chunk.
+    * `predicateChunks` maps predicate snapshots to their first heap occurrence.
+    * `qfcSnapMapRenamings` maps snapshot maps to their first heap occurrence, and a renaming of the snapshot map that
+    *   includes the field name. This does not record singleton QFCs.
+    * `quantPredChunks` maps predicate snapshot maps to their first heap occurrence. Currently not used.
+    * `usedVarDefinitions` notes fresh variable definitions that do not need to be printed again as a PC
+    */
+  private val (fieldVarDefinitions: immutable.Map[Term, (BasicChunk, HeapLabel)],
+               predicateChunks: immutable.Map[Term, (BasicChunk, HeapLabel)],
+               qfcSnapMapRenamings: immutable.Map[Term, (QuantifiedFieldChunk, String)],
+               singletonQFCs: immutable.Map[Term, (QuantifiedFieldChunk, HeapLabel)],
+               quantPredChunks: immutable.Map[Term, (QuantifiedPredicateChunk, String)],
+               usedVarDefinitions: immutable.Set[FreshVarDefinition]) = {
+    val fields = mutable.Map[Term, (BasicChunk, HeapLabel)]()
+    val predicates = mutable.Map[Term, (BasicChunk, HeapLabel)]()
     val quantFields = mutable.Map[Term, (QuantifiedFieldChunk, String)]()
     val qfcCounter: mutable.Map[String, Int] = mutable.Map(program.fields.map(_.name).map((_, 0)): _*)
-    val quantPreds = mutable.Map[Term, (QuantifiedPredicateChunk, String)]()
-    for ((label, record) <- state.debugOldHeaps.toList.reverse) {
+    val singletons = mutable.Map[Term, (QuantifiedFieldChunk, HeapLabel)]()
+    val quantPredicates = mutable.Map[Term, (QuantifiedPredicateChunk, HeapLabel)]()
+    val usedDefs = mutable.Set[FreshVarDefinition]()
+
+    for ((label, record) <- heapsInCreationOrder) {
       for (chunk <- record.heap.values) {
         chunk match {
-          case basic: BasicChunk =>
-            basic.resourceID match {
-              // If the chunk is a basic field access, with a symbolic variable, add rewriting
-              case resources.FieldID =>
-                basic.snap match {
-                  case terms.SortWrapper(_: terms.Var, _)
-                       | terms.SortWrapper(_: terms.First, _)
-                       | terms.SortWrapper(_: terms.Second, _)
-                    if basic.snap.toString.contains("$t")
-                    && !fields.contains(basic.snap)
-                    && permIsPositive(basic.perm) =>
-                    fields += basic.snap -> (basic, label)
-                  case _ =>
-                }
-              case resources.PredicateID =>
-                if (!(predicates contains basic.snap) && permIsPositive(basic.perm)) {
-                  predicates += basic.snap -> (basic, label)
-                }
+          case bfc: BasicChunk if bfc.resourceID == FieldID =>
+            // If the chunk's term is a fresh variable, add it to the replacements
+            if ((isFreshVar(bfc.snap)) && !(fields contains bfc.snap) && permIsPositive(bfc.perm)) {
+              fields += bfc.snap -> (bfc, label)
+              usedDefs += freshVarDefinitions(bfc.snap)
             }
-          case qfc: QuantifiedFieldChunk =>
-            // TODO: It looks like this is completely useless, I should only take this for singletons
+          case bpc: BasicChunk if bpc.resourceID == PredicateID =>
+            if (!(predicates contains bpc.snap) && permIsPositive(bpc.perm))
+              predicates += bpc.snap -> (bpc, label)
+          case qfc: QuantifiedFieldChunk if qfc.singletonRcvr.isEmpty =>
             if (!(quantFields contains qfc.snapshotMap)) {
               val field = qfc.id.name
               val mapLabel = s"${field}Map${qfcCounter(field)}"
               qfcCounter(field) = qfcCounter(field) + 1
               quantFields += (qfc.snapshotMap -> (qfc, mapLabel))
             }
+          case qfc: QuantifiedFieldChunk if qfc.singletonRcvr.isDefined =>
+            if (!(singletons contains qfc.singletonRcvr.get)) {
+              // TODO: I don't check permission yet, not sure if we have to
+              singletons += qfc.snapshotMap -> (qfc, label)
+            }
           case qpc: QuantifiedPredicateChunk =>
-            if (!(quantPreds contains qpc.snapshotMap))
-              quantPreds += (qpc.snapshotMap -> (qpc, label))
+            quantPredicates += (qpc.snapshotMap -> (qpc, label))
           case _ =>
-            println("Other chunk: " + chunk.toString)
         }
       }
     }
-    (Rewrites(varRenames.toMap, fields.toMap), predicates.toMap, quantFields.toMap, quantPreds.toMap)
+    (fields.toMap, predicates.toMap, quantFields.toMap, singletons.toMap, quantPredicates.toMap, usedDefs.toSet)
   }
+
+  private val fieldReplacementsByName: immutable.Map[String, (BasicChunk, String)] =
+    fieldVarDefinitions.collect { case (terms.Var(id, _, _), loc) => nameWithoutVersion(id.name) -> loc }
 
   def translateObligation(): Unit = {
     strings += s"theory $filename\n"
@@ -220,19 +245,54 @@ class Translator(val obl: ProofObligation, val filename: String) {
   private def fieldAccess(field: String, heap: String, ref: String): String =
     s"$heap:$ref\\<cdot>$field"
 
-  // Heap labels "debug@N" are written as h with N in subscript, e.g. "debug@12" becomes "h\<^sub>1\<^sub>2".
-  // Other labels (e.g. "old", user labels) are kept as is.
-  private val DebugHeapLabel = "debug@(\\d+)".r
-  private def heapName(label: String): String = label match {
+  // Predicate notation declared in declarePredicate: `heap:P(arg1, ..., argN)`, e.g. "_:list'(_,/ _')".
+  // The heap is atomic (priority 1000); the arguments are enclosed by the parentheses, so they can be any term.
+  private def predicateNotation(pred: ast.Predicate): String = {
+    val argSlots = pred.formalArgs.map(_ => "_").mkString(",/ ")
+    val priorities = (1000 +: pred.formalArgs.map(_ => 0)).mkString(", ")
+    s"(\"_:${pred.name}'($argSlots')\" [$priorities] 999)"
+  }
+
+  // Predicate instance using the notation declared in declarePredicate: `heap:P(arg1, ..., argN)`.
+  // The heap must be atomic; the args need no parentheses.
+  private def predicateAccess(pred: String, heap: String, args: Seq[String]): String =
+    s"$heap:$pred(${args.mkString(", ")})"
+
+  // P_eq states that two heaps agree on the footprint of the predicate instance P(args).
+  // It takes the two heaps, then the arguments as a tuple if there are several: `P_eq h h' (x, y)`.
+  // A single argument is passed directly (`P_eq h h' x`), so it must be atomic: translate it with
+  // eqArgLevel, which gives parenthesisLevel 100 for one argument and 0 for tuple components.
+  private def predicateEq(pred: String, heap1: String, heap2: String, args: Seq[String]): String = args match {
+    case Seq() => s"${pred}_eq $heap1 $heap2"
+    case Seq(arg) => s"${pred}_eq $heap1 $heap2 $arg"
+    case _ => s"${pred}_eq $heap1 $heap2 (${args.mkString(", ")})"
+  }
+
+  private def eqArgLevel(numArgs: Int): Int = if (numArgs == 1) 100 else 0
+
+  private def predicateEqType(pred: ast.Predicate): String = {
+    val argTypes = pred.formalArgs.map(a => translateType(a.typ))
+    val argType = argTypes match {
+      case Seq() => ""
+      case Seq(t) => s"$t $FN_ARR "
+      case _ => s"${argTypes.mkString(" \\<times> ")} $FN_ARR "
+    }
+    s"Heap $FN_ARR Heap $FN_ARR ${argType}bool"
+  }
+
+  // Debug labels "debug@N" are written as h_N. Named labels are kept as is.
+  // The current heap (or any label whose dominant heap is the current heap) is written as isabelleCurrentHeap.
+  private def printHeapLabel(label: String): String = label match {
+    case l if l == currentHeapLabel || l == currentDomHeapLabel => isabelleCurrentHeap
     case DebugHeapLabel(n) => "h" + n.map(d => s"\\<^sub>$d").mkString
-    case _ => safeString(label)
+    case _ => label
   }
 
   private def translateMembers(): Unit = {
     strings += "text \\<open>Translate domains, functions and predicates\\<close>\n"
 
-    for ((mSeq, deps) <- translationOrder) {
-      val depLocales = (if (heapDepMemSeq(mSeq)) "\n  Fields +" else "") +
+    for ((mSeq, deps) <- membersInTranslationOrder) {
+      val depLocales = (if (memberSeqIsHeapDep(mSeq)) "\n  Fields +" else "") +
         deps.map(m => s"\n  ${localeName(m)} +").mkString("")
       strings += s"locale ${localeName(mSeq)} =" + depLocales
       translateMemberSeq(mSeq)
@@ -241,24 +301,25 @@ class Translator(val obl: ProofObligation, val filename: String) {
     strings += ""
   }
 
-  private def heapDepMemSeq(seq: MemberSeq): Boolean = {
-    seq.exists {
+  // Whether any member in the sequence is heap dependent
+  private def memberSeqIsHeapDep(members: MemberSeq): Boolean = {
+    members.exists {
       case DomainName(_) => false
       case FunctionName(name) => !program.findFunction(name).isPure
-      case PredicateName(_) => true
+      case PredicateName(name) => !program.findPredicate(name).body.exists(_.isPure)
     }
   }
 
   // Translate a single collection of inter-dependent members
-  private def translateMemberSeq(memSeq: MemberSeq): Unit = {
-    for (member <- memSeq) {
+  private def translateMemberSeq(members: MemberSeq): Unit = {
+    for (member <- members) {
       member match {
         case DomainName(name) => declareDomain(program.findDomain(name))
         case FunctionName(name) => declareFunction(program.findFunction(name))
         case PredicateName(name) => declarePredicate(program.findPredicate(name))
       }
     }
-    for (member <- memSeq) {
+    for (member <- members) {
       member match {
         case DomainName(name) => defineDomain(program.findDomain(name))
         case FunctionName(name) => defineFunction(program.findFunction(name))
@@ -325,27 +386,24 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
   private def declarePredicate(pred: ast.Predicate): Unit = {
     val typeString = s"Heap $FN_ARR " + pred.formalArgs.map(a => translateType(a.typ) + s" $FN_ARR ").mkString("")
-    strings += s"  fixes ${pred.name} :: \"${typeString}bool\""
-    val typeTuple = s"Heap \\<times> ${pred.formalArgs.map(a => translateType(a.typ)).mkString(" \\<times> ")}"
-    strings += s"  fixes ${pred.name}_eq :: \"$typeTuple $FN_ARR $typeTuple $FN_ARR bool\""
+    strings += s"  fixes ${pred.name} :: \"${typeString}bool\" ${predicateNotation(pred)}"
+    strings += s"  fixes ${pred.name}_eq :: \"${predicateEqType(pred)}\""
   }
 
   private def definePredicate(pred: ast.Predicate): Unit = {
     pred.getPureFragment match {
       case Some(exp) =>
-        val argString = "h " + pred.formalArgs.map(_.name).mkString(" ")
+        val predString = predicateAccess(pred.name, "h", pred.formalArgs.map(_.name))
         val bodyString = translateExp(exp, parenthesisLevel = 51)
         strings += s"  assumes unfold_${pred.name}: \"" +
-          s"${pred.name} $argString $META_ARR\n    $bodyString\""
+          s"$predString $META_ARR\n    $bodyString\""
       case None =>
     }
     pred.getAccessFragment match {
       case Some(exp) =>
-        val varsString = "h h' " + pred.formalArgs.map(a => s"${a.name} ${a.name}'").mkString(" ")
-        val argString1 = s"(h, ${pred.formalArgs.map(_.name).mkString(", ")})"
-        val argString2 = s"(h', ${pred.formalArgs.map(_.name + "'").mkString(", ")})"
+        val eqString = predicateEq(pred.name, "h", "h'", pred.formalArgs.map(_.name))
         val bodyString = translateExp(exp, parenthesisLevel = 51, isFrameAxiom = true)
-        strings += s"  assumes ${pred.name}_eq_def: \"\\<And>$varsString. ${pred.name}_eq $argString1 $argString2 $META_ARR"
+        strings += s"  assumes ${pred.name}_eq_def: \"$eqString $META_ARR"
         strings += s"    $bodyString\""
       case None =>
     }
@@ -366,7 +424,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
     val locales = mutable.Buffer[String]()
     if (program.fields.nonEmpty) locales += "  Fields"
-    translationOrder.foreach { case (mSeq, _) => locales += "  " + localeName(mSeq) }
+    membersInTranslationOrder.foreach { case (mSeq, _) => locales += "  " + localeName(mSeq) }
     if (locales.isEmpty)
       strings += "  assumes True (* no program definitions *)"
     else
@@ -389,21 +447,39 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
   private def translateStore(): Unit = {
     strings += "  (* Local variables *)"
-    for ((v, (t, _)) <- obl.s.g.values) {
-        strings += s"  fixes ${safeString(v.name)} :: \"${translateSort(t.sort)}\""
+    for ((localVar, term) <- store.termValues) {
+      strings += s"  fixes ${localVar.name} :: \"${translateSort(term.sort)}\""
+    }
+    for ((localVar, (term, _)) <- store.values) {
+      term match {
+        case _: terms.Literal =>
+          val value = translateTerm(term)
+          strings += s"  assumes store_${localVar.name}: \"${localVar.name} = $value\""
+        case _ => freshVarDefinitions.get(term) match {
+          case Some(varDef) =>
+            val value = translateExp(varDef.rhsNew)
+            strings += s"  assumes store_${localVar.name}: \"${localVar.name} = $value\""
+          case None => // No definition to print
+        }
+      }
     }
   }
 
   private def translateHeaps(): Unit = {
-    // TODO: Maybe explicitly identify current heap?
-    // Ignore any heaps (probably just debug@0) from the precondition that are not "old"
+    // Ignore any heaps (e.g. debug@0) from the precondition that are not "old"
     val heapsExclPreOld = state.debugOldHeaps.filter { case (label, record) =>
       // Remove heaps inhale pre heaps that aren't labelled 'old'
       (record.cause != InhalePre || label == Verifier.PRE_STATE_LABEL) &&
       // Remove heaps generated by checking loop invariants
       record.cause != ExhaleInv }
     for ((label, record) <- heapsExclPreOld) {
-      strings += s"  (* Heap $label *)"
+      if (label == currentHeapLabel) strings += s"  (* Current heap *)"
+      else {
+        label match {
+          case DebugHeapLabel(n) => strings += s"  (* Heap $n *)"
+          case _ => strings += s"  (* Heap $label *)"
+        }
+      }
       for ((chunk, idx) <- record.heap.values.zipWithIndex) {
         translateChunk(chunk, label, idx)
       }
@@ -420,98 +496,119 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case None => translateTerm(chunk.args.head, parenthesisLevel = 100)
     }
     val domHeapLabel = heapLabelMap.getOrElse(heapLabel, "missing:"+heapLabel)
-    fieldAccess(chunk.id.name, heapName(domHeapLabel), ref)
+    fieldAccess(chunk.id.name, printHeapLabel(domHeapLabel), ref)
   }
 
-  private def translateChunk(c: Chunk, heapLabel: String, idx: Int): Unit = {
-    val domLabel = heapLabelMap(heapLabel)
-    // def fieldSnapInOtherHeap(s: Term): Boolean = (fieldChunks contains s) && fieldChunks(s)._2 != heapLabel
-    def predSnapInOtherHeap(s: Term): Boolean = (predicateChunks contains s) && predicateChunks(s)._2 != heapLabel
-
-    c match {
+  private def translateChunk(chunk: Chunk, heapLabel: String, idx: Int): Unit = {
+    chunk match {
       case basic: BasicChunk =>
         basic.resourceID match {
-          case FieldID =>
-            assert(basic.args.length == 1, "Method translateChunk expected FieldChunk to have exactly one arg.")
-              val permCondition = permCondSimp(basic.perm)
-              val condString = if (permCondition == terms.True) "" else translateTerm(permCondition) + s" $META_ARR "
-              val thisChunk = basicFieldChunkLocation(basic, domLabel)
-              val valString = basicRewrites.fieldReplacements.get(basic.snap) match {
-                case Some(kv) => (basicFieldChunkLocation _).tupled(kv)
-                case None => translateTerm(basic.snap)
-              }
-              val chunk = s"$condString$thisChunk = $valString"
-              strings += s"  assumes ${heapName(heapLabel)}_$idx: \"$chunk\""
-          case PredicateID =>
-            val chunkString = safeString(basic.id.name) + s" ${heapName(domLabel)} " +
-              basic.args.map(translateTerm(_, parenthesisLevel = 100)).mkString(" ")
-            val predEq = if (predSnapInOtherHeap(basic.snap)) {
-              val (otherChunk, otherLabel) = predicateChunks(basic.snap)
-              val thisTuple = s"(${heapName(domLabel)}, ${basic.args.map(translateTerm(_)).mkString(", ")})"
-              val otherTuple = s"(${heapName(otherLabel)}, ${otherChunk.args.map(translateTerm(_)).mkString(", ")})"
-              s" \\<and> ${basic.id.name}_eq $thisTuple $otherTuple"
-            } else ""
-            strings += s"  assumes ${heapName(heapLabel)}_$idx: \"$chunkString$predEq\""
+          case FieldID => translateBFC(basic, heapLabel, idx)
+          case PredicateID => translateBPC(basic, heapLabel, idx)
         }
-      case qfc: QuantifiedFieldChunk =>
-        qfc.singletonRcvrExp match {
-          case Some(rcvr) =>
-            val rcvr2 = Simplifier.simplify(rcvr)
-            val perm = Simplifier.simplify(qfc.permValueExp.get.replace(qfc.quantifiedVarExps.get.head.localVar, rcvr2))
-            val permCond = permCondSimpExp(perm)
-            val permCondString = permCond match {
-              case _: ast.TrueLit => ""
-              case _ => translateExp(permCond, oldHeapLabel = Some(domLabel)) + " \\<Longrightarrow> "
-            }
-            val rcvrString = translateExp(rcvr2, parenthesisLevel = 100)
-            val default = quantFieldChunks.get(qfc.fvf) match {
-              case Some((_, str)) => str + " " + rcvrString
-              case None => translateTerm(qfc.fvf) + " " + rcvrString
-            }
-            val eqString = s"${fieldAccess(qfc.id.name, heapName(domLabel), rcvrString)} = $default"
-            strings += s"  assumes ${heapName(heapLabel)}_$idx: \"$permCondString$eqString\""
-          case None =>
-            val quantifiedVars = qfc.invs.headOption.map(_.qvarExps.getOrElse(Seq())).getOrElse(Seq())
-            val newRenamings = quantifiedVars.map(v => (v.name, cleanName(v)))
-            val newRewrites = basicRewrites.addRenames(newRenamings)
-            val rcvr = (for (inv <- qfc.invs.headOption; exps <- inv.invertibleExps; e <- exps.headOption)
-              yield translateExp(e, parenthesisLevel = 100, newRewrites)).getOrElse("missingInvExp")
-            val varString = argStringWithTypes(quantifiedVars, includeHeap = false)
-            val freeRef = safeString(qfc.quantifiedVarExps.get.head.name)
-            val condString = translateExp(qfc.conditionExp.get, oldHeapLabel = Some(heapLabel), rewrites = newRewrites) + s" $META_ARR"
-            val permCond = permCondSimpExp(qfc.permValueExp.get) match {
-              case ast.TrueLit() => ""
-              case e => translateExp(e, oldHeapLabel = Some(domLabel), rewrites = newRewrites) + " \\<longrightarrow> "
-            }
-            val field = fieldAccess(qfc.id.name, heapName(domLabel), freeRef)
-            val default = quantFieldChunks.get(qfc.fvf) match {
-              case Some((_, snapString)) => s"$snapString $freeRef"
-              case None => s"${qfc.id}_${translateTerm(qfc.fvf, rewrites = newRewrites)} $freeRef"
-            }
-            val chunkString = s"\\<And>$varString. $condString\n    let r = $rcvr in $permCond$field = $default"
-            strings += s"  assumes ${heapName(heapLabel)}_$idx: \"$chunkString\""
-        }
-      case qpc: QuantifiedPredicateChunk =>
-        val condString = translateTerm(terms.And(qpc.condition, permCondSimp(qpc.permValue)))
-        val argList = qpc.quantifiedVars.map(_.id.name)
-        val quantifyString = "\\<And>" + argList.mkString(" ")
-        val predString = s"$quantifyString. $condString $META_ARR ${qpc.id.name} ${heapName(domLabel)} ${argList.mkString(" ")}"
-        strings += s"  assumes ${heapName(heapLabel)}_${idx}a: \"$predString\""
-        if (predSnapInOtherHeap(qpc.snapshotMap)) {
-          val (otherChunk, otherLabel) = predicateChunks(qpc.snapshotMap)
-          val thisTuple = s"(${heapName(domLabel)}, ${argList.mkString(", ")})"
-          val otherTuple = s"(${heapName(otherLabel)}, ARGS???)"
-          val eqString = s"${qpc.id.name}(args) \\<and> ${qpc.id.name}_eq $thisTuple $otherTuple"
-          strings += s"  assumes ${heapName(heapLabel)}_${idx}b: \"$condString $META_ARR $eqString\""
+      case qfc: QuantifiedFieldChunk => translateQFC(qfc, heapLabel, idx)
+      case qpc: QuantifiedPredicateChunk => translateQPC(qpc, heapLabel, idx)
+    }
+  }
+
+  private def translateBFC(chunk: BasicChunk, heapLabel: String, idx: Int): Unit = {
+    require(chunk.args.length == 1, "Method translateChunk expected FieldChunk to have exactly one arg.")
+    val assumptionName = s"${printHeapLabel(heapLabel)}_$idx"
+    val locString = basicFieldChunkLocation(chunk, heapLabelMap(heapLabel)) // TODO: Idk what this is, simplify
+    val valueString = freshVarDefinitions.get(chunk.args.head) match {
+      case Some(varDef) =>
+        translateExp(varDef.rhsNew)
+      case None =>
+        chunk.snapExp match {
+          case Some(exp) => translateExp(exp)
+          case None => locString // TODO: I think this means it is the original snap location, is this always true?
         }
     }
+    permCondSimp(chunk.perm) match {
+      case terms.True =>
+        strings += s"  assumes $assumptionName: \"$locString = $valueString\""
+      case cond =>
+        strings += s"  assumes $assumptionName: \"${translateTerm(cond)} $META_ARR $locString = $valueString\""
+    }
+  }
 
+  private def translateBPC(chunk: BasicChunk, heapLabel: String, idx: Int): Unit = {
+    def predSnapInOtherHeap(s: Term): Boolean = (predicateChunks contains s) && predicateChunks(s)._2 != heapLabel
+
+    val domHeap = printHeapLabel(heapLabelMap(heapLabel))
+    val args = chunk.args.map(translateTerm(_))
+    val chunkString = predicateAccess(chunk.id.name, domHeap, args)
+    val predEq = if (predSnapInOtherHeap(chunk.snap)) {
+      val (_, otherLabel) = predicateChunks(chunk.snap)
+      val eqArgs = chunk.args.map(translateTerm(_, parenthesisLevel = eqArgLevel(chunk.args.length)))
+      s" \\<and> ${predicateEq(chunk.id.name, domHeap, printHeapLabel(otherLabel), eqArgs)}"
+    } else ""
+    strings += s"  assumes ${printHeapLabel(heapLabel)}_$idx: \"$chunkString$predEq\""
+  }
+
+  private def translateQFC(qfc: QuantifiedFieldChunk, heapLabel: String, idx: Int): Unit = {
+    val domLabel = heapLabelMap(heapLabel)
+
+    qfc.singletonRcvrExp match {
+      case Some(rcvr) =>
+        val rcvr2 = Simplifier.simplify(rcvr)
+        val perm = Simplifier.simplify(qfc.permValueExp.get.replace(qfc.quantifiedVarExps.get.head.localVar, rcvr2))
+        val permCond = permCondSimpExp(perm)
+        val permCondString = permCond match {
+          case _: ast.TrueLit => ""
+          case _ => translateExp(permCond, oldHeapLabel = Some(domLabel)) + " \\<Longrightarrow> "
+        }
+        val rcvrString = translateExp(rcvr2, parenthesisLevel = 100)
+        val default = translateTerm(qfc.fvf)
+          /*qfcSnapMapRenamings.get(qfc.fvf) match {
+          case Some((_, str)) => str + " " + rcvrString
+          case None => translateTerm(qfc.fvf) + " " + rcvrString
+        }
+           */
+        val eqString = s"${fieldAccess(qfc.id.name, printHeapLabel(domLabel), rcvrString)} = $default"
+        strings += s"  assumes ${printHeapLabel(heapLabel)}_$idx: \"$permCondString$eqString\""
+      case None =>
+        val quantifiedVars = qfc.invs.headOption.map(_.qvarExps.getOrElse(Seq())).getOrElse(Seq())
+        val newRenamings = quantifiedVars.map(v => (v.name, cleanName(v)))
+        val newRenames = storeRenames ++ newRenamings
+        val rcvr = (for (inv <- qfc.invs.headOption; exps <- inv.invertibleExps; e <- exps.headOption)
+          yield translateExp(e, parenthesisLevel = 100, newRenames)).getOrElse("missingInvExp")
+        val varString = argStringWithTypes(quantifiedVars, includeHeap = false)
+        val freeRef = safeString(qfc.quantifiedVarExps.get.head.name)
+        val condString = translateExp(qfc.conditionExp.get, oldHeapLabel = Some(heapLabel), renames = newRenames) + s" $META_ARR"
+        val permCond = permCondSimpExp(qfc.permValueExp.get) match {
+          case ast.TrueLit() => ""
+          case e => translateExp(e, oldHeapLabel = Some(domLabel), renames = newRenames) + " \\<longrightarrow> "
+        }
+        val field = fieldAccess(qfc.id.name, printHeapLabel(domLabel), freeRef)
+        val default = qfcSnapMapRenamings.get(qfc.fvf) match {
+          case Some((_, snapString)) => s"$snapString $freeRef"
+          case None => s"${qfc.id}_${translateTerm(qfc.fvf, renames = newRenames)} $freeRef"
+        }
+        val chunkString = s"\\<And>$varString. $condString\n    let r = $rcvr in $permCond$field = $default"
+        strings += s"  assumes ${printHeapLabel(heapLabel)}_$idx: \"$chunkString\""
+    }
+  }
+
+  private def translateQPC(qpc: QuantifiedPredicateChunk, heapLabel: String, idx: Int): Unit = {
+    def predSnapInOtherHeap(s: Term): Boolean = (predicateChunks contains s) && predicateChunks(s)._2 != heapLabel
+    val domLabel = heapLabelMap(heapLabel)
+
+    val condString = translateTerm(terms.And(qpc.condition, permCondSimp(qpc.permValue)))
+    val argList = qpc.quantifiedVars.map(_.id.name)
+    val quantifyString = "\\<And>" + argList.mkString(" ")
+    val predString = s"$quantifyString. $condString $META_ARR ${predicateAccess(qpc.id.name, printHeapLabel(domLabel), argList)}"
+    strings += s"  assumes ${printHeapLabel(heapLabel)}_${idx}a: \"$predString\""
+    if (predSnapInOtherHeap(qpc.snapshotMap)) {
+      val (_, otherLabel) = predicateChunks(qpc.snapshotMap)
+      val eqString = predicateEq(qpc.id.name, printHeapLabel(domLabel), printHeapLabel(otherLabel), argList)
+      strings += s"  assumes ${printHeapLabel(heapLabel)}_${idx}b: \"$condString $META_ARR $eqString\""
+    }
   }
 
   case class TranslationOptions(parenthesisLevel: Int,
                                 collapseSnaps: Boolean,
                                 annotateIntLits: Boolean) {
-    def collapseSnapsOn(): TranslationOptions = this.copy(collapseSnaps = true)
     def annotateIntLitsOff(): TranslationOptions = this.copy(annotateIntLits = false)
   }
 
@@ -528,23 +625,27 @@ class Translator(val obl: ProofObligation, val filename: String) {
   // Main translation function
   private def translateTerm(term: Term,
                             parenthesisLevel: Int = 0,
-                            rewrites: Rewrites = basicRewrites,
+                            renames: immutable.Map[String, String] = storeRenames,
                             options: TranslationOptions = defaultOptions): String = {
     // Recursive call, for convenience
-    def rec(term2: Term, pLevel: Int, ops: TranslationOptions = options): String = translateTerm(term2, pLevel, rewrites, options)
+    def rec(term2: Term, pLevel: Int, ops: TranslationOptions = options): String = translateTerm(term2, pLevel, renames, options)
     def wrap(s: String, pLevel: Int): String = if (pLevel <= parenthesisLevel) s"($s)" else s
     def recOp(left: Term, op: String, right: Term, pLevel: Int): String = {
       wrap(rec(left, pLevel) + s" $op " + rec(right, pLevel), pLevel)
     }
 
-    if (rewrites.fieldReplacements contains term) {
-      val (chunk, heapLabel) = rewrites.fieldReplacements(term)
+    if (fieldVarDefinitions contains term) {
+      val (chunk, heapLabel) = fieldVarDefinitions(term)
       return wrap(basicFieldChunkLocation(chunk, heapLabel), 100)
+    } else if (singletonQFCs contains term) {
+      val (chunk, heapLabel) = singletonQFCs(term)
+      val location = fieldAccess(chunk.id.name, heapLabel, translateExp(chunk.singletonRcvrExp.get))
+      return wrap(location, 100)
     }
 
     term match {
       // Functions and Applications
-      case terms.Var(id, _, _) => rewrites.varRenames.getOrElse(id.name, safeId(id))
+      case terms.Var(id, _, _) => renames.getOrElse(id.name, safeId(id))
       case terms.Let(bindings, body) =>
         val bindString = bindings.transform((bVar, bTerm) => rec(bVar, 10) + " = " + rec(bTerm, 10)).mkString("; ")
         wrap(s"let $bindString in ${rec(body, 10)}", 10)
@@ -553,7 +654,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.App(applicable, args) =>
         if (applicable.resultSort.isInstanceOf[FieldValueFunction]) {
           // In this case there are no args and the whole term is the snapshot, which returns a function
-          quantFieldChunks(term)._2
+          qfcSnapMapRenamings(term)._2
         } else {
           // TODO: if it is spurious precondition then remove it
           val og_fn = applicable.id.name.takeWhile(_ != '%')
@@ -577,9 +678,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case b: terms.BooleanLiteral => b.toString
       case terms.Quantification(q, vars, body, _, _, _, _) =>
         val varRenames = vars.map(v => (v.id.name, v.id.name.takeWhile(_ != '@')))
-        val newRewrites = rewrites.addRenames(varRenames)
+        val newRenames = renames ++ varRenames
         val varString = varRenames.map(_._2).mkString(" ")
-        wrap(s"${quantifierToString(q)}$varString. ${translateTerm(body, 10, newRewrites)}", 10)
+        wrap(s"${quantifierToString(q)}$varString. ${translateTerm(body, 10, newRenames)}", 10)
       // Arithmetic
       case terms.Plus(left, right) => recOp(left, "+", right, 65)
       case terms.Minus(left, right) => recOp(left, "-", right, 65)
@@ -691,18 +792,18 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
   private def translateExp(e: Exp,
                            parenthesisLevel: Int = 0,
-                           rewrites: Rewrites = basicRewrites,
+                           renames: immutable.Map[String, String] = storeRenames,
                            isFrameAxiom: Boolean = false,
                            variablePrime: Boolean = false,
                            resultString: Option[String] = None,
                            oldHeapLabel: Option[String] = None): String = {
-    def rec(e2: Exp, pLevel: Int): String = translateExp(e2, pLevel, rewrites, isFrameAxiom, variablePrime, resultString, oldHeapLabel)
+    def rec(e2: Exp, pLevel: Int): String = translateExp(e2, pLevel, renames, isFrameAxiom, variablePrime, resultString, oldHeapLabel)
     def wrap(s: String, pLevel: Int): String = if (pLevel <= parenthesisLevel) s"($s)" else s
     def recOp(left: Exp, op: String, right: Exp, pLevel: Int): String = {
       wrap(rec(left, pLevel) + s" $op " + rec(right, pLevel), pLevel)
     }
     val domOldHeapLabel = oldHeapLabel match {
-      case Some(label) => heapName(heapLabelMap(label.takeWhile(_ != '#')))
+      case Some(label) => printHeapLabel(heapLabelMap(label.takeWhile(_ != '#')))
       case _ => "h"
     }
 
@@ -729,7 +830,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
         val rPLevel = if (right.isInstanceOf[ast.And]) 34 else 35
         wrap(rec(left, lPLevel) + " \\<and> " + rec(right, rPLevel), 35)
       case ast.Implies(left, right) =>
-        val translation = translateExp(left, 25, rewrites, isFrameAxiom = false, variablePrime, resultString, oldHeapLabel) +
+        val translation = translateExp(left, 25, renames, isFrameAxiom = false, variablePrime, resultString, oldHeapLabel) +
           " \\<longrightarrow> " + rec(right, 25)
         wrap(translation, 25)
       case ast.MagicWand(left, right) => rec(left, 50) + " \\<longrightarrow> " + rec(right, 50) // TODO: remove?
@@ -748,20 +849,15 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case ast.FieldAccessPredicate(loc, _) =>
         if (isFrameAxiom) {
           val loc1 = rec(loc.rcv, 100)
-          val loc2 = translateExp(loc.rcv, 100, rewrites, isFrameAxiom, variablePrime = true, resultString)
+          val loc2 = translateExp(loc.rcv, 100, renames, isFrameAxiom, variablePrime = true, resultString)
           s"${fieldAccess(loc.field.name, "h", loc1)} = ${fieldAccess(loc.field.name, "h'", loc2)}"
         }
         else "undefined"
       case ast.PredicateAccessPredicate(loc, _) =>
         if (isFrameAxiom){
-          val argString1 = loc.args.map(rec(_, 100)).mkString(", ")
-          val argString2 = loc.args.map(
-            translateExp(_, parenthesisLevel, rewrites, isFrameAxiom, variablePrime = true, resultString)
-          ).mkString(", ")
-          s"${loc.predicateName}_eq (h, $argString1) (h', $argString1)"
+          wrap(predicateEq(loc.predicateName, "h", "h'", loc.args.map(rec(_, eqArgLevel(loc.args.length)))), 100)
         } else {
-          val argString = loc.args.map(rec(_, 100)).mkString(" ")
-          wrap(s"${loc.predicateName} h $argString", 100)
+          wrap(predicateAccess(loc.predicateName, "h", loc.args.map(rec(_, 0))), 100)
         }
 
       case ast.FuncApp(funcname, args) =>
@@ -776,35 +872,37 @@ class Translator(val obl: ProofObligation, val filename: String) {
         wrap(funcname + " " + args.map(rec(_, 100)).mkString(" "), 100)
       case ast.FieldAccess(rcv, field) =>
         val heapString = (for (oldLabel <- oldHeapLabel; keyLabel <- heapLabelMap.get(oldLabel.takeWhile(_ != '#')))
-          yield heapName(keyLabel)).getOrElse("h")
+          yield printHeapLabel(keyLabel)).getOrElse("h")
           wrap(fieldAccess(field.name, heapString, rec(rcv, 100)), 100)
 
       case ast.CondExp(cond, thn, els) => "(if " + rec(cond, 10) + " then " + rec(thn, 10) +
         " else " + rec(els, 10) + ")"
       case ast.Unfolding(_, body) => rec(body, parenthesisLevel)
       case ast.Asserting(_, body) => rec(body, parenthesisLevel)
-      case ast.Old(exp) => translateExp(exp, parenthesisLevel, rewrites, isFrameAxiom, variablePrime, resultString, Some("old"))
+      case ast.Old(exp) => translateExp(exp, parenthesisLevel, renames, isFrameAxiom, variablePrime, resultString, Some("old"))
       case ast.LabelledOld(exp, oldLabel) =>
-        translateExp(exp, parenthesisLevel, rewrites, isFrameAxiom, variablePrime, resultString, Some(oldLabel))
+        translateExp(exp, parenthesisLevel, renames, isFrameAxiom, variablePrime, resultString, Some(oldLabel))
       case ast.DebugLabelledOld(exp, oldLabel) =>
-        translateExp(exp, parenthesisLevel, rewrites, isFrameAxiom, variablePrime, resultString, Some(oldLabel))
+        translateExp(exp, parenthesisLevel, renames, isFrameAxiom, variablePrime, resultString, Some(oldLabel))
       case ast.Let(variable, exp, body) =>
         wrap(s"let ${safeString(variable.name)} = ${rec(exp, 10)} in ${rec(body, 10)}", 10)
       case ast.Forall(vars, _, exp) =>
         val varRenames = vars.map(v => (v.name, cleanName(v)))
-        val newRewrites = rewrites.addRenames(varRenames)
+        val newRenames = renames ++ varRenames
         val varString = varRenames.map(_._2).mkString(" ")
-        val bodyString = translateExp(exp, 10, newRewrites, isFrameAxiom, variablePrime, resultString, oldHeapLabel)
+        val bodyString = translateExp(exp, 10, newRenames, isFrameAxiom, variablePrime, resultString, oldHeapLabel)
         wrap(s"\\<forall>$varString. $bodyString", 10)
       case ast.Exists(variables, _, exp) =>
         wrap("\\<exists>" + variables.map(v => safeString(v.name)).mkString(" ") + ". " + rec(exp, 10), 10)
       case ast.LocalVar(name, _) =>
-        val baseName = rewrites.varRenames.getOrElse(name, safeString(name))
+        val baseName = renames.getOrElse(name, safeString(name))
         baseName
       case ast.Result(_) => wrap(resultString.getOrElse("result"), 100)
+      case ast.LocalVarWithVersion(name, _) if fieldReplacementsByName contains name =>
+        val (chunk, heapLabel) = fieldReplacementsByName(name)
+        wrap(basicFieldChunkLocation(chunk, heapLabel), 100)
       case ast.LocalVarWithVersion(name, _) =>
-        // if (variablePrime) safeString(name) + "'"
-        rewrites.varRenames.getOrElse(name, safeString(name))
+        renames.getOrElse(name, safeString(name))
 
       case ast.FullPerm() => "1"
       case ast.NoPerm() => "0"
@@ -863,48 +961,20 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
-  private lazy val freeVars: InsertionOrderedSet[terms.Var] = {
-    /*
-    def deToVars(de: DebugExp): InsertionOrderedSet[terms.Var] = {
-      if (de.term.isDefined) {
-        de.term.get.freeVariables ++ de.children.flatMap(deToVars)
-      } else {
-        de.children.flatMap(deToVars)
+  private def translateDebugNode(debugNode: AnyDebugNode): Unit =
+    translateDebugNode(debugNode, "", "", storeRenames, inAux = false)
+
+  private def translateDebugNode(debugNode: AnyDebugNode, prefix: String, suffix: String,
+                                renames: immutable.Map[String, String],
+                                inAux: Boolean): Unit = {
+    def recordPC(assumption: String): Unit = {
+      val assumptionString = prefix + assumption + suffix
+      if (!(printedAssumptions contains assumptionString)) {
+        strings += s"  assumes ${debugNode.id}: \"$assumptionString\""
+        printedAssumptions += assumptionString
       }
     }
 
-    obl.assumptionsExp.flatMap(deToVars)
-     */
-    InsertionOrderedSet.empty
-  }
-
-  // Maps from variable ids to strings that are shorter, clearer
-  private lazy val renaming: immutable.Map[Identifier, String] = {
-    val varMap = mutable.Map[Identifier, String]()
-    // Add variables from the store
-    for ((lVar, (term, _)) <- obl.s.g.values) {
-      term match {
-        case terms.Var(id, _, _) =>
-          if (!(varMap contains id)) {
-            varMap += id -> safeString(lVar.toString)
-           // add if non-existent
-          } else if (matches(lVar, id)) {
-            varMap(id) = safeString(lVar.toString) // update if better match found
-          }
-        case _ => ()
-      }
-    }
-
-    // Add other free variables not in the store
-    val fvs = freeVars.map(v => v.id) -- varMap.keys
-    val newVars = fvs.map(id => id.name.replaceFirst("@", "_").split('@')(0))
-    varMap ++= fvs.zip(newVars)
-    varMap.toMap
-  }
-
-  private def translateDebugNode(debugNode: AnyDebugNode, prefix: String = "", suffix: String = "",
-                                rewrites: Rewrites = basicRewrites,
-                                inAux: Boolean = false): Unit = {
     debugNode match {
       case debugExp: DebugExp if debugExp.isInternal =>
         if (debugExp.description.exists(_.contains("singleton-FVF"))) {
@@ -917,41 +987,44 @@ class Translator(val obl: ProofObligation, val filename: String) {
         else if (inAux && descriptionContains(debugExp, "branch")) {} // do nothing
         else {
           debugExp.finalExp match {
-            case Some(_: PermLeCmp) | Some(_: PermLtCmp) | Some(_: PermGeCmp) | Some(_: PermGtCmp) => {} // do nothing
+            case Some(_: PermLeCmp) | Some(_: PermLtCmp) | Some(_: PermGeCmp) | Some(_: PermGtCmp) => // do nothing
             case _ =>
-              val assumptionString = translateExp(debugExp.finalExp.getOrElse(debugExp.originalExp.get), rewrites = rewrites)
-              strings += s"  assumes ${debugExp.id}: \"$prefix$assumptionString$suffix\""
+              recordPC(translateExp(debugExp.finalExp.getOrElse(debugExp.originalExp.get), renames = renames))
+              // strings += s"  assumes ${debugExp.id}: \"$prefix$assumptionString$suffix\""
           }
         }
+      case varDef: FreshVarDefinition =>
+        if (usedVarDefinitions contains varDef)
+          recordPC(translateExp(varDef.finalExp.get, renames = renames))
       case debugPre: DebugPrecondition =>
         val function = program.findFunction(debugPre.funExp.funcname)
         if (function.pres.nonEmpty) {
           val domHeapLabel = if (!function.isPure)
-            heapName(heapLabelMap.getOrElse(debugPre.heapLabel, debugPre.heapLabel)) + " "
+            printHeapLabel(heapLabelMap.getOrElse(debugPre.heapLabel, debugPre.heapLabel)) + " "
           else ""
-          val preconditionString = s"${debugPre.funExp.funcname}_pre $domHeapLabel" +
-            debugPre.finalArgs.get.map(translateExp(_, parenthesisLevel = 100, rewrites = rewrites)).mkString(" ")
-          strings += s"  assumes ${debugPre.id}: \"$prefix$preconditionString$suffix\""
+          val assumptionString = s"${debugPre.funExp.funcname}_pre $domHeapLabel" +
+            debugPre.finalArgs.get.map(translateExp(_, parenthesisLevel = 100, renames = renames)).mkString(" ")
+          recordPC(assumptionString)
         }
       case quantifier: DebugQuantifier =>
         val varRenames = quantifier.qvars.map(v => (v.toString, v.toString.takeWhile(c => c != '@' && c != '$')))
-        val newRewrites = basicRewrites.addRenames(varRenames)
+        val newRenames = renames ++ varRenames
         val qvarString = "\\<forall>" + varRenames.map(_._2).mkString(" ") + ". "
         quantifier.children.toSeq.sortBy(_.id) foreach {
-          translateDebugNode(_, prefix + qvarString, suffix, newRewrites, inAux = inAux) }
+          translateDebugNode(_, prefix + qvarString, suffix, newRenames, inAux = inAux) }
       case implication: DebugImplication =>
-        val LHS = if (implication.isInternal) translateTerm(implication.term, rewrites = rewrites)
-          else translateExp(implication.finalExp.get, rewrites = rewrites)
+        val LHS = if (implication.isInternal) translateTerm(implication.term, renames = renames)
+          else translateExp(implication.finalExp.get, renames = renames)
         implication.children.toSeq.sortBy(_.id) foreach {
-          translateDebugNode(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix, rewrites, inAux = inAux) }
+          translateDebugNode(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix, renames, inAux = inAux) }
       case invariant: DebugInvariant =>
         strings += s"  (* Begin loop invariant at ${invariant.loopPos} *)"
-        invariant.children.toSeq.sortBy(_.id) foreach { translateDebugNode(_, prefix, suffix, rewrites, inAux) }
+        invariant.children.toSeq.sortBy(_.id) foreach { translateDebugNode(_, prefix, suffix, renames, inAux) }
         strings += "  (* End loop invariant *)"
       case group: DebugGroup if group.groupDescription.contains("unfolding of") => // do nothing
       case group: DebugGroup =>
         val isAuxGroup = inAux || group.description.getOrElse("").contains("aux")
-        group.children.toSeq.sortBy(_.id) foreach { translateDebugNode(_, prefix, suffix, rewrites, inAux = isAuxGroup) }
+        group.children.toSeq.sortBy(_.id) foreach { translateDebugNode(_, prefix, suffix, renames, inAux = isAuxGroup) }
     }
   }
 }

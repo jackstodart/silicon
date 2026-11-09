@@ -6,7 +6,7 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.{DebugExp, DebugExporter, DebugGroup, DebugInvariant, ProofObligation}
+import viper.silicon.debugger.{DebugExp, DebugExporter, DebugGroup, DebugInvariant, FreshVarDefinition, ProofObligation}
 import viper.silicon.Config.JoinMode
 import viper.silver.cfg.silver.SilverCfg
 import viper.silver.cfg.silver.SilverCfg.{SilverBlock, SilverEdge}
@@ -762,7 +762,13 @@ object executor extends ExecutionRules {
     executed
   }
 
-   private def ssaifyRhs(rhs: Term, rhsExp: ast.Exp, rhsExpNew: Option[ast.Exp], name: String, typ: ast.Type, v: Verifier, s : State): (Term, Option[ast.Exp]) = {
+   private def ssaifyRhs(rhs: Term,
+                         rhsExp: ast.Exp,
+                         rhsExpNew: Option[ast.Exp],
+                         name: String,
+                         typ: ast.Type,
+                         v: Verifier,
+                         s: State): (Term, Option[ast.Exp]) = {
      rhs match {
        case _: Var | _: Literal =>
          (rhs, rhsExpNew)
@@ -782,9 +788,7 @@ object executor extends ExecutionRules {
          val (eNew, debugExp) = if (debugOn) {
            val eRhs = rhsExp
            val eNew = ast.LocalVarWithVersion(simplifyVariableName(t.id.name), typ)(eRhs.pos, eRhs.info, eRhs.errT)
-           val exp = ast.EqCmp(ast.LocalVar(name, typ)(), eRhs)(eRhs.pos, eRhs.info, eRhs.errT)
-           val expNew = ast.EqCmp(eNew, rhsExpNew.get)()
-           val debugExp = DebugExp.awaitTerm(exp, expNew)
+           val debugExp = FreshVarDefinition.awaitTerm(name, typ, t, eNew, eRhs, rhsExpNew.get)
            (Some(eNew), Some(debugExp))
          } else {
             (None, None)

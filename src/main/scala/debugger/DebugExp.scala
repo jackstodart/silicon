@@ -238,6 +238,42 @@ object DebugPrecondition {
     term => DebugPrecondition(term, fun, finalArgs, heapLabel)
 }
 
+class FreshVarDefinition(val id: Int,
+                         val term: Term,
+                         val targetName: String, // The name of the assigned local variable or field.
+                         val targetType: ast.Type, // The type of the assigned local variable or field.
+                         val freshVarTerm: Var, // The fresh variable, as a term.
+                         val freshVar: ast.LocalVarWithVersion,
+                         val rhs: Exp,
+                         val rhsNew: Exp) extends DebugAssumption[FreshVarDefinition] {
+  override def description: Option[String] = Some(s"Definition of $targetName")
+
+  override def isInternal: Boolean = false
+
+  override def originalExp: Option[Exp] =
+    Some(ast.EqCmp(ast.LocalVar(targetName, targetType)(), rhs)(rhs.pos, rhs.info, rhs.errT))
+
+  override def finalExp: Option[Exp] = Some(ast.EqCmp(freshVar, rhsNew)())
+
+  override def display(config: DebugPrintConfiguration): String = {
+    if (config.printInternalTermRepresentation) s"${description.get}: ${term.toString}"
+    else s"${description.get}: $freshVar == $rhsNew"
+  }
+}
+
+object FreshVarDefinition {
+  def apply(term: Term, targetName: String, targetType: ast.Type,
+            freshVarTerm: Var, freshVar: ast.LocalVarWithVersion, rhs: Exp, rhsNew: Exp): FreshVarDefinition = {
+    val rhsSimplified = Simplifier.simplify(rhs, assumeWelldefinedness = true)
+    val rhsNewSimplified = Simplifier.simplify(rhsNew, assumeWelldefinedness = true)
+    new FreshVarDefinition(DebugCounter.next(), term, targetName, targetType, freshVarTerm, freshVar, rhsSimplified, rhsNewSimplified)
+  }
+
+  def awaitTerm(targetName: String, targetType: ast.Type,
+                freshVarTerm: Var, freshVar: ast.LocalVarWithVersion, rhs: Exp, rhsNew: Exp): Term => FreshVarDefinition =
+    term => FreshVarDefinition(term, targetName, targetType, freshVarTerm, freshVar, rhs, rhsNew)
+}
+
 
 /* -------------------------------------------------------------------------------------------- *
  * Groups                                                                                       *
