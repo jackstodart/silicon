@@ -246,7 +246,7 @@ class FreshVarDefinition(val id: Int,
                          val freshVar: ast.LocalVarWithVersion,
                          val rhs: Exp,
                          val rhsNew: Exp) extends DebugAssumption[FreshVarDefinition] {
-  override def description: Option[String] = Some(s"Definition of $targetName")
+  override def description: Option[String] = Some(s"Definition of fresh var")
 
   override def isInternal: Boolean = false
 
@@ -256,8 +256,8 @@ class FreshVarDefinition(val id: Int,
   override def finalExp: Option[Exp] = Some(ast.EqCmp(freshVar, rhsNew)())
 
   override def display(config: DebugPrintConfiguration): String = {
-    if (config.printInternalTermRepresentation) s"${description.get}: ${term.toString}"
-    else s"${description.get}: $freshVar == $rhsNew"
+    if (config.printInternalTermRepresentation) s"${description.get} ${freshVarTerm.id}: ${term.toString}"
+    else s"${description.get} ${freshVar.name}: $freshVar == $rhsNew"
   }
 }
 

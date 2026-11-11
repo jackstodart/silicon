@@ -101,6 +101,14 @@ class Translator(val obl: ProofObligation, val filename: String) {
   private val isabelleCurrentHeap = "h\\<^sub>c"
   private val DebugHeapLabel = "debug@(\\d+)".r
 
+  // Debug labels "debug@N" are written as h_N. Named labels are kept as is.
+  // The current heap (or any label whose dominant heap is the current heap) is written as isabelleCurrentHeap.
+  private def printHeapLabel(label: String): String = label match {
+    case l if l == currentHeapLabel || l == currentDomHeapLabel => isabelleCurrentHeap
+    case DebugHeapLabel(n) => "h" + n.map(d => s"\\<^sub>$d").mkString
+    case _ => label
+  }
+
   // Definitions of fresh variables Silicon introduced, keyed by the fresh variable's term.
   // Definitions are only collected from plain groups, not from under implications or quantifiers,
   // since there they would only hold conditionally.
@@ -117,9 +125,10 @@ class Translator(val obl: ProofObligation, val filename: String) {
   private def isFreshVar(term: Term): Boolean =
     freshVarDefinitions.contains(term)
 
-  // Maps SSA versions of local variables to a current store variable
-  // If x -> x_2; y -> y_3, z -> y_3
-  // Then result maps x_2 -> x; y_3 -> y
+  /* Maps SSA versions of local variables to a current store variable
+   * If x -> x_2; y -> y_3, z -> y_3
+   * Then result maps x_2 -> x; y_3 -> y
+   */
   private val storeRenames: immutable.Map[String, String] = {
     val varRenames = mutable.Map[String, String]()
     for ((lVar, term) <- obl.s.g.termValues) {
@@ -138,9 +147,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
     varRenames.toMap
   }
 
-  // Debug heaps in the order they were created. debugOldHeaps is a Map, so its iteration order says
-  // nothing, but "debug@N" labels are numbered in creation order. Other labels ("old", user labels)
-  // name heaps that are also recorded under a "debug@N" label, so they come last.
   private val heapsInCreationOrder: Seq[(HeapLabel, HeapRecord)] = {
     val (debugHeaps, labelledHeaps) = state.debugOldHeaps.toSeq.partition(h => DebugHeapLabel.matches(h._1))
     debugHeaps.sortBy { case (DebugHeapLabel(n), _) => n.toInt } ++ labelledHeaps.sortBy(_._1)
@@ -204,6 +210,11 @@ class Translator(val obl: ProofObligation, val filename: String) {
   private val fieldReplacementsByName: immutable.Map[String, (BasicChunk, String)] =
     fieldVarDefinitions.collect { case (terms.Var(id, _, _), loc) => nameWithoutVersion(id.name) -> loc }
 
+
+  /* -------------------------------------------------------------------------------------------- *
+   * Translation steps                                                                            *
+   * -------------------------------------------------------------------------------------------- */
+
   def translateObligation(): Unit = {
     strings += s"theory $filename\n"
     strings += "imports \"~/Viper/isabelle/ViperTranslations\"\n"
@@ -218,7 +229,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
   }
 
   private def declareDomainTypes(): Unit = {
-    // First declare domain types
     if (domains.nonEmpty) {
       strings += "text \\<open>Declare domain types\\<close>\n"
       domains.foreach(d => strings += "typedecl " + d.name)
@@ -238,54 +248,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
       }
       strings += "\n"
     }
-  }
-
-  // Field lookup using the notation declared in defineFields: `heap:ref\<cdot>field`.
-  // Heap and ref must be atomic (priority 1000), so callers should translate the ref with parenthesisLevel 100.
-  private def fieldAccess(field: String, heap: String, ref: String): String =
-    s"$heap:$ref\\<cdot>$field"
-
-  // Predicate notation declared in declarePredicate: `heap:P(arg1, ..., argN)`, e.g. "_:list'(_,/ _')".
-  // The heap is atomic (priority 1000); the arguments are enclosed by the parentheses, so they can be any term.
-  private def predicateNotation(pred: ast.Predicate): String = {
-    val argSlots = pred.formalArgs.map(_ => "_").mkString(",/ ")
-    val priorities = (1000 +: pred.formalArgs.map(_ => 0)).mkString(", ")
-    s"(\"_:${pred.name}'($argSlots')\" [$priorities] 999)"
-  }
-
-  // Predicate instance using the notation declared in declarePredicate: `heap:P(arg1, ..., argN)`.
-  // The heap must be atomic; the args need no parentheses.
-  private def predicateAccess(pred: String, heap: String, args: Seq[String]): String =
-    s"$heap:$pred(${args.mkString(", ")})"
-
-  // P_eq states that two heaps agree on the footprint of the predicate instance P(args).
-  // It takes the two heaps, then the arguments as a tuple if there are several: `P_eq h h' (x, y)`.
-  // A single argument is passed directly (`P_eq h h' x`), so it must be atomic: translate it with
-  // eqArgLevel, which gives parenthesisLevel 100 for one argument and 0 for tuple components.
-  private def predicateEq(pred: String, heap1: String, heap2: String, args: Seq[String]): String = args match {
-    case Seq() => s"${pred}_eq $heap1 $heap2"
-    case Seq(arg) => s"${pred}_eq $heap1 $heap2 $arg"
-    case _ => s"${pred}_eq $heap1 $heap2 (${args.mkString(", ")})"
-  }
-
-  private def eqArgLevel(numArgs: Int): Int = if (numArgs == 1) 100 else 0
-
-  private def predicateEqType(pred: ast.Predicate): String = {
-    val argTypes = pred.formalArgs.map(a => translateType(a.typ))
-    val argType = argTypes match {
-      case Seq() => ""
-      case Seq(t) => s"$t $FN_ARR "
-      case _ => s"${argTypes.mkString(" \\<times> ")} $FN_ARR "
-    }
-    s"Heap $FN_ARR Heap $FN_ARR ${argType}bool"
-  }
-
-  // Debug labels "debug@N" are written as h_N. Named labels are kept as is.
-  // The current heap (or any label whose dominant heap is the current heap) is written as isabelleCurrentHeap.
-  private def printHeapLabel(label: String): String = label match {
-    case l if l == currentHeapLabel || l == currentDomHeapLabel => isabelleCurrentHeap
-    case DebugHeapLabel(n) => "h" + n.map(d => s"\\<^sub>$d").mkString
-    case _ => label
   }
 
   private def translateMembers(): Unit = {
@@ -351,8 +313,9 @@ class Translator(val obl: ProofObligation, val filename: String) {
 
   private def defineFunction(fn: ast.Function): Unit = {
     val argString = (if (fn.isPure) "" else "h ") + fn.formalArgs.map(_.name).mkString(" ")
-    var argStringWTypes = argStringWithTypes(fn.formalArgs, !fn.isPure)
+    val argStringWTypes = argStringWithTypes(fn.formalArgs, !fn.isPure)
 
+    // TODO: Pure functions can define their preconditions
     // Translate function body
     if (fn.body.isDefined) {
       val fnRHS = translateExp(fn.body.get)
@@ -409,15 +372,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
-  // returns "fn_name :: args* => result", with optional _pre suffix, and heap argument
-  private def functionType(fn: ast.FuncLike, isPrecondition: Boolean = false, isHeapDep: Boolean = false): String = {
-    val name = if (isPrecondition) fn.name + "_pre" else fn.name
-    val maybeHeap = if (isHeapDep) s"Heap $FN_ARR " else ""
-    val argString = fn.formalArgs.map(a => translateType(a.typ) + s" $FN_ARR ").mkString("")
-    val typeString = if (isPrecondition) "bool" else translateType(fn.typ)
-    name + " :: \"" + maybeHeap + argString + typeString + "\""
-  }
-
   private def generateLemma(): Unit = {
     strings += "text \\<open>Proof obligation\\<close>\n"
     strings += "locale Program ="
@@ -434,7 +388,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     translateStore()
     translateHeaps()
     strings += "  (* Assumptions *)"
-    obl.assumptionsExp.toSeq.sortBy(_.id).foreach(translateDebugNode(_))
+    obl.assumptionsExp.toSeq.sortBy(_.id).foreach(translateDebugNode)
 
     strings += "  (* Proof goal *)"
     obl.eAssertion.finalExp match {
@@ -466,6 +420,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
   }
 
   private def translateHeaps(): Unit = {
+    // TODO: Correctly ignore unified heaps
     // Ignore any heaps (e.g. debug@0) from the precondition that are not "old"
     val heapsExclPreOld = state.debugOldHeaps.filter { case (label, record) =>
       // Remove heaps inhale pre heaps that aren't labelled 'old'
@@ -524,7 +479,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
           case None => locString // TODO: I think this means it is the original snap location, is this always true?
         }
     }
-    permCondSimp(chunk.perm) match {
+    permCondSimplified(chunk.perm) match {
       case terms.True =>
         strings += s"  assumes $assumptionName: \"$locString = $valueString\""
       case cond =>
@@ -594,7 +549,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
     def predSnapInOtherHeap(s: Term): Boolean = (predicateChunks contains s) && predicateChunks(s)._2 != heapLabel
     val domLabel = heapLabelMap(heapLabel)
 
-    val condString = translateTerm(terms.And(qpc.condition, permCondSimp(qpc.permValue)))
+    val condString = translateTerm(terms.And(qpc.condition, permCondSimplified(qpc.permValue)))
     val argList = qpc.quantifiedVars.map(_.id.name)
     val quantifyString = "\\<And>" + argList.mkString(" ")
     val predString = s"$quantifyString. $condString $META_ARR ${predicateAccess(qpc.id.name, printHeapLabel(domLabel), argList)}"
@@ -606,29 +561,80 @@ class Translator(val obl: ProofObligation, val filename: String) {
     }
   }
 
-  case class TranslationOptions(parenthesisLevel: Int,
-                                collapseSnaps: Boolean,
-                                annotateIntLits: Boolean) {
-    def annotateIntLitsOff(): TranslationOptions = this.copy(annotateIntLits = false)
-  }
+  private def translateDebugNode(debugNode: AnyDebugNode): Unit =
+    translateDebugNode(debugNode, "", "", storeRenames, inAux = false)
 
-  private object TranslationOptions {
-    def apply(parenthesisLevel: Int,
-              collapseSnaps: Boolean,
-              annotateIntLits: Boolean): TranslationOptions = new TranslationOptions(parenthesisLevel,
-                collapseSnaps,
-                annotateIntLits)
-  }
+  private def translateDebugNode(debugNode: AnyDebugNode, prefix: String, suffix: String,
+                                 renames: immutable.Map[String, String],
+                                 inAux: Boolean): Unit = {
+    def recordPC(assumption: String): Unit = {
+      val assumptionString = prefix + assumption + suffix
+      if (!(printedAssumptions contains assumptionString)) {
+        strings += s"  assumes ${debugNode.id}: \"$assumptionString\""
+        printedAssumptions += assumptionString
+      }
+    }
 
-  private val defaultOptions = TranslationOptions(parenthesisLevel = 0, collapseSnaps = false, annotateIntLits = true)
+    debugNode match {
+      case debugExp: DebugExp if debugExp.isInternal =>
+        if (debugExp.description.exists(_.contains("singleton-FVF"))) {
+          strings += s"  assumes ${debugExp.id}: \"${translateTerm(debugExp.term)}\""
+        }
+        // do nothing TODO: do I need to keep the quantified precs?
+      case debugExp: DebugExp if !debugExp.isInternal =>
+        if (descriptionContains(debugExp, "perm")) {} // do nothing
+        else if (descriptionContains(debugExp, "feasible")) {} // do nothing
+        else if (inAux && descriptionContains(debugExp, "branch")) {} // do nothing
+        else {
+          debugExp.finalExp match {
+            case Some(_: PermLeCmp) | Some(_: PermLtCmp) | Some(_: PermGeCmp) | Some(_: PermGtCmp) => // do nothing
+            case _ =>
+              recordPC(translateExp(debugExp.finalExp.getOrElse(debugExp.originalExp.get), renames = renames))
+              // strings += s"  assumes ${debugExp.id}: \"$prefix$assumptionString$suffix\""
+          }
+        }
+      case varDef: FreshVarDefinition =>
+        if (usedVarDefinitions contains varDef)
+          recordPC(translateExp(varDef.finalExp.get, renames = renames))
+      case debugPre: DebugPrecondition =>
+        val function = program.findFunction(debugPre.funExp.funcname)
+        if (function.pres.nonEmpty) {
+          val domHeapLabel = if (!function.isPure)
+            printHeapLabel(heapLabelMap.getOrElse(debugPre.heapLabel, debugPre.heapLabel)) + " "
+          else ""
+          val assumptionString = s"${debugPre.funExp.funcname}_pre $domHeapLabel" +
+            debugPre.finalArgs.get.map(translateExp(_, parenthesisLevel = 100, renames = renames)).mkString(" ")
+          recordPC(assumptionString)
+        }
+      case quantifier: DebugQuantifier =>
+        val varRenames = quantifier.qvars.map(v => (v.toString, v.toString.takeWhile(c => c != '@' && c != '$')))
+        val newRenames = renames ++ varRenames
+        val qvarString = "\\<forall>" + varRenames.map(_._2).mkString(" ") + ". "
+        quantifier.children.toSeq.sortBy(_.id) foreach {
+          translateDebugNode(_, prefix + qvarString, suffix, newRenames, inAux = inAux) }
+      case implication: DebugImplication =>
+        val LHS = if (implication.isInternal) translateTerm(implication.term, renames = renames)
+        else translateExp(implication.finalExp.get, renames = renames)
+        implication.children.toSeq.sortBy(_.id) foreach {
+          translateDebugNode(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix, renames, inAux = inAux) }
+      case invariant: DebugInvariant =>
+        strings += s"  (* Begin loop invariant at ${invariant.loopPos} *)"
+        invariant.children.toSeq.sortBy(_.id) foreach { translateDebugNode(_, prefix, suffix, renames, inAux) }
+        strings += "  (* End loop invariant *)"
+      case group: DebugGroup if group.groupDescription.contains("unfolding of") => // do nothing
+      case group: DebugGroup =>
+        val isAuxGroup = inAux || group.description.getOrElse("").contains("aux")
+        group.children.toSeq.sortBy(_.id) foreach { translateDebugNode(_, prefix, suffix, renames, inAux = isAuxGroup) }
+    }
+  }
 
   // Main translation function
   private def translateTerm(term: Term,
                             parenthesisLevel: Int = 0,
-                            renames: immutable.Map[String, String] = storeRenames,
-                            options: TranslationOptions = defaultOptions): String = {
+                            renames: immutable.Map[String, String] = storeRenames
+                           ): String = {
     // Recursive call, for convenience
-    def rec(term2: Term, pLevel: Int, ops: TranslationOptions = options): String = translateTerm(term2, pLevel, renames, options)
+    def rec(term2: Term, pLevel: Int): String = translateTerm(term2, pLevel, renames)
     def wrap(s: String, pLevel: Int): String = if (pLevel <= parenthesisLevel) s"($s)" else s
     def recOp(left: Term, op: String, right: Term, pLevel: Int): String = {
       wrap(rec(left, pLevel) + s" $op " + rec(right, pLevel), pLevel)
@@ -674,7 +680,7 @@ class Translator(val obl: ProofObligation, val filename: String) {
           }
         }
       // Stuff
-      case terms.IntLiteral(i) => if (options.annotateIntLits) s"($i::int)" else i.toString()
+      case terms.IntLiteral(i) => s"($i::int)"
       case b: terms.BooleanLiteral => b.toString
       case terms.Quantification(q, vars, body, _, _, _, _) =>
         val varRenames = vars.map(v => (v.id.name, v.id.name.takeWhile(_ != '@')))
@@ -712,8 +718,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.FullPerm => "(1::perm)"
       case terms.FractionPermLiteral(r) => r.toString
       case terms.PermTimes(p0, p1) => recOp(p0, "*", p1, 70)
-      case terms.IntPermTimes(p0, p1) => s"${rec(p0, 70)} * ${rec(p1, 70, options.annotateIntLitsOff())}"
-      case terms.PermIntDiv(p0, p1) => s"${rec(p0, 70)} / ${rec(p1, 70, options.annotateIntLitsOff())}"
+      case terms.IntPermTimes(p0, p1) => s"${rec(p0, 70)} * ${rec(p1, 70)}"
+      case terms.PermIntDiv(p0, p1) => s"${rec(p0, 70)} / ${rec(p1, 70)}"
       case terms.PermPermDiv(p0, p1) => recOp(p0, "/", p1, 70)
       case terms.PermPlus(p0, p1) => recOp(p0, "+", p1, 65)
       case terms.PermMinus(p0, p1) => recOp(p0, "-", p1, 65)
@@ -758,8 +764,8 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.MapRange(map) => wrap(s"fmran ${rec(map, 100)}", 100)
       // Snapshots
       case terms.Combine(_, _) => "undefined"
-      case terms.First(snap) => if (options.collapseSnaps) rec(snap, parenthesisLevel) else "F" + rec(snap, parenthesisLevel)
-      case terms.Second(snap) => if (options.collapseSnaps) rec(snap, parenthesisLevel) else "S" + rec(snap, parenthesisLevel)
+      case terms.First(snap) => "F" + rec(snap, parenthesisLevel)
+      case terms.Second(snap) => "S" + rec(snap, parenthesisLevel)
       // Quantified Permissions
       case terms.Lookup(_, fvf, at) =>
         s"${rec(fvf, 0)} ${rec(at, 100)}"
@@ -780,13 +786,6 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case terms.SortWrapper(t, _) => rec(t, parenthesisLevel)
       case terms.Distinct(_) => "undefined"
       case _ => "NOT SUPPORTED: " + term.getClass.toString + "; " + term.toString
-    }
-  }
-
-  private def setOrMSetOp(s: String, t: ast.Type): String = {
-    t match {
-      case _: ast.SetType => s"|$s|"
-      case _: ast.MultisetType => s"$s#"
     }
   }
 
@@ -960,87 +959,81 @@ class Translator(val obl: ProofObligation, val filename: String) {
       case todo => "TODO: " + todo.getClass + todo.toString
     }
   }
-
-  private def translateDebugNode(debugNode: AnyDebugNode): Unit =
-    translateDebugNode(debugNode, "", "", storeRenames, inAux = false)
-
-  private def translateDebugNode(debugNode: AnyDebugNode, prefix: String, suffix: String,
-                                renames: immutable.Map[String, String],
-                                inAux: Boolean): Unit = {
-    def recordPC(assumption: String): Unit = {
-      val assumptionString = prefix + assumption + suffix
-      if (!(printedAssumptions contains assumptionString)) {
-        strings += s"  assumes ${debugNode.id}: \"$assumptionString\""
-        printedAssumptions += assumptionString
-      }
-    }
-
-    debugNode match {
-      case debugExp: DebugExp if debugExp.isInternal =>
-        if (debugExp.description.exists(_.contains("singleton-FVF"))) {
-          strings += s"  assumes ${debugExp.id}: \"${translateTerm(debugExp.term)}\""
-        }
-        // do nothing TODO: do I need to keep the quantified precs?
-      case debugExp: DebugExp if !debugExp.isInternal =>
-        if (descriptionContains(debugExp, "perm")) {} // do nothing
-        else if (descriptionContains(debugExp, "feasible")) {} // do nothing
-        else if (inAux && descriptionContains(debugExp, "branch")) {} // do nothing
-        else {
-          debugExp.finalExp match {
-            case Some(_: PermLeCmp) | Some(_: PermLtCmp) | Some(_: PermGeCmp) | Some(_: PermGtCmp) => // do nothing
-            case _ =>
-              recordPC(translateExp(debugExp.finalExp.getOrElse(debugExp.originalExp.get), renames = renames))
-              // strings += s"  assumes ${debugExp.id}: \"$prefix$assumptionString$suffix\""
-          }
-        }
-      case varDef: FreshVarDefinition =>
-        if (usedVarDefinitions contains varDef)
-          recordPC(translateExp(varDef.finalExp.get, renames = renames))
-      case debugPre: DebugPrecondition =>
-        val function = program.findFunction(debugPre.funExp.funcname)
-        if (function.pres.nonEmpty) {
-          val domHeapLabel = if (!function.isPure)
-            printHeapLabel(heapLabelMap.getOrElse(debugPre.heapLabel, debugPre.heapLabel)) + " "
-          else ""
-          val assumptionString = s"${debugPre.funExp.funcname}_pre $domHeapLabel" +
-            debugPre.finalArgs.get.map(translateExp(_, parenthesisLevel = 100, renames = renames)).mkString(" ")
-          recordPC(assumptionString)
-        }
-      case quantifier: DebugQuantifier =>
-        val varRenames = quantifier.qvars.map(v => (v.toString, v.toString.takeWhile(c => c != '@' && c != '$')))
-        val newRenames = renames ++ varRenames
-        val qvarString = "\\<forall>" + varRenames.map(_._2).mkString(" ") + ". "
-        quantifier.children.toSeq.sortBy(_.id) foreach {
-          translateDebugNode(_, prefix + qvarString, suffix, newRenames, inAux = inAux) }
-      case implication: DebugImplication =>
-        val LHS = if (implication.isInternal) translateTerm(implication.term, renames = renames)
-          else translateExp(implication.finalExp.get, renames = renames)
-        implication.children.toSeq.sortBy(_.id) foreach {
-          translateDebugNode(_, prefix + s"$LHS \\<longrightarrow> (", ")" + suffix, renames, inAux = inAux) }
-      case invariant: DebugInvariant =>
-        strings += s"  (* Begin loop invariant at ${invariant.loopPos} *)"
-        invariant.children.toSeq.sortBy(_.id) foreach { translateDebugNode(_, prefix, suffix, renames, inAux) }
-        strings += "  (* End loop invariant *)"
-      case group: DebugGroup if group.groupDescription.contains("unfolding of") => // do nothing
-      case group: DebugGroup =>
-        val isAuxGroup = inAux || group.description.getOrElse("").contains("aux")
-        group.children.toSeq.sortBy(_.id) foreach { translateDebugNode(_, prefix, suffix, renames, inAux = isAuxGroup) }
-    }
-  }
 }
 
-// Things that will never be dependent on the particular program
+/** Utility functions that aren't dependent on a particular proof obligation
+  */
 object ExportUtils {
+  /* -------------------------------------------------------------------------------------------- *
+   * Notation                                                                                     *
+   * -------------------------------------------------------------------------------------------- */
   val FN_ARR = "\\<Rightarrow>"
   val META_ARR = "\\<Longrightarrow>"
 
-  def permCondSimp(p: Term): Term = {
-    booleanSimp(isPosSimp(collapseITE(p)))
+  def setOrMSetOp(op: String, t: ast.Type): String = {
+    t match {
+      case _: ast.SetType => s"|$op|"
+      case _: ast.MultisetType => s"$op#"
+    }
   }
 
-  def permIsPositive(p: Term): Boolean = permCondSimp(p) == terms.True
+  // returns "fn_name :: args* => result", with optional _pre suffix, and heap argument
+  def functionType(fn: ast.FuncLike, isPrecondition: Boolean = false, isHeapDep: Boolean = false): String = {
+    val name = if (isPrecondition) fn.name + "_pre" else fn.name
+    val maybeHeap = if (isHeapDep) s"Heap $FN_ARR " else ""
+    val argString = fn.formalArgs.map(a => translateType(a.typ) + s" $FN_ARR ").mkString("")
+    val typeString = if (isPrecondition) "bool" else translateType(fn.typ)
+    name + " :: \"" + maybeHeap + argString + typeString + "\""
+  }
 
-  def booleanSimp(c: Term): Term = {
+  // NOTE: Heap and ref must be atomic (priority 1000), so callers should translate the ref with parenthesisLevel 100.
+  def fieldAccess(field: String, heap: String, ref: String): String =
+    s"$heap:$ref\\<cdot>$field"
+
+  // Defines predicate notation in Isabelle: `heap:P(arg1, ..., argN)`
+  def predicateNotation(pred: ast.Predicate): String = {
+    val argSlots = pred.formalArgs.map(_ => "_").mkString(",/ ")
+    val priorities = (1000 +: pred.formalArgs.map(_ => 0)).mkString(", ")
+    s"(\"_:${pred.name}'($argSlots')\" [$priorities] 999)"
+  }
+
+  // Predicate instance using the notation declared in declarePredicate: `heap:P(arg1, ..., argN)`.
+  def predicateAccess(pred: String, heap: String, args: Seq[String]): String =
+    s"$heap:$pred(${args.mkString(", ")})"
+
+  // P_eq states that two heaps agree on the footprint of the predicate instance P(args).
+  // It takes the two heaps, then the arguments as a tuple if there are several: `P_eq h h' (x, y)`.
+  // A single argument is passed directly (`P_eq h h' x`), so it must be atomic: translate it with
+  // eqArgLevel, which gives parenthesisLevel 100 for one argument and 0 for tuple components.
+  def predicateEq(pred: String, heap1: String, heap2: String, args: Seq[String]): String = args match {
+    case Seq() => s"${pred}_eq $heap1 $heap2"
+    case Seq(arg) => s"${pred}_eq $heap1 $heap2 $arg"
+    case _ => s"${pred}_eq $heap1 $heap2 (${args.mkString(", ")})"
+  }
+
+  def eqArgLevel(numArgs: Int): Int = if (numArgs == 1) 100 else 0
+
+  def predicateEqType(pred: ast.Predicate): String = {
+    val argTypes = pred.formalArgs.map(a => translateType(a.typ))
+    val argType = argTypes match {
+      case Seq() => ""
+      case Seq(t) => s"$t $FN_ARR "
+      case _ => s"${argTypes.mkString(" \\<times> ")} $FN_ARR "
+    }
+    s"Heap $FN_ARR Heap $FN_ARR ${argType}bool"
+  }
+
+  /* -------------------------------------------------------------------------------------------- *
+   * Permissions                                                                                  *
+   * -------------------------------------------------------------------------------------------- */
+
+  // Returns a simplified, boolean-valued term describing when p is positive
+  def permCondSimplified(p: Term): Term =
+    booleanSimp(isPosCond(collapseCondTerm(p)))
+
+  def permIsPositive(p: Term): Boolean = permCondSimplified(p) == terms.True
+
+  private def booleanSimp(c: Term): Term = {
     c match {
       case terms.Ite(c, p0, terms.False) => booleanSimp(terms.And(c, p0))
       case terms.Ite(c, terms.False, p0) => booleanSimp(terms.And())
@@ -1052,65 +1045,66 @@ object ExportUtils {
 
   // Silicon permissions are largely of the form (c ? p : Z)
   // If these are nested we collapse them to simplify
-  private def collapseITE(p: Term): Term = {
+  private def collapseCondTerm(p: Term): Term = {
     p match {
       case terms.Ite(c0, terms.Ite(c1, p1, terms.NoPerm), terms.NoPerm) =>
-        collapseITE(terms.Ite(terms.And(c0, c1), p1, terms.NoPerm))
-      case terms.Ite(c, p0, p1) => terms.Ite(c, collapseITE(p0), collapseITE(p1))
-      case terms.PermMinus(p0, p1) => terms.PermMinus(collapseITE(p0), collapseITE(p1))
-      case terms.PermMin(p0, p1) => terms.PermMin(collapseITE(p0), collapseITE(p1))
+        collapseCondTerm(terms.Ite(terms.And(c0, c1), p1, terms.NoPerm))
+      case terms.Ite(c, p0, p1) => terms.Ite(c, collapseCondTerm(p0), collapseCondTerm(p1))
+      case terms.PermMinus(p0, p1) => terms.PermMinus(collapseCondTerm(p0), collapseCondTerm(p1))
+      case terms.PermMin(p0, p1) => terms.PermMin(collapseCondTerm(p0), collapseCondTerm(p1))
       case _ => p
     }
   }
 
-  // Takes a permission amount p and simplifies it to a boolean term describing when p > 0
-  private def isPosSimp(p: Term): Term = {
+  // Takes a permission amount p and returns a boolean term describing when p > 0
+  private def isPosCond(p: Term): Term = {
     p match {
       case terms.FullPerm => terms.True
       case terms.NoPerm => terms.False
       case terms.FractionPermLiteral(r) => if (r > Rational.zero) terms.True else terms.False
       case terms.PermMinus(terms.FullPerm, terms.NoPerm) => terms.True
       case terms.PermMinus(terms.NoPerm, terms.FullPerm) => terms.False
-      case terms.PermMinus(terms.FullPerm, p0) => notFullSimp(p0)
+      case terms.PermMinus(terms.FullPerm, p0) => notFullCond(p0)
       case terms.PermMinus(p0, terms.Ite(c, p1, p2)) =>
-        isPosSimp(terms.Ite(c, terms.PermMinus(p0, p1), terms.PermMinus(p0, p2)))
-      case terms.PermMin(p0, terms.FullPerm) => isPosSimp(p0)
+        isPosCond(terms.Ite(c, terms.PermMinus(p0, p1), terms.PermMinus(p0, p2)))
+      case terms.PermMin(p0, terms.FullPerm) => isPosCond(p0)
       case terms.PermMin(terms.Ite(c, p0, p1), p2) =>
-        isPosSimp(terms.Ite(c, terms.PermMin(p0, p2), terms.PermMin(p1, p2)))
+        isPosCond(terms.Ite(c, terms.PermMin(p0, p2), terms.PermMin(p1, p2)))
       case terms.PermMin(p0, terms.Ite(c, p1, p2)) =>
-        isPosSimp(terms.Ite(c, terms.PermMin(p0, p1), terms.PermMin(p0, p2)))
-      case terms.PermMin(p0, p1) => terms.And(isPosSimp(p0), isPosSimp(p1))
+        isPosCond(terms.Ite(c, terms.PermMin(p0, p1), terms.PermMin(p0, p2)))
+      case terms.PermMin(p0, p1) => terms.And(isPosCond(p0), isPosCond(p1))
       case terms.Ite(c, terms.FullPerm, terms.NoPerm) => c
       case terms.Ite(c, terms.NoPerm, terms.FullPerm) => terms.Not(c)
-      case terms.Ite(p0, p1, terms.FullPerm) => terms.Implies(p0, isPosSimp(p1))
-      case terms.Ite(p0, p1, terms.NoPerm) => terms.And(p0, isPosSimp(p1))
-      case terms.Ite(p0, p1, p2) => terms.Ite(p0, isPosSimp(p1), isPosSimp(p2))
+      case terms.Ite(p0, p1, terms.FullPerm) => terms.Implies(p0, isPosCond(p1))
+      case terms.Ite(p0, p1, terms.NoPerm) => terms.And(p0, isPosCond(p1))
+      case terms.Ite(p0, p1, p2) => terms.Ite(p0, isPosCond(p1), isPosCond(p2))
       case _ => booleanSimp(terms.PermLess(terms.NoPerm, p))
     }
   }
 
   // Counterpoint to the above, describing when p < 1
-  private def notFullSimp(p: Term): Term = {
+  private def notFullCond(p: Term): Term = {
     p match {
       case terms.FullPerm => terms.False
       case terms.NoPerm => terms.True
       case terms.FractionPermLiteral(r) => if (r < Rational.one) terms.True else terms.False
       case terms.PermMinus(terms.FullPerm, terms.NoPerm) => terms.False
-      case terms.PermMinus(terms.FullPerm, p1) => notFullSimp(p1)
+      case terms.PermMinus(terms.FullPerm, p1) => notFullCond(p1)
       case terms.PermMinus(p0, terms.Ite(c, p1, p2)) =>
-        notFullSimp(terms.Ite(c, terms.PermMinus(p0, p1), terms.PermMinus(p0, p2)))
-      case terms.PermMin(p0, terms.FullPerm) => notFullSimp(p0)
-      case terms.PermMin(terms.FullPerm, p1) => notFullSimp(p1)
-      case terms.PermMin(p0, p1) => terms.Or(notFullSimp(p0), notFullSimp(p1))
+        notFullCond(terms.Ite(c, terms.PermMinus(p0, p1), terms.PermMinus(p0, p2)))
+      case terms.PermMin(p0, terms.FullPerm) => notFullCond(p0)
+      case terms.PermMin(terms.FullPerm, p1) => notFullCond(p1)
+      case terms.PermMin(p0, p1) => terms.Or(notFullCond(p0), notFullCond(p1))
       case terms.Ite(p0, terms.FullPerm, terms.NoPerm) => terms.Not(p0)
       case terms.Ite(p0, terms.NoPerm, terms.FullPerm) => p0
-      case terms.Ite(p0, p1, terms.FullPerm) => terms.And(p0, notFullSimp(p1))
-      case terms.Ite(p0, p1, terms.NoPerm) => terms.Implies(p0, notFullSimp(p1))
-      case terms.Ite(p0, p1, p2) => terms.Ite(p0, notFullSimp(p1), notFullSimp(p2))
+      case terms.Ite(p0, p1, terms.FullPerm) => terms.And(p0, notFullCond(p1))
+      case terms.Ite(p0, p1, terms.NoPerm) => terms.Implies(p0, notFullCond(p1))
+      case terms.Ite(p0, p1, p2) => terms.Ite(p0, notFullCond(p1), notFullCond(p2))
       case _ => terms.PermLess(p, terms.FullPerm)
     }
   }
 
+  //
   def permCondSimpExp(e: Exp): Exp = {
     assert(e.typ == ast.Perm, s"permCondSimpExp expects a perm type but recieved ${e.typ}")
     val eSimp = Simplifier.simplify(e)
@@ -1197,6 +1191,10 @@ object ExportUtils {
       case _ => Simplifier.simplify(ast.PermLtCmp(p, ast.FullPerm()())())
     }
   }
+
+  /* -------------------------------------------------------------------------------------------- *
+   * Other Stuff                                                                                  *
+   * -------------------------------------------------------------------------------------------- */
 
   val varVersionRegex = """([^@]+)@(\d+)@(\d+)""".r
   def nameHead(name: String): String = name.split('@')(0)
@@ -1538,4 +1536,7 @@ object ExportUtils {
     val result = tempIntermediates ++ keyHeapMap ++ intermediateHeapMap
     result
   }
+
+  def filteredHeaps(debugHeaps: DebugOldHeaps, tempHeaps: Option[TemporaryRecord]): Map[String, String] =
+    ???
 }

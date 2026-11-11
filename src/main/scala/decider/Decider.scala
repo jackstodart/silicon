@@ -429,8 +429,13 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
 
     private def isKnownToBeTrue(t: Term) = t match {
       case True => true
-  //    case eq: BuiltinEquals => eq.p0 == eq.p1 /* WARNING: Blocking trivial equalities might hinder axiom triggering. */
+      // case eq: BuiltinEquals => eq.p0 == eq.p1 /* WARNING: Blocking trivial equalities might hinder axiom triggering. */
       case _ if pcs.assumptions contains t => true
+      /* Path conditions store only the top-level conjuncts of an assumption (see PathConditions.add),
+       * so a conjunction is known once all of its conjuncts are. */
+      case and: And =>
+        val assumptions = pcs.assumptions
+        and.topLevelConjuncts.forall(assumptions.contains)
       case q: Quantification if q.body == True => true
       case _ => false
     }
