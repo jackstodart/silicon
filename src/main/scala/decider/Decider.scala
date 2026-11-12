@@ -412,8 +412,10 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
 
     private def isKnownToBeTrue(t: Term) = t match {
       case True => true
-  //    case eq: BuiltinEquals => eq.p0 == eq.p1 /* WARNING: Blocking trivial equalities might hinder axiom triggering. */
+      // case eq: BuiltinEquals => eq.p0 == eq.p1 /* WARNING: Blocking trivial equalities might hinder axiom triggering. */
       case _ if pcs.assumptions contains t => true
+      case and: And =>
+        and.topLevelConjuncts.forall(pcs.assumptions.contains)
       case q: Quantification if q.body == True => true
       case _ => false
     }
