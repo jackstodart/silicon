@@ -986,8 +986,6 @@ class Or private[terms] (val ts: Seq[Term]) extends BooleanTerm
     with ConditionalFlyweight[Seq[Term], Or] {
 
   assert(ts.nonEmpty, "Expected at least one term, but found none")
-  assert(ts.forall(_.sort == sorts.Bool),
-         s"Expected all disjuncts to be of sort Bool, but found ${ts.filter(_.sort != sorts.Bool).map(t => s"$t: ${t.sort}").mkString(", ")}")
 
   val equalityDefiningMembers = ts
 
@@ -1024,8 +1022,10 @@ class And private[terms](val ts: Seq[Term]) extends BooleanTerm
     with ConditionalFlyweight[Seq[Term], And] {
 
   assert(ts.nonEmpty, "Expected at least one term, but found none")
-  assert(ts.forall(_.sort == sorts.Bool),
-         s"Expected all conjuncts to be of sort Bool, but found ${ts.filter(_.sort != sorts.Bool).map(t => s"$t: ${t.sort}").mkString(", ")}")
+  /* Note: conjuncts are not asserted to be of sort Bool, because And is also used to group
+   * arbitrary terms into a single root for trigger search (e.g. `And(invertibles)` in
+   * QuantifiedChunkSupport.getFreshInverseFunctions). Such terms should never be sent to the prover.
+   */
 
   val equalityDefiningMembers = ts
 
