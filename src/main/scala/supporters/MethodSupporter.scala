@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.supporters
 
@@ -15,7 +15,7 @@ import viper.silicon.interfaces._
 import viper.silicon.decider.Decider
 import viper.silicon.logger.records.data.WellformednessCheckRecord
 import viper.silicon.rules.{consumer, executionFlowController, executor, producer}
-import viper.silicon.state.{CreateLabel, ExhalePost, InhalePre, State, Store}
+import viper.silicon.state.{CreateLabel, ExhalePost, InhalePre, NamedLabel, State, Store}
 import viper.silicon.state.State.OldHeaps
 import viper.silicon.verifier.{Verifier, VerifierComponent}
 import viper.silicon.utils.freshSnap
@@ -84,7 +84,7 @@ trait DefaultMethodVerificationUnitProvider extends VerifierComponent { v: Verif
                          debugOldHeaps = Map(),
                          methodCfg = body)
 
-      val s0 = if (producer.debugOn) v.startKeyHeap(s, "nil", InhalePre) else s
+      val s0 = if (producer.debugOn) v.startKeyHeap(s, NamedLabel("nil"), InhalePre) else s
       val emptyPCS = v.decider.pcs.duplicate()
 
       if (Verifier.config.printMethodCFGs()) {
@@ -104,8 +104,8 @@ trait DefaultMethodVerificationUnitProvider extends VerifierComponent { v: Verif
             val s2a = s2.copy(oldHeaps = s2.oldHeaps + (Verifier.PRE_STATE_LABEL -> s2.h))
             val s2b = if (producer.debugOn) {
               val tmp = v2.finishKeyHeap(s2a)
-              val parentLabel = v2.getDebugHeapLabel(tmp).getOrElse("nil")
-              v2.recordHeap(tmp, Verifier.PRE_STATE_LABEL, parentLabel, CreateLabel, emptyPCS)
+              val parentLabel = v2.getDebugHeapLabel(tmp).getOrElse(NamedLabel("nil"))
+              v2.recordHeap(tmp, NamedLabel(Verifier.PRE_STATE_LABEL), parentLabel, CreateLabel, emptyPCS)
             } else s2a
             (  executionFlowController.locally(s2b, v2)((s3, v3) => {
                   val s3a = s3.copy(h = v3.heapSupporter.getEmptyHeap(s3.program, v3))
@@ -117,7 +117,7 @@ trait DefaultMethodVerificationUnitProvider extends VerifierComponent { v: Verif
             && {
                executionFlowController.locally(s2b, v2)((s3, v3) =>  {
                   exec(s3, body, v3)((s4, v4) => {
-                    val currentLabel = v4.getDebugHeapLabel(s4).getOrElse("finalHeapMissing")
+                    val currentLabel = v4.getDebugHeapLabel(s4).getOrElse(NamedLabel("finalHeapMissing"))
                     val s4a = if (producer.debugOn) v4.startKeyHeap(s4, currentLabel, ExhalePost) else s4
                     consumes(s4a, posts, false, postViolated, v4)((_, _, _) =>
                       Success())})}) }  )})})

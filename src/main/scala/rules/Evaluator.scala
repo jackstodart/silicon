@@ -2,19 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.rules
 
 import viper.silicon
-import viper.silicon.debugger.{DebugExp, DebugGroup, DebugNode, DebugPrecondition}
 import viper.silicon.Config.JoinMode
-import viper.silver.ast
-import viper.silver.verifier.{CounterexampleTransformer, PartialVerificationError, VerifierWarning}
-import viper.silver.verifier.errors.{ErrorWrapperWithExampleTransformer, PreconditionInAppFalse}
-import viper.silver.verifier.reasons._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
-import viper.silicon.debugger.debugger.{AnyDebugNode, PreDebugGroup}
+import viper.silicon.debugger.debugger.AnyDebugNode
+import viper.silicon.debugger.{DebugExp, DebugGroup, DebugPrecondition}
 import viper.silicon.interfaces._
 import viper.silicon.interfaces.state.ChunkIdentifer
 import viper.silicon.logger.records.data.{CondExpRecord, EvaluateRecord, ImpliesRecord}
@@ -23,12 +19,15 @@ import viper.silicon.state.terms._
 import viper.silicon.state.terms.implicits._
 import viper.silicon.state.terms.perms.IsPositive
 import viper.silicon.utils.ast._
-import viper.silicon.utils.toSf
 import viper.silicon.verifier.Verifier
 import viper.silicon.{Map, TriggerSets}
+import viper.silver.ast
 import viper.silver.ast.{AnnotationInfo, LocalVarWithVersion, WeightedQuantifier}
 import viper.silver.reporter.{AnnotationWarning, WarningsDuringVerification}
 import viper.silver.utility.Common.Rational
+import viper.silver.verifier.errors.{ErrorWrapperWithExampleTransformer, PreconditionInAppFalse}
+import viper.silver.verifier.reasons._
+import viper.silver.verifier.{CounterexampleTransformer, PartialVerificationError, VerifierWarning}
 
 
 /* TODO: With the current design w.r.t. parallelism, eval should never "move" an execution
@@ -658,7 +657,7 @@ object evaluator extends EvaluationRules {
               val (stateArgs, snapToRecord) = v3.heapSupporter.functionAppSnapArgs(s2a, func, tArgs, snap.get, v3)
               val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)),
                 stateArgs ++ tArgs)
-              val preExp = Option.when(debugOn)(DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel.getOrElse("missing heap label")))
+              val preExp = Option.when(debugOn)(DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel.map(_.label).getOrElse("missing heap label")))
               v3.decider.assume(preFApp, preExp)
               val funcAnn = func.info.getUniqueInfo[AnnotationInfo]
               val tFApp = funcAnn match {
@@ -703,7 +702,7 @@ object evaluator extends EvaluationRules {
           evals(s, eArgs, _ => pve, v)((s1, tArgs, eArgsNew, v1) =>
             eval(s1, ePerm.getOrElse(ast.FullPerm()()), pve, v1)((s2, tPerm, ePermNew, v2) => {
               val s2a = if (debugOn && s1.isRecordingHeaps) v2.recordIntermediateHeap(s2, EvalExp(uf)) else s2
-              val s2Label = v2.getDebugHeapLabel(s2a).getOrElse("missingUnfoldingHeap")
+              val s2Label = v2.getDebugHeapLabel(s2a).map(_.label).getOrElse("missingUnfoldingHeap")
               val unfoldingNew = eArgsNew.map(args => uf.copy(acc = acc.copy(loc = pa.copy(args = args)(pa.pos, pa.info, pa.errT),
                 permExp = Some(ePermNew.get))(acc.pos, acc.info, acc.errT))(uf.pos, uf.info, uf.errT))
               val joinExp = Option.when(debugOn)({

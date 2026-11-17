@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.supporters.functions
 
@@ -233,7 +233,7 @@ trait DefaultFunctionVerificationUnitProvider extends VerifierComponent { v: Ver
       }
       val g = Store(argsStore + (function.result -> (data.formalResult, data.valFormalResultExp)))
       val s = sInit.copy(g = g, h = v.heapSupporter.getEmptyHeap(sInit.program, v, mayDefineNewVars = false), oldHeaps = OldHeaps())
-      val s0 = if (debugOn) v.startKeyHeap(s, "nil", InhalePre) else s
+      val s0 = if (debugOn) v.startKeyHeap(s, NamedLabel("nil"), InhalePre) else s
 
       var phase1Data: Seq[Phase1Data] = Vector.empty
       var recorders: Seq[FunctionRecorder] = Vector.empty
@@ -278,7 +278,7 @@ trait DefaultFunctionVerificationUnitProvider extends VerifierComponent { v: Ver
             decider.setCurrentBranchCondition(And(bcsPre), (BigAnd(bcsPreExp.map(_._1)), Option.when(debugOn)(BigAnd(bcsPreExp.map(_._2.get)))))
             decider.assume(pcsPre, Option.when(debugOn)(DebugGroup(s"precondition of ${function.name}", pcsPreExp.get)), enforceAssumption = false)
             v.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
-            val s1a = if (debugOn) v.startKeyHeap(s1, "nil", EvalExp(body)) else s1
+            val s1a = if (debugOn) v.startKeyHeap(s1, NamedLabel("nil"), EvalExp(body)) else s1
             eval(s1a, body, FunctionNotWellformed(function), v)((s2, tBody, bodyNew, _) => {
               val debugExp = if (debugOn) {
                 val e = ast.EqCmp(ast.Result(function.typ)(), body)(function.pos, function.info, function.errT)
@@ -288,7 +288,7 @@ trait DefaultFunctionVerificationUnitProvider extends VerifierComponent { v: Ver
               decider.assume(BuiltinEquals(data.formalResult, tBody), debugExp)
               val s2a = if (debugOn) {
                 val tmp = v.finishKeyHeap(s2)
-                v.startKeyHeap(tmp, v.getDebugHeapLabel(tmp).getOrElse("missingFunctionHeap"), ExhalePost)
+                v.startKeyHeap(tmp, v.getDebugHeapLabel(tmp).getOrElse(NamedLabel("missingFunctionHeap")), ExhalePost)
               } else s2
               consumes(s2a, posts, false, postconditionViolated, v)((s3, _, _) => {
                 recorders :+= s3.functionRecorder

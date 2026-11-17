@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.debugger
 
@@ -11,8 +11,8 @@ import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.decider.PathConditions
 import viper.silicon.state.terms.{Quantifier, Term, Trigger, Var}
 import viper.silver.ast
-import viper.silver.ast.{Exp, Position}
 import viper.silver.ast.utility.Simplifier
+import viper.silver.ast.{Exp, Position}
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.supporters
 
@@ -110,7 +110,7 @@ trait DefaultPredicateVerificationUnitProvider extends VerifierComponent { v: Ve
                          h = v.heapSupporter.getEmptyHeap(sInit.program, v),
                          oldHeaps = OldHeaps(),
                          functionRecorder = funcRecorder)
-      val s0 = if (debugOn) v.startKeyHeap(s, "nil", InhalePre) else s
+      val s0 = if (debugOn) v.startKeyHeap(s, NamedLabel("nil"), InhalePre) else s
 
       val err = PredicateNotWellformed(predicate)
 

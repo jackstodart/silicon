@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.rules
 
@@ -116,7 +116,7 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
 
     val alreadyRecording = s.isRecordingHeaps
     val s1 = if (debugOn && !alreadyRecording)
-      v.startKeyHeap(s, v.getDebugHeapLabel(s).getOrElse("preConsolidateHeapMissing"), StateConsolidation)
+      v.startKeyHeap(s, v.getDebugHeapLabel(s).getOrElse(NamedLabel("preConsolidateHeapMissing")), StateConsolidation)
     else s
     /* While packaging a wand (s.exhaleExt), the reserve heaps [hUsed, hOps, hLhs, ...] consist of the
      * three heaps that belong to the package operation, followed by the heaps of the surrounding

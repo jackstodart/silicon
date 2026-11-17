@@ -2,28 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.state
 
 import viper.silicon.Config.JoinMode
 import viper.silicon.Config.JoinMode.JoinMode
-import viper.silver.ast
-import viper.silver.cfg.silver.SilverCfg
 import viper.silicon.common.Mergeable
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.decider.{PathConditionStack, RecordedPathConditions}
-import viper.silicon.interfaces.state.GeneralChunk
-import viper.silicon.state.State.{DebugOldHeaps, HeapLabel, OldHeaps, TemporaryRecord}
-import viper.silicon.state.terms.{Term, Var}
-import viper.silicon.interfaces.state.Chunk
+import viper.silicon.interfaces.state.{Chunk, GeneralChunk}
+import viper.silicon.state.State.{DebugOldHeaps, OldHeaps, TemporaryRecord}
 import viper.silicon.state.terms.predef.`?r`
-import viper.silicon.state.terms.{And, Ite}
+import viper.silicon.state.terms.{And, Ite, Term, Var}
 import viper.silicon.supporters.PredicateData
 import viper.silicon.supporters.functions.{FunctionData, FunctionRecorder, NoopFunctionRecorder}
 import viper.silicon.utils.ast.BigAnd
 import viper.silicon.verifier.Verifier
 import viper.silicon.{Map, SiliconRunner, Stack}
+import viper.silver.ast
+import viper.silver.cfg.silver.SilverCfg
 import viper.silver.utility.Sanitizer
 
 final case class State(g: Store = Store(),
@@ -198,6 +196,14 @@ final case class State(g: Store = Store(),
   override val toString = s"${this.getClass.getSimpleName}(...)"
 }
 
+sealed trait HeapLabel {
+  def label: String
+}
+case class NamedLabel(label: String) extends HeapLabel
+case class DebugLabel(number: Int) extends HeapLabel {
+  val label = s"debug@$number"
+}
+
 sealed trait HeapCause
 case object InhalePre extends HeapCause
 case object ExhalePost extends HeapCause
@@ -220,8 +226,7 @@ case class IntermediateHeapRecord(heap: Heap,
                                   newBranchConds: Seq[(ast.Exp, Term)])
 
 object State {
-  type HeapLabel = String
-  type OldHeaps = Map[HeapLabel, Heap]
+  type OldHeaps = Map[String, Heap]
   type DebugOldHeaps = Map[HeapLabel, HeapRecord]
   type TemporaryRecord = (HeapLabel, HeapCause, PathConditionStack, Map[HeapLabel, IntermediateHeapRecord])
 
@@ -609,12 +614,10 @@ object State {
   def preserveAfterLocalEvaluation(pre: State, post: State): State = {
     pre.copy(debugOldHeaps = post.debugOldHeaps,
              temporaryHeapRecord = post.temporaryHeapRecord,
+             constrainableARPs = post.constrainableARPs,
              functionRecorder = post.functionRecorder,
              possibleTriggers = post.possibleTriggers,
-             smCache = post.smCache,
-             constrainableARPs = post.constrainableARPs,
-             debugOldHeaps = post.debugOldHeaps,
-             temporaryHeapRecord = post.temporaryHeapRecord)
+             smCache = post.smCache)
   }
 
   def conflictFreeUnionOrAbort[K, V](m1: Map[K, V], m2: Map[K, V]): Map[K,V] =

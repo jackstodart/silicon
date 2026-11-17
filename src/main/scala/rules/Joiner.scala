@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.rules
 
@@ -11,7 +11,7 @@ import viper.silicon.decider.RecordedPathConditions
 import viper.silicon.interfaces.{Success, VerificationResult}
 import viper.silicon.logger.records.structural.JoiningRecord
 import viper.silicon.state.terms.{And, Or, Term}
-import viper.silicon.state.{State, StateMerge}
+import viper.silicon.state.{NamedLabel, State, StateMerge}
 import viper.silicon.utils.ast.{BigAnd, BigOr}
 import viper.silicon.verifier.Verifier
 import viper.silver.ast
@@ -91,7 +91,7 @@ object joiner extends JoiningRules {
         Success()
       } else {
         val (sJoined, dataJoined) = merge(entries)
-        val sJoined2 = if (debugOn) v.recordHeap(sJoined, "nil", StateMerge, v.decider.pcs.duplicate()) else sJoined
+        val sJoined2 = if (debugOn) v.recordHeap(sJoined, NamedLabel("nil"), StateMerge, v.decider.pcs.duplicate()) else sJoined
 
         var feasibleBranches: List[Term] = Nil
         var feasibleBranchesExp: Option[List[ast.Exp]] = Option.when(debugOn)(Nil)

@@ -2,20 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.verifier
 
 import com.typesafe.scalalogging.Logger
-import viper.silicon.{Config, Map}
 import viper.silicon.decider.{Decider, PathConditionStack}
 import viper.silicon.logger.MemberSymbExLogger
 import viper.silicon.reporting.StateFormatter
-import viper.silicon.state.terms.{AxiomRewriter, Term, TriggerGenerator}
 import viper.silicon.rules.{HeapSupportRules, StateConsolidationRules, magicWandSupporter}
 import viper.silicon.state._
+import viper.silicon.state.terms.{AxiomRewriter, Term, TriggerGenerator}
 import viper.silicon.supporters.{QuantifierSupporter, SnapshotSupporter}
 import viper.silicon.utils.Counter
+import viper.silicon.{Config, Map}
 import viper.silver.ast
 import viper.silver.reporter.Reporter
 
@@ -50,13 +50,13 @@ trait Verifier {
 
   def getDebugOldLabel(s: State, pos: ast.Position, h: Option[Heap] = None): String =
     heapRecorder.getDebugOldLabel(s, this, pos, h)
-  def getDebugHeapLabel(s: State, h: Option[Heap] = None): Option[String] =
+  def getDebugHeapLabel(s: State, h: Option[Heap] = None): Option[HeapLabel] =
     heapRecorder.getDebugHeapLabel(s, this, h)
-  def recordHeap(s: State, parentLabel: String, cause: HeapCause, oldPCS: PathConditionStack): State =
+  def recordHeap(s: State, parentLabel: HeapLabel, cause: HeapCause, oldPCS: PathConditionStack): State =
     heapRecorder.recordHeap(s, this, None, parentLabel, cause, oldPCS, decider.pcs.duplicate())
-  def recordHeap(s: State, currentLabel: String, parentLabel: String, cause: HeapCause, oldPCS: PathConditionStack): State =
+  def recordHeap(s: State, currentLabel: HeapLabel, parentLabel: HeapLabel, cause: HeapCause, oldPCS: PathConditionStack): State =
     heapRecorder.recordHeap(s, this, Some(currentLabel), parentLabel, cause, oldPCS, decider.pcs.duplicate())
-  def startKeyHeap(s: State, parentLabel: String, cause: HeapCause): State =
+  def startKeyHeap(s: State, parentLabel: HeapLabel, cause: HeapCause): State =
     heapRecorder.startKeyHeap(s, parentLabel, cause, decider.pcs.duplicate())
   def recordIntermediateHeap(s: State): State =
     heapRecorder.recordIntermediateHeap(s, this, decider.pcs.duplicate(), None)
@@ -64,7 +64,7 @@ trait Verifier {
     heapRecorder.recordIntermediateHeap(s, this, decider.pcs.duplicate(), Some(cause))
   def finishKeyHeap(s: State): State =
     heapRecorder.finishKeyHeap(s, this, decider.pcs.duplicate())
-  def mergeHeapRecord(s: State, kv: (String, HeapRecord)): State =
+  def mergeHeapRecord(s: State, kv: (HeapLabel, HeapRecord)): State =
     heapRecorder.mergeHeapRecord(s, kv._1, kv._2)
 
   def reportFurtherErrors(): Boolean = (Verifier.config.numberOfErrorsToReport() > errorsReportedSoFar.get()
@@ -86,12 +86,12 @@ class DebugHeapRecorder {
   private val debugHeapCounter = new AtomicInteger(0);
 
   // Returns Left for an existing label or Right when it made a new label.
-  private def getOrMakeHeapLabel(s: State, v: Verifier, h: Option[Heap]): Either[String, String] = {
+  private def getOrMakeHeapLabel(s: State, v: Verifier, h: Option[Heap]): Either[HeapLabel, HeapLabel] = {
     getDebugHeapLabel(s, v, h) match {
       case Some(label) => Left(label)
       case None =>
         val counter = debugHeapCounter.getAndIncrement()
-        Right(s"debug@$counter")
+        Right(DebugLabel(counter))
     }
   }
 
@@ -105,14 +105,14 @@ class DebugHeapRecorder {
       case column: ast.HasLineColumn => s"l:${column.line}.${column.column}"
       case _ => s"l:unknown"
     }
-    val heapLabel = getDebugHeapLabel(s, v, h).getOrElse("unrecordedHeap")
+    val heapLabel = getDebugHeapLabel(s, v, h).map(_.label).getOrElse("unrecordedHeap")
     s"$heapLabel#$posString"
   }
 
   /** Returns the label for a given heap, or None if the heap has not been recorded.
     * In case of multiple matches, prefer labelled key heaps then debug key heaps, then tempHeaps, then childrenHeaps.
     */
-  def getDebugHeapLabel(s: State, v: Verifier, h: Option[Heap]): Option[String] = {
+  def getDebugHeapLabel(s: State, v: Verifier, h: Option[Heap]): Option[HeapLabel] = {
     val heap = h match {
       case Some(heap) => heap
       case None => magicWandSupporter.getEvalHeap(s, v)
@@ -120,7 +120,7 @@ class DebugHeapRecorder {
 
     val equalKeyHeaps = s.debugOldHeaps.collect {
       case (label, record) if heap.equalChunks(record.heap) => label }
-    val (debugs, labelled) = equalKeyHeaps.partition(_.contains("debug"))
+    val (debugs, labelled) = equalKeyHeaps.partition(_.isInstanceOf[DebugLabel])
 
     if (labelled.nonEmpty) labelled.lastOption
     else if (debugs.nonEmpty) debugs.lastOption
@@ -143,7 +143,7 @@ class DebugHeapRecorder {
   }
 
   // Record a heap as a key heap with no intermediates
-  def recordHeap(s: State, v: Verifier, currentLabel: Option[String], parentLabel: String, cause: HeapCause,
+  def recordHeap(s: State, v: Verifier, currentLabel: Option[HeapLabel], parentLabel: HeapLabel, cause: HeapCause,
                  oldPCS: PathConditionStack, newPCS: PathConditionStack): State = {
     lazy val branchConds = branchCondDiff(oldPCS, newPCS)
     lazy val heapRecord = HeapRecord(magicWandSupporter.getEvalHeap(s, v), parentLabel, cause, branchConds, Map.empty)
@@ -158,7 +158,7 @@ class DebugHeapRecorder {
     }
   }
 
-  def startKeyHeap(s: State, parentLabel: String, cause: HeapCause, pcs: PathConditionStack): State = {
+  def startKeyHeap(s: State, parentLabel: HeapLabel, cause: HeapCause, pcs: PathConditionStack): State = {
     s.copy(temporaryHeapRecord = Some(parentLabel, cause, pcs, Map.empty))
   }
 
@@ -202,7 +202,7 @@ class DebugHeapRecorder {
     }
   }
 
-  def mergeHeapRecord(s: State, label: String, record: HeapRecord): State = {
+  def mergeHeapRecord(s: State, label: HeapLabel, record: HeapRecord): State = {
     s.debugOldHeaps.get(label) match {
       case Some(sRecord) if sRecord == record => s
       case Some(sRecord) =>

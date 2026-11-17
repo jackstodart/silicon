@@ -1,3 +1,9 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) 2011-2026 ETH Zurich.
+
 package viper.silicon.debugger
 
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
@@ -11,7 +17,7 @@ import viper.silicon.rules.evaluator
 import viper.silicon.state.State.TemporaryRecord
 import viper.silicon.state._
 import viper.silicon.state.terms.{Term, True}
-import viper.silicon.utils.ast.{flattenOperator, simplifyVariableName}
+import viper.silicon.utils.ast.simplifyVariableName
 import viper.silicon.verifier.{MainVerifier, Verifier, WorkerVerifier}
 import viper.silver.ast
 import viper.silver.ast._
@@ -23,7 +29,6 @@ import viper.silver.verifier.errors.ContractNotWellformed
 import viper.silver.verifier.{ErrorReason, PartialVerificationError}
 
 import java.nio.file.Paths
-import scala.collection.mutable
 import scala.io.StdIn.readLine
 
 package object debugger {
@@ -99,19 +104,19 @@ case class ProofObligation(s: State,
     else h.values.map(c => s"$tabs${chunkString(c)}\n").mkString("")
   }
 
-  private def debugHeapString(label: String, heapRecord: HeapRecord): String = {
+  private def debugHeapString(label: HeapLabel, heapRecord: HeapRecord): String = {
     val condString = if (heapRecord.branchConds.nonEmpty)
       "\tNew branch conditions: " + heapRecord.branchConds.map(bc => bc._1.toString).mkString(", ") + "\n"
     else ""
-    s"Heap $label:\n" +
-      s"\tParent: ${heapRecord.parentLabel}\n" +
+    s"Heap ${label.label}:\n" +
+      s"\tParent: ${heapRecord.parentLabel.label}\n" +
       s"\tCause: ${causeToString(heapRecord.cause)}\n" +
       condString +
       heapChunksString(heapRecord.heap) + "\n" +
       heapRecord.intermediateHeaps.map { case (l, r) => intermediateHeapString(l, r) + "\n" }.mkString("")
   }
 
-  private def intermediateHeapString(label: String, heapRecord: IntermediateHeapRecord): String = {
+  private def intermediateHeapString(label: HeapLabel, heapRecord: IntermediateHeapRecord): String = {
     val condString = if (heapRecord.newBranchConds.nonEmpty)
       "\t\tNew branch conditions: " + heapRecord.newBranchConds.map(bc => bc._1.toString).mkString(", ") + "\n"
     else ""
@@ -119,7 +124,7 @@ case class ProofObligation(s: State,
       case Some(cause) => s"\t\tCause: ${causeToString(cause)}\n"
       case None => ""
     }
-    s"\tIntermediate heap $label:\n" +
+    s"\tIntermediate heap ${label.label}:\n" +
       causeString +
       condString +
       heapChunksString(heapRecord.heap, isIntermediateHeap = true)
@@ -130,7 +135,7 @@ case class ProofObligation(s: State,
       case None => ""
       case Some((label, cause, _, heaps)) =>
         s"Current intermediate heaps:\n" +
-          s"\tParent: $label\n" +
+          s"\tParent: ${label.label}\n" +
           s"\tCause: ${causeToString(cause)}\n\n" +
           heaps.map { case (l, r) => intermediateHeapString(l, r) + "\n" }.mkString("")
     }
@@ -140,7 +145,7 @@ case class ProofObligation(s: State,
     if (!printConfig.printOldHeaps)
       s"Heap:\n${heapChunksString(s.h)}\n"
     else {
-      val currLabel = v.getDebugHeapLabel(s).map(" (" + _ + ")").getOrElse("")
+      val currLabel = v.getDebugHeapLabel(s).map(" (" + _.label + ")").getOrElse("")
       s"Current Heap$currLabel:\n${heapChunksString(s.h)}\n" +
         s.debugOldHeaps.map { case (label, dh) => debugHeapString(label, dh) }.mkString("") +
         tempHeapString(s.temporaryHeapRecord)

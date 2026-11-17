@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.rules
 
@@ -96,7 +96,7 @@ object executor extends ExecutionRules {
   def handleOutEdge(s: State, edge: SilverEdge, v: Verifier): State = {
     edge.kind match {
       case cfg.Kind.Out =>
-        val s1 = if (debugOn) v.startKeyHeap(s, "nil", StateMerge) else s
+        val s1 = if (debugOn) v.startKeyHeap(s, NamedLabel("nil"), StateMerge) else s
         val (fr1, h1) = v.stateConsolidator(s1).merge(s1.functionRecorder, s1, s1.h, s1.invariantContexts.head, v)
         val s2 = s1.copy(functionRecorder = fr1, h = h1, invariantContexts = s1.invariantContexts.tail)
         if (debugOn) v.finishKeyHeap(s2) else s2
@@ -290,7 +290,7 @@ object executor extends ExecutionRules {
             (executionFlowController.locally(sBody, v)((s0, v0) => {
               v0.decider.prover.comment("Loop head block: Check well-definedness of invariant")
               val mark = v0.decider.setPathConditionMark()
-              val s0a = if (debugOn) v.startKeyHeap(s0, "nil", InhaleInv) else s0
+              val s0a = if (debugOn) v.startKeyHeap(s0, NamedLabel("nil"), InhaleInv) else s0
               produces(s0a, freshSnap, invs, ContractNotWellformed, v0)((s1, v1) => {
                 val s1a = if (debugOn) v1.finishKeyHeap(s1) else s1
                 phase1data = phase1data :+ (s1a,
@@ -302,7 +302,7 @@ object executor extends ExecutionRules {
             combine executionFlowController.locally(sLocal, v)((s0, v0) => {
               v0.decider.prover.comment("Loop head block: Establish invariant")
               val s0a = if (debugOn)
-                v0.startKeyHeap(s0, v0.getDebugHeapLabel(s0).getOrElse("missingHeap"), ExhaleInv) else s0
+                v0.startKeyHeap(s0, v0.getDebugHeapLabel(s0).getOrElse(NamedLabel("missingHeap")), ExhaleInv) else s0
               consumes(s0a, invs, false, LoopInvariantNotEstablished, v0)((sLeftover, _, v1) => {
                 val sLeftover2 = if (debugOn) v1.finishKeyHeap(sLeftover) else sLeftover
                 val exhaleHeapRecord = Option.when(debugOn)({
@@ -392,7 +392,7 @@ object executor extends ExecutionRules {
     val s = state.copy(h = magicWandSupporter.getExecutionHeap(state))
     val Q: (State, Verifier) => VerificationResult = (s, v) => {
       continuation(magicWandSupporter.moveToReserveHeap(s, v), v)}
-    val oldLabel = v.getDebugHeapLabel(s).getOrElse("missingHeap")
+    val oldLabel = v.getDebugHeapLabel(s).getOrElse(NamedLabel("missingHeap"))
     val oldPCS = v.decider.pcs.duplicate()
 
     /* For debugging-purposes only */
@@ -413,7 +413,7 @@ object executor extends ExecutionRules {
 
       case ast.Label(name, _) =>
         val s1 = s.copy(oldHeaps = s.oldHeaps + (name -> magicWandSupporter.getEvalHeap(s, v)))
-        val s2 = if (debugOn) v.recordHeap(s1, name, oldLabel, CreateLabel, oldPCS) else s1
+        val s2 = if (debugOn) v.recordHeap(s1, NamedLabel(name), oldLabel, CreateLabel, oldPCS) else s1
         Q(s2, v)
 
       case ast.LocalVarDeclStmt(decl) =>
