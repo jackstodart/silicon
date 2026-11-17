@@ -300,46 +300,47 @@ object executor extends ExecutionRules {
                 Success()
               })})
             combine executionFlowController.locally(sLocal, v)((s0, v0) => {
-                v0.decider.prover.comment("Loop head block: Establish invariant")
-                val s0a = if (debugOn)
-                  v0.startKeyHeap(s0, v0.getDebugHeapLabel(s0).getOrElse("missingHeap"), ExhaleInv) else s0
-                consumes(s0a, invs, false, LoopInvariantNotEstablished, v0)((sLeftover, _, v1) => {
-                  val sLeftover2 = if (debugOn) v1.finishKeyHeap(sLeftover) else sLeftover
-                  val exhaleHeapRecord = Option.when(debugOn)({
-                    val label = v1.getDebugHeapLabel(sLeftover2).get
-                    (label, sLeftover2.debugOldHeaps(label))
-                  })
+              v0.decider.prover.comment("Loop head block: Establish invariant")
+              val s0a = if (debugOn)
+                v0.startKeyHeap(s0, v0.getDebugHeapLabel(s0).getOrElse("missingHeap"), ExhaleInv) else s0
+              consumes(s0a, invs, false, LoopInvariantNotEstablished, v0)((sLeftover, _, v1) => {
+                val sLeftover2 = if (debugOn) v1.finishKeyHeap(sLeftover) else sLeftover
+                val exhaleHeapRecord = Option.when(debugOn)({
+                  val label = v1.getDebugHeapLabel(sLeftover2).get
+                  (label, sLeftover2.debugOldHeaps(label))
+                })
 
-                  v1.decider.prover.comment("Loop head block: Execute statements of loop head block (in invariant state)")
-                  phase1data.foldLeft(Success(): VerificationResult) {
-                    case (result, _) if !result.continueVerification => result
-                    case (intermediateResult, (s1, pcs, ff1, fm1)) => /* [BRANCH-PARALLELISATION] ff1, m1 */
-                      val s1a = s1.copy(invariantContexts = sLeftover2.h +: s1.invariantContexts)
-                      val s1b = if (debugOn) v1.mergeHeapRecord(s1a, exhaleHeapRecord.get) else s1a
-                      intermediateResult combine executionFlowController.locally(s1b, v1)((s2, v2) => {
-                        v2.decider.declareAndRecordAsFreshFunctions(ff1 -- v2.decider.freshFunctions) /* [BRANCH-PARALLELISATION] */
-                        v2.decider.declareAndRecordAsFreshMacros(fm1.filter(!v2.decider.freshMacros.contains(_)))  /* [BRANCH-PARALLELISATION] */
-                        val debugGroup = Option.when(debugOn)(DebugInvariant(loopPos, pcs.assumptionExps))
-                        v2.decider.assume(pcs.assumptions, debugGroup, enforceAssumption = false)
-                        v2.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterInhale)
-                        if (v2.decider.checkSmoke())
-                          Success()
-                        else {
-                          execs(s2, stmts, v2)((s3, v3) => {
-                            val edgeCondWelldefinedness = {
-                              v1.decider.prover.comment("Loop head block: Check well-definedness of edge conditions")
-                              edgeConditions.foldLeft(Success(): VerificationResult) {
-                                case (result, _) if !result.continueVerification => result
-                                case (intermediateResult, eCond) =>
-                                  intermediateResult combine executionFlowController.locally(s3, v3)((s4, v4) => {
-                                    eval(s4, eCond, WhileFailed(eCond), v4)((_, _, _, _) =>
-                                      Success())
-                                  })
-                              }
+                v1.decider.prover.comment("Loop head block: Execute statements of loop head block (in invariant state)")
+                phase1data.foldLeft(Success(): VerificationResult) {
+                  case (result, _) if !result.continueVerification => result
+                  case (intermediateResult, (s1, pcs, ff1, fm1)) => /* [BRANCH-PARALLELISATION] ff1, m1 */
+                    val s1a = s1.copy(invariantContexts = sLeftover2.h +: s1.invariantContexts)
+                    val s1b = if (debugOn) v1.mergeHeapRecord(s1a, exhaleHeapRecord.get) else s1a
+                    intermediateResult combine executionFlowController.locally(s1b, v1)((s2, v2) => {
+                      v2.decider.declareAndRecordAsFreshFunctions(ff1 -- v2.decider.freshFunctions) /* [BRANCH-PARALLELISATION] */
+                      v2.decider.declareAndRecordAsFreshMacros(fm1.filter(!v2.decider.freshMacros.contains(_))) /* [BRANCH-PARALLELISATION] */
+                      val debugGroup = Option.when(debugOn)(DebugInvariant(loopPos, pcs.assumptionExps))
+                      v2.decider.assume(pcs.assumptions, debugGroup, enforceAssumption = false)
+                      v2.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterInhale)
+                      if (v2.decider.checkSmoke())
+                        Success()
+                      else {
+                        execs(s2, stmts, v2)((s3, v3) => {
+                          val edgeCondWelldefinedness = {
+                            v1.decider.prover.comment("Loop head block: Check well-definedness of edge conditions")
+                            edgeConditions.foldLeft(Success(): VerificationResult) {
+                              case (result, _) if !result.continueVerification => result
+                              case (intermediateResult, eCond) =>
+                                intermediateResult combine executionFlowController.locally(s3, v3)((s4, v4) => {
+                                  eval(s4, eCond, WhileFailed(eCond), v4)((_, _, _, _) =>
+                                    Success())
+                                })
                             }
-                            v3.decider.prover.comment("Loop head block: Follow loop-internal edges")
-                            edgeCondWelldefinedness combine follows(s3, sortedEdges, WhileFailed, v3, joinPoint, pathId)(Q)})
-                        }})}})}))
+                          }
+                          v3.decider.prover.comment("Loop head block: Follow loop-internal edges")
+                          edgeCondWelldefinedness combine follows(s3, sortedEdges, WhileFailed, v3, joinPoint, pathId)(Q)
+                        })
+                      }})}})}))
 
           case _ =>
             /* We've reached a loop head block via an edge other than an in-edge: a normal edge or
@@ -517,17 +518,23 @@ object executor extends ExecutionRules {
         val pve = AssertFailed(assert)
         val s0 = if (debugOn) v.startKeyHeap(s, oldLabel, ExecStmt(assert)) else s
 
-        if (s.exhaleExt) v.heapSupporter.checkEmptyExhaleExtState(s)
-        consume(s0, a, false, pve, v)((s1, _, v1) => {
-          val s1a = if (s.exhaleExt) s1.copy(h = s1.reserveHeaps.head)
-          else s1.copy(h = s.h, reserveHeaps = s.reserveHeaps)
+        if (s.exhaleExt) {
+          v.heapSupporter.checkEmptyExhaleExtState(s)
+
           /* When exhaleExt is set magicWandSupporter.transfer is used to transfer permissions to
            * hUsed (reserveHeaps.head) instead of consuming them. hUsed is later discarded and replaced
            * by s.h. By copying hUsed to s.h the contained permissions remain available inside the wand.
            */
-          val s1b = if (debugOn) v1.finishKeyHeap(s1a) else s1a
-          Q(s1b, v1)
-        })
+          consume(s0, a, false, pve, v)((s1, _, v1) => {
+            val s1a = s1.copy(h = s1.reserveHeaps.head)
+            val s1b = if (debugOn) v1.finishKeyHeap(s1a) else s1a
+            Q(s1b, v1)
+          })
+        } else
+          consume(s0, a, false, pve, v)((s1, _, v1) => {
+            val s1a = s1.copy(h = s.h, reserveHeaps = s.reserveHeaps)
+            val s1b = if (debugOn) v1.finishKeyHeap(s1a) else s1a
+            Q(s1b, v1)})
 
       // Calling hack407_R() results in Silicon efficiently havocking all instances of resource R.
       // See also Silicon issue #407.
@@ -598,7 +605,23 @@ object executor extends ExecutionRules {
             val outs = meth.formalReturns.map(_.localVar)
             val gOuts = Store(outs.map(x => (x, v2.decider.fresh(x))).toMap)
 
-            val newOldHeaps = if (needsOldHeapReconstruct) {
+            // Produces the postcondition using the given old heap and continues with Q.
+            def producePost(sPre: State, oldHeap: Heap, vPre: Verifier): VerificationResult = {
+              val s2a = sPre.copy(g = sPre.g + gOuts, oldHeaps = sPre.oldHeaps + (Verifier.PRE_STATE_LABEL -> oldHeap))
+              produces(s2a, freshSnap, meth.posts, _ => pveCallTransformed, vPre)((s3, v3) => {
+                v3.symbExLog.closeScope(postCondId)
+                v3.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterInhale)
+                val gLhs = Store(lhs.zip(outs)
+                                .map(p => (p._1, s3.g.values(p._2))).toMap)
+                val s3a = s3.copy(g = s1.g + gLhs,
+                                 oldHeaps = s1.oldHeaps,
+                                 recordVisited = s1.recordVisited)
+                v3.symbExLog.closeScope(sepIdentifier)
+                val s3b = if (debugOn) v3.finishKeyHeap(s3a) else s3a
+                Q(s3b, v3)})
+            }
+
+            if (needsOldHeapReconstruct) {
               // We're in the process of packaging a wand, which means that we cannot simply use the
               // heap before the call as the old heap for producing the postcondition.
               // Instead, we produce the preconditions again to get an evalHeap that contains all permissions
@@ -610,35 +633,17 @@ object executor extends ExecutionRules {
               // e.g. duplicate permissions for the same field (from the wand lhs and the surrounding
               // context), which would be inconsistent, so that if state consolidation happens during
               // the postcondition consume, we'll assume false.
-              var oldHeapState: Option[State] = None
-              produces(s2, toSf(preSnap.get), meth.pres, _ => pveCallTransformed, v2)((so, _) => {
-                oldHeapState = Some(so)
-                Success()
+              // The rest of the call is executed inside the continuation of the re-production, such that
+              // every branch of the precondition gets its own old heap, together with its branch
+              // conditions (see issue #1021).
+              produces(s2, toSf(preSnap.get), meth.pres, _ => pveCallTransformed, v2)((so, vo) => {
+                val oldHeap = magicWandSupporter.getEvalHeap(so, vo)
+                producePost(s2.copy(functionRecorder = so.functionRecorder), oldHeap, vo)
               })
-              val oldHeap = oldHeapState match {
-                case Some(so) => magicWandSupporter.getEvalHeap(so, v2)
-                case None => {
-                  // This basically should not happen, but to fail gracefully if it does because
-                  // of some incompleteness, we use an incomplete heap instead.
-                  magicWandSupporter.getEvalHeap(s1, v2)
-                }
-              }
-              s2.oldHeaps + (Verifier.PRE_STATE_LABEL -> oldHeap)
             } else {
-              s2.oldHeaps + (Verifier.PRE_STATE_LABEL -> magicWandSupporter.getEvalHeap(s1, v2))
+              producePost(s2, magicWandSupporter.getEvalHeap(s1, v2), v2)
             }
-            val s2a = s2.copy(g = s2.g + gOuts, oldHeaps = newOldHeaps)
-            produces(s2a, freshSnap, meth.posts, _ => pveCallTransformed, v2)((s3, v3) => {
-              v3.symbExLog.closeScope(postCondId)
-              v3.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterInhale)
-              val gLhs = Store(lhs.zip(outs)
-                              .map(p => (p._1, s3.g.values(p._2))).toMap)
-              val s3a = s3.copy(g = s1.g + gLhs,
-                               oldHeaps = s1.oldHeaps,
-                               recordVisited = s1.recordVisited)
-              v3.symbExLog.closeScope(sepIdentifier)
-              val s3b = if (debugOn) v3.finishKeyHeap(s3a) else s3a
-              Q(s3b, v3)})})})
+          })})
 
       case fold @ ast.Fold(pap @ ast.PredicateAccessPredicate(predAcc @ ast.PredicateAccess(eArgs, _), _)) =>
         assert(s.constrainableARPs.isEmpty)

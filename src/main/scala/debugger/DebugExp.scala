@@ -318,14 +318,14 @@ object DebugGroup {
 class DebugImplication(val id: Int,
                        val description: Option[String],
                        val isInternal: Boolean,
-                       val term : Term, // Antecedent of the implication
+                       val condTerm : Term, // Antecedent of the implication
                        val originalExp: Option[Exp],
                        val finalExp: Option[Exp],
                        val children: InsertionOrderedSet[AnyDebugNode],
                        val actualTerms: InsertionOrderedSet[Term]) // The assumed implication(s)
                        extends DebugGroupNode[DebugImplication] {
   override def filterTerm(t: Term): Option[DebugNode[DebugImplication]] = {
-    if (term.contains(t)) None
+    if (condTerm.contains(t)) None
     else {
       val newChildren = children.flatMap(_.filterTerm(t))
       Option.when(newChildren.nonEmpty)(withRemainingChildren(newChildren))
@@ -333,13 +333,13 @@ class DebugImplication(val id: Int,
   }
 
   override def withChildren(newChildren: InsertionOrderedSet[AnyDebugNode]): DebugImplication =
-    new DebugImplication(id, description, isInternal, term, originalExp, finalExp, newChildren, actualTerms)
+    new DebugImplication(id, description, isInternal, condTerm, originalExp, finalExp, newChildren, actualTerms)
 
   override def withTerms(newTerms: InsertionOrderedSet[Term]): DebugImplication =
-    new DebugImplication(id, description, isInternal, term, originalExp, finalExp, children, newTerms)
+    new DebugImplication(id, description, isInternal, condTerm, originalExp, finalExp, children, newTerms)
 
   override def headerString(config: DebugPrintConfiguration): String = {
-    if (config.printInternalTermRepresentation) s"$term ==>"
+    if (config.printInternalTermRepresentation) s"$condTerm ==>"
     else (finalExp, originalExp) match {
       case (Some(exp), _) => exp.toString + " ==>"
       case (None, Some(exp)) => exp.toString + " ==>"
@@ -349,14 +349,14 @@ class DebugImplication(val id: Int,
 }
 
 object DebugImplication {
-  def apply(description: Option[String], isInternal: Boolean, term: Term,
+  def apply(description: Option[String], isInternal: Boolean, condTerm: Term,
             originalExp: Option[Exp], finalExp: Option[Exp],
             children: InsertionOrderedSet[AnyDebugNode],
-            terms: InsertionOrderedSet[Term]
+            assumptionTerms: InsertionOrderedSet[Term]
            ): DebugImplication = {
     val originalExpSimp = originalExp.map(Simplifier.simplify(_, assumeWelldefinedness = true))
     val finalExpSimp = finalExp.map(Simplifier.simplify(_, assumeWelldefinedness = true))
-    new DebugImplication(DebugCounter.next(), description, isInternal, term, originalExpSimp, finalExpSimp, children, terms)
+    new DebugImplication(DebugCounter.next(), description, isInternal, condTerm, originalExpSimp, finalExpSimp, children, assumptionTerms)
   }
 }
 

@@ -637,7 +637,7 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
                     val qpMaskGet = HeapLookup(qpMask, argTerm)
                     val conditionalizedPermissions = Ite(condOfInvOfLoc, PermMin(rPerm, currentPerm), NoPerm)
                     val qpMaskConstraint = Forall(formalQVars, qpMaskGet === conditionalizedPermissions, Seq(Trigger(qpMaskGet)), "qpMaskdef")
-                    v.decider.assumeDefinition(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = false)))
+                    v.decider.assumeDefinition(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = true)))
                     (qpMask, s.functionRecorder.recordFieldInv(inverseFunctions).recordConstrainedVar(qpMask, qpMaskConstraint))
                   }
 

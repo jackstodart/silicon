@@ -347,6 +347,12 @@ private trait LayeredPathConditionStackLike {
     unconditionalTerms ++ conditionalTerms
   }
 
+  /** For each layer (in the order of `layers`), the conjunction of its own branch condition and those of
+    * all layers below it, outermost first.
+    */
+  private def cumulativeBranchConditions(layers: Stack[PathConditionStackLayer]): Seq[Term] =
+    layers.scanRight(Vector.empty[Term])((layer, outer) => outer ++ layer.branchCondition).init.map(And(_))
+
   protected def quantified(layers: Stack[PathConditionStackLayer],
                            quantifier: Quantifier,
                            qvars: Seq[Var],
@@ -361,8 +367,11 @@ private trait LayeredPathConditionStackLike {
 
     val ignores = ignore.topLevelConjuncts
 
-    for (layer <- layers) {
-      val actualBranchCondition = layer.branchCondition.getOrElse(True)
+    /* The assumptions of a layer hold only under the branch conditions of that layer *and* all layers
+     * below it (cf. conditionalized). Using only the layer's own branch condition would drop the guard
+     * for layers that don't have one, e.g. layers pushed by marks inside a quantifier body (#1020).
+     */
+    for ((layer, actualBranchCondition) <- layers.zip(cumulativeBranchConditions(layers))) {
       val relevantNonGlobals = layer.nonGlobalAssumptions -- ignores
       val (trueNonGlobals, additionalGlobals) = if (!actualBranchCondition.existsDefined{ case t if qvars.contains(t) => }) {
         // The branch condition is independent of all quantified variables
@@ -401,21 +410,30 @@ private trait LayeredPathConditionStackLike {
     var globals = InsertionOrderedSet.empty[AnyDebugNode]
     var nonGlobals = InsertionOrderedSet.empty[AnyDebugNode]
 
+    /* As in quantified: a layer's assumptions are guarded by the branch conditions of all layers below it, too. */
+    val cumulativeConditions: Seq[Vector[PathConditionStackLayer]] =
+      layers.scanRight(Vector.empty[PathConditionStackLayer])((layer, outer) =>
+        if (layer.branchConditionExp.isDefined) outer :+ layer else outer).init
+
     // The quantifications that quantified creates, one per layer, which the debug nodes record as their terms
     val (_, layerQuantifications) = quantified(layers, quantifier, tQvars, tTriggers, name, isGlobal, ignore)
 
-    for (((layer, layerNonGlobals), quantification) <- layers.zip(nonGlobalDebugExps(layers)).zip(layerQuantifications)) {
+    for ((((layer, layerNonGlobals), conditionLayers), quantification) <-
+           layers.zip(nonGlobalDebugExps(layers)).zip(cumulativeConditions).zip(layerQuantifications)) {
       globals ++= layer.globalAssumptionDebugExps
 
-      val branchConditionExp = layer.branchConditionExp
-        if (branchConditionExp.isDefined){
+        if (conditionLayers.nonEmpty){
+          val nonTrivial = conditionLayers.filterNot(_.branchConditionExp.get._1.equals(ast.TrueLit()()))
           var quantBody: InsertionOrderedSet[AnyDebugNode] = InsertionOrderedSet.empty
-          if (branchConditionExp.get._1.equals(ast.TrueLit()())) {
+          if (nonTrivial.isEmpty) {
             quantBody = layerNonGlobals
           } else {
-            quantBody = InsertionOrderedSet(DebugImplication(description = None, isInternal = false, term = layer.branchCondition.get,
-              originalExp = Some(branchConditionExp.get._1), finalExp = Some(branchConditionExp.get._2.get),
-              children = layerNonGlobals, terms = InsertionOrderedSet(quantification.body)))
+            quantBody = InsertionOrderedSet(DebugImplication(description = None, isInternal = false,
+              condTerm = And(nonTrivial.map(_.branchCondition.get)),
+              originalExp = Some(viper.silicon.utils.ast.BigAnd(nonTrivial.map(_.branchConditionExp.get._1))),
+              finalExp = Some(viper.silicon.utils.ast.BigAnd(nonTrivial.map(_.branchConditionExp.get._2.get))),
+              children = layerNonGlobals,
+              assumptionTerms = InsertionOrderedSet(quantification.body)))
           }
 
           val quantDebugExp = DebugQuantifier(description = None, isInternal = false, quantifier, qvars, tQvars,
