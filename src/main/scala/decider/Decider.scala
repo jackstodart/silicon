@@ -266,10 +266,9 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
 
     def setCurrentBranchCondition(t: Term, te: (ast.Exp, Option[ast.Exp])): Unit = {
       pathConditions.setCurrentBranchCondition(t, te)
-      val dAssm = Option.when(te._2.isDefined)(
-        DebugExp.awaitTerm("Branch condition", te._1, te._2.get, isInternal = false)
-      )
-      assume(t, dAssm)
+      val debugBC = Option.when(te._2.isDefined)(
+        DebugExp.awaitTerm("Branch condition", te._1, te._2.get, isInternal = false))
+      assume(t, debugBC)
     }
 
     def setPathConditionMark(): Mark = pathConditions.mark()

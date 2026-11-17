@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.supporters
 
@@ -199,7 +199,7 @@ class DefaultSnapshotSupporter(symbolConverter: SymbolConverter) extends Snapsho
 
         (snap0, snap1, snap === Combine(snap0, snap1))
       }
-    v.decider.assume(snapshotEq, Option.when(Verifier.config.enableDebugging())(DebugExp.awaitTerm("Snapshot", true)))
+    v.decider.assume(snapshotEq, Option.when(Verifier.config.enableDebugging())(DebugExp.awaitTerm("Snapshot", isInternal = true)))
 
     (snap0, snap1)
   }

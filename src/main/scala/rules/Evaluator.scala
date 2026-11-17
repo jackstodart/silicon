@@ -184,7 +184,7 @@ object evaluator extends EvaluationRules {
 
       case _: ast.WildcardPerm =>
         val (tVar, tConstraints, eVar) = v.decider.freshARP()
-        val constraintExp = Option.when(debugOn)(DebugExp.awaitTerm(s"${eVar.get.toString} > none", true))
+        val constraintExp = Option.when(debugOn)(DebugExp.awaitTerm(s"${eVar.get.toString} > none", isInternal = true))
         v.decider.assumeDefinition(tConstraints, constraintExp)
         /* TODO: Only record wildcards in State.constrainableARPs that are used in exhale
          *       position. Currently, wildcards used in inhale position (only) may not be removed
@@ -253,7 +253,8 @@ object evaluator extends EvaluationRules {
       case l@ast.Let(x, e0, e1) =>
         eval(s, e0, pve, v)((s1, t0, e0New, v1) => {
           val t = v1.decider.appliedFresh("letvar", v1.symbolConverter.toSort(x.typ), s1.relevantQuantifiedVariables.map(_._1))
-          val debugExp = Option.when(debugOn)(DebugExp.awaitTerm("letvar assignment", ast.EqCmp(x.localVar, e0)(), ast.EqCmp(x.localVar, e0New.get)(), isInternal = false))
+          val debugExp = Option.when(debugOn)(
+            DebugExp.awaitTerm("letvar assignment", ast.EqCmp(x.localVar, e0)(), ast.EqCmp(x.localVar, e0New.get)(), isInternal = false))
           v1.decider.assumeDefinition(BuiltinEquals(t, t0), debugExp)
           val newFuncRec = s1.functionRecorder.recordFreshSnapshot(t.applicable.asInstanceOf[Function]).enterLet(l)
           val possibleTriggersBefore = if (s1.recordPossibleTriggers) s1.possibleTriggers else Map.empty
@@ -657,7 +658,8 @@ object evaluator extends EvaluationRules {
               val (stateArgs, snapToRecord) = v3.heapSupporter.functionAppSnapArgs(s2a, func, tArgs, snap.get, v3)
               val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)),
                 stateArgs ++ tArgs)
-              val preExp = Option.when(debugOn)(DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel.map(_.label).getOrElse("missing heap label")))
+              val preExp = Option.when(debugOn)(
+                DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel.map(_.label).getOrElse("missing heap label")))
               v3.decider.assume(preFApp, preExp)
               val funcAnn = func.info.getUniqueInfo[AnnotationInfo]
               val tFApp = funcAnn match {

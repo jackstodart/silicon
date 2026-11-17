@@ -142,7 +142,8 @@ object FunctionDecl extends CondFlyweightFactory[Function, FunctionDecl, Functio
   override def actualCreate(args: Function): FunctionDecl = new FunctionDecl(args)
 }
 
-class SortWrapperDecl private[terms] (val from: Sort, val to: Sort) extends Decl with ConditionalFlyweight[(Sort, Sort), SortWrapperDecl] {
+class SortWrapperDecl private[terms] (val from: Sort, val to: Sort)
+    extends Decl with ConditionalFlyweight[(Sort, Sort), SortWrapperDecl] {
   val id: Identifier = SortWrapperId(from, to)
   override val equalityDefiningMembers: (Sort, Sort) = (from, to)
 }
@@ -151,7 +152,8 @@ object SortWrapperDecl extends CondFlyweightFactory[(Sort, Sort), SortWrapperDec
   override def actualCreate(args: (Sort, Sort)): SortWrapperDecl = new SortWrapperDecl(args._1, args._2)
 }
 
-class MacroDecl private[terms] (val id: Identifier, val args: Seq[Var], val body: Term) extends Decl with ConditionalFlyweight[(Identifier, Seq[Var], Term), MacroDecl] {
+class MacroDecl private[terms] (val id: Identifier, val args: Seq[Var], val body: Term)
+    extends Decl with ConditionalFlyweight[(Identifier, Seq[Var], Term), MacroDecl] {
   override val equalityDefiningMembers: (Identifier, Seq[Var], Term) = (id, args, body)
 }
 
@@ -276,7 +278,8 @@ object Macro extends CondFlyweightFactory[(Identifier, Seq[Sort], Sort), Macro, 
   override def actualCreate(args: (Identifier, Stack[Sort], Sort)): Macro = new Macro(args._1, args._2, args._3)
 }
 
-class Var private[terms] (val id: Identifier, val sort: Sort, val isWildcard: Boolean) extends Function with Application[Var] with ConditionalFlyweight[(Identifier, Sort, Boolean), Var] {
+class Var private[terms] (val id: Identifier, val sort: Sort, val isWildcard: Boolean)
+    extends Function with Application[Var] with ConditionalFlyweight[(Identifier, Sort, Boolean), Var] {
   override val equalityDefiningMembers: (Identifier, Sort, Boolean) = (id, sort, isWildcard)
   val applicable: Var = this
   val args: Seq[Term] = Seq.empty
@@ -293,8 +296,8 @@ object Var extends CondFlyweightFactory[(Identifier, Sort, Boolean), Var, Var] {
 }
 
 class App private[terms] (val applicable: Applicable, val args: Seq[Term])
-  extends Application[Applicable] with ConditionalFlyweight[(Applicable, Seq[Term]), App] {
-  /*with PossibleTrigger*/
+    extends Application[Applicable] with ConditionalFlyweight[(Applicable, Seq[Term]), App] {
+    /*with PossibleTrigger*/
 
   utils.assertExpectedSorts(applicable, args)
 
@@ -881,9 +884,8 @@ sealed abstract class ArithmeticTerm extends Term {
   val sort = sorts.Int
 }
 
-class Plus(val p0: Term, val p1: Term) extends ArithmeticTerm
-    with ConditionalFlyweightBinaryOp[Plus] {
-
+class Plus(val p0: Term, val p1: Term)
+    extends ArithmeticTerm with ConditionalFlyweightBinaryOp[Plus] {
   override val op = "+"
 }
 
@@ -900,9 +902,8 @@ object Plus extends CondFlyweightTermFactory[(Term, Term), Plus] {
   override def actualCreate(args: (Term, Term)): Plus = new Plus(args._1, args._2)
 }
 
-class Minus(val p0: Term, val p1: Term) extends ArithmeticTerm
-  with ConditionalFlyweightBinaryOp[Minus] {
-
+class Minus(val p0: Term, val p1: Term)
+    extends ArithmeticTerm with ConditionalFlyweightBinaryOp[Minus] {
   override val op = "-"
 }
 
@@ -919,9 +920,8 @@ object Minus extends CondFlyweightTermFactory[(Term, Term), Minus] {
   override def actualCreate(args: (Term, Term)): Minus = new Minus(args._1, args._2)
 }
 
-class Times(val p0: Term, val p1: Term) extends ArithmeticTerm
-    with ConditionalFlyweightBinaryOp[Times] {
-
+class Times(val p0: Term, val p1: Term)
+    extends ArithmeticTerm with ConditionalFlyweightBinaryOp[Times] {
   override val op = "*"
 }
 
@@ -1036,7 +1036,6 @@ object Or extends GeneralCondFlyweightFactory[Iterable[Term], Seq[Term], Term, O
 
 class And private[terms](val ts: Seq[Term]) extends BooleanTerm
     with ConditionalFlyweight[Seq[Term], And] {
-
   assert(ts.nonEmpty, "Expected at least one term, but found none")
 
   val equalityDefiningMembers = ts
@@ -1104,7 +1103,6 @@ object Iff extends CondFlyweightTermFactory[(Term, Term), Iff] {
 
 class Ite private[terms] (val t0: Term, val t1: Term, val t2: Term)
     extends Term with ConditionalFlyweight[(Term, Term, Term), Ite] {
-
   assert(t0.sort == sorts.Bool && t1.sort == t2.sort, /* @elidable */
          s"Ite term Ite($t0, $t1, $t2) is not well-sorted: ${t0.sort}, ${t1.sort}, ${t2.sort}")
 
@@ -1174,7 +1172,8 @@ object Equals extends ((Term, Term) => BooleanTerm) {
 }
 
 /* Represents built-in equality, e.g., '=' in SMT-LIB */
-class BuiltinEquals private[terms] (val p0: Term, val p1: Term) extends ConditionalFlyweightBinaryOp[BuiltinEquals] with Equals
+class BuiltinEquals private[terms] (val p0: Term, val p1: Term)
+    extends ConditionalFlyweightBinaryOp[BuiltinEquals] with Equals
 
 object BuiltinEquals extends CondFlyweightFactory[(Term, Term), BooleanTerm, BuiltinEquals] {
   override def apply(v0: (Term, Term)) = v0 match {
@@ -1190,8 +1189,8 @@ object BuiltinEquals extends CondFlyweightFactory[(Term, Term), BooleanTerm, Bui
 }
 
 /* Custom equality that (potentially) needs to be axiomatised. */
-class CustomEquals private[terms] (val p0: Term, val p1: Term) extends ConditionalFlyweightBinaryOp[CustomEquals] with Equals {
-
+class CustomEquals private[terms] (val p0: Term, val p1: Term)
+    extends ConditionalFlyweightBinaryOp[CustomEquals] with Equals {
   override val op = "==="
 }
 
@@ -1219,9 +1218,8 @@ object Less extends /* OptimisingBinaryArithmeticOperation with */ CondFlyweight
   override def actualCreate(args: (Term, Term)): Less = new Less(args._1, args._2)
 }
 
-class AtMost private[terms] (val p0: Term, val p1: Term) extends ComparisonTerm
-    with ConditionalFlyweightBinaryOp[AtMost] {
-
+class AtMost private[terms] (val p0: Term, val p1: Term)
+    extends ComparisonTerm with ConditionalFlyweightBinaryOp[AtMost] {
   override val op = "<="
 }
 
@@ -1236,9 +1234,8 @@ object AtMost extends /* OptimisingBinaryArithmeticOperation with */ CondFlyweig
   override def actualCreate(args: (Term, Term)): AtMost = new AtMost(args._1, args._2)
 }
 
-class Greater private[terms] (val p0: Term, val p1: Term) extends ComparisonTerm
-    with ConditionalFlyweightBinaryOp[Greater] {
-
+class Greater private[terms] (val p0: Term, val p1: Term)
+    extends ComparisonTerm with ConditionalFlyweightBinaryOp[Greater] {
   override val op = ">"
 }
 
@@ -1253,9 +1250,8 @@ object Greater extends /* OptimisingBinaryArithmeticOperation with */ CondFlywei
   override def actualCreate(args: (Term, Term)): Greater = new Greater(args._1, args._2)
 }
 
-class AtLeast private[terms] (val p0: Term, val p1: Term) extends ComparisonTerm
-    with ConditionalFlyweightBinaryOp[AtLeast] {
-
+class AtLeast private[terms] (val p0: Term, val p1: Term)
+  extends ComparisonTerm with ConditionalFlyweightBinaryOp[AtLeast] {
   override val op = ">="
 }
 
@@ -1607,7 +1603,8 @@ object SeqNil extends CondFlyweightTermFactory[Sort, SeqNil] {
   override def actualCreate(args: Sort): SeqNil = new SeqNil(args)
 }
 
-class SeqSingleton private[terms] (val p: Term) extends SeqTerm /* with UnaryOp[Term] */ with ConditionalFlyweight[Term, SeqSingleton] {
+class SeqSingleton private[terms] (val p: Term)
+    extends SeqTerm /* with UnaryOp[Term] */ with ConditionalFlyweight[Term, SeqSingleton] {
   val elementsSort = p.sort
   val sort = sorts.Seq(elementsSort)
   override val equalityDefiningMembers: Term = p
@@ -1619,9 +1616,8 @@ object SeqSingleton extends CondFlyweightFactory[Term, SeqTerm, SeqSingleton] {
   override def actualCreate(args: Term): SeqSingleton = new SeqSingleton(args)
 }
 
-class SeqAppend private[terms] (val p0: Term, val p1: Term) extends SeqTerm
-    with ConditionalFlyweightBinaryOp[SeqAppend] {
-
+class SeqAppend private[terms] (val p0: Term, val p1: Term)
+    extends SeqTerm with ConditionalFlyweightBinaryOp[SeqAppend] {
   val elementsSort = p0.sort.asInstanceOf[sorts.Seq].elementsSort
   val sort = sorts.Seq(elementsSort)
 
@@ -1637,9 +1633,8 @@ object SeqAppend extends CondFlyweightTermFactory[(Term, Term), SeqAppend] {
   override def actualCreate(args: (Term, Term)): SeqAppend = new SeqAppend(args._1, args._2)
 }
 
-class SeqDrop private[terms] (val p0: Term, val p1: Term) extends SeqTerm
-    with ConditionalFlyweightBinaryOp[SeqDrop] {
-
+class SeqDrop private[terms] (val p0: Term, val p1: Term)
+    extends SeqTerm with ConditionalFlyweightBinaryOp[SeqDrop] {
   val elementsSort = p0.sort.asInstanceOf[sorts.Seq].elementsSort
   val sort = sorts.Seq(elementsSort)
 
@@ -1677,9 +1672,8 @@ object SeqTake extends CondFlyweightTermFactory[(Term, Term), SeqTake] {
   override def actualCreate(args: (Term, Term)): SeqTake = new SeqTake(args._1, args._2)
 }
 
-class SeqLength private[terms] (val p: Term) extends Term
-    with ConditionalFlyweightUnaryOp[SeqLength] {
-
+class SeqLength private[terms] (val p: Term)
+    extends Term with ConditionalFlyweightUnaryOp[SeqLength] {
   val sort = sorts.Int
   override lazy val toString = s"|$p|"
 }
@@ -1695,9 +1689,7 @@ object SeqLength extends CondFlyweightTermFactory [Term, SeqLength] {
 
 class SeqAt private[terms] (val p0: Term, val p1: Term) extends Term
     with ConditionalFlyweightBinaryOp[SeqAt] {
-
   val sort = p0.sort.asInstanceOf[sorts.Seq].elementsSort
-
   override lazy val toString = s"$p0[$p1]"
 }
 
@@ -1712,9 +1704,8 @@ object SeqAt extends CondFlyweightTermFactory[(Term, Term), SeqAt] {
   override def actualCreate(args: (Term, Term)): SeqAt = new SeqAt(args._1, args._2)
 }
 
-class SeqIn private[terms] (val p0: Term, val p1: Term) extends BooleanTerm
-    with ConditionalFlyweightBinaryOp[SeqIn] {
-
+class SeqIn private[terms] (val p0: Term, val p1: Term)
+    extends BooleanTerm with ConditionalFlyweightBinaryOp[SeqIn] {
   override lazy val toString = s"$p1 in $p0"
 }
 
@@ -1747,9 +1738,7 @@ object SeqInTrigger extends CondFlyweightTermFactory[(Term, Term), SeqInTrigger]
 }
 
 class SeqUpdate private[terms] (val t0: Term, val t1: Term, val t2: Term)
-    extends SeqTerm
-       with ConditionalFlyweight[(Term, Term, Term), SeqUpdate] {
-
+    extends SeqTerm with ConditionalFlyweight[(Term, Term, Term), SeqUpdate] {
   val sort = t0.sort.asInstanceOf[sorts.Seq]
   val elementsSort = sort.elementsSort
   val equalityDefiningMembers = (t0, t1, t2)
@@ -1786,7 +1775,8 @@ sealed trait BinarySetOp extends SetTerm {
   val sort = sorts.Set(elementsSort)
 }
 
-class EmptySet private[terms] (val elementsSort: Sort) extends ConditionalFlyweight[Sort, EmptySet] with SetTerm with Literal {
+class EmptySet private[terms] (val elementsSort: Sort)
+    extends ConditionalFlyweight[Sort, EmptySet] with SetTerm with Literal {
   val sort = sorts.Set(elementsSort)
   override lazy val toString = "Ø"
   override val equalityDefiningMembers: Sort = elementsSort
@@ -1843,7 +1833,8 @@ object SetUnion extends PreciseCondFlyweightFactory[(Term, Term), SetUnion] {
   override def actualCreate(args: (Term, Term)): SetUnion = new SetUnion(args._1, args._2)
 }
 
-class SetIntersection private[terms] (val p0: Term, val p1: Term) extends ConditionalFlyweightBinaryOp[SetIntersection] with BinarySetOp {
+class SetIntersection private[terms] (val p0: Term, val p1: Term)
+    extends ConditionalFlyweightBinaryOp[SetIntersection] with BinarySetOp {
   override val op = "∩"
 }
 
@@ -1857,8 +1848,8 @@ object SetIntersection extends PreciseCondFlyweightFactory[(Term, Term), SetInte
   override def actualCreate(args: (Term, Term)): SetIntersection = new SetIntersection(args._1, args._2)
 }
 
-class SetSubset private[terms] (val p0: Term, val p1: Term) extends BooleanTerm
-    with ConditionalFlyweightBinaryOp[SetSubset] {
+class SetSubset private[terms] (val p0: Term, val p1: Term)
+    extends BooleanTerm with ConditionalFlyweightBinaryOp[SetSubset] {
   override val op = "⊂"
 }
 
@@ -1887,7 +1878,8 @@ object SetDisjoint extends PreciseCondFlyweightFactory[(Term, Term), SetDisjoint
   override def actualCreate(args: (Term, Term)): SetDisjoint = new SetDisjoint(args._1, args._2)
 }
 
-class SetDifference private[terms] (val p0: Term, val p1: Term) extends ConditionalFlyweightBinaryOp[SetDifference] with BinarySetOp {
+class SetDifference private[terms] (val p0: Term, val p1: Term)
+    extends ConditionalFlyweightBinaryOp[SetDifference] with BinarySetOp {
   override val op = "\\"
 }
 
@@ -1901,9 +1893,8 @@ object SetDifference extends PreciseCondFlyweightFactory[(Term, Term), SetDiffer
   override def actualCreate(args: (Term, Term)): SetDifference = new SetDifference(args._1, args._2)
 }
 
-class SetIn private[terms] (val p0: Term, val p1: Term) extends BooleanTerm
-    with ConditionalFlyweightBinaryOp[SetIn] {
-
+class SetIn private[terms] (val p0: Term, val p1: Term)
+    extends BooleanTerm with ConditionalFlyweightBinaryOp[SetIn] {
   override val op = "in"
 }
 
@@ -1943,13 +1934,13 @@ sealed trait MultisetTerm extends Term {
 }
 
 sealed trait BinaryMultisetOp extends MultisetTerm {
-
   val p0: Term
   val elementsSort = p0.sort.asInstanceOf[sorts.Multiset].elementsSort
   val sort = sorts.Multiset(elementsSort)
 }
 
-class EmptyMultiset private[terms] (val elementsSort: Sort) extends MultisetTerm with Literal with ConditionalFlyweight[Sort, EmptyMultiset] {
+class EmptyMultiset private[terms] (val elementsSort: Sort)
+    extends MultisetTerm with Literal with ConditionalFlyweight[Sort, EmptyMultiset] {
   val sort = sorts.Multiset(elementsSort)
   override lazy val toString = "Ø"
   override val equalityDefiningMembers: Sort = elementsSort
@@ -1959,7 +1950,8 @@ object EmptyMultiset extends PreciseCondFlyweightFactory[Sort, EmptyMultiset] {
   override def actualCreate(args: Sort): EmptyMultiset = new EmptyMultiset(args)
 }
 
-class SingletonMultiset private[terms] (val p: Term) extends MultisetTerm /* with UnaryOp[Term] */ with ConditionalFlyweight[Term, SingletonMultiset] {
+class SingletonMultiset private[terms] (val p: Term)
+    extends MultisetTerm /* with UnaryOp[Term] */ with ConditionalFlyweight[Term, SingletonMultiset] {
   val elementsSort = p.sort
   val sort = sorts.Multiset(elementsSort)
 
@@ -1971,9 +1963,8 @@ object SingletonMultiset extends PreciseCondFlyweightFactory[Term, SingletonMult
   override def actualCreate(args: Term): SingletonMultiset = new SingletonMultiset((args))
 }
 
-class MultisetAdd private[terms] (val p0: Term, val p1: Term) extends BinaryMultisetOp
-    with ConditionalFlyweightBinaryOp[MultisetAdd] {
-
+class MultisetAdd private[terms] (val p0: Term, val p1: Term)
+    extends BinaryMultisetOp with ConditionalFlyweightBinaryOp[MultisetAdd] {
   override val op = "+"
 }
 
@@ -1989,7 +1980,8 @@ object MultisetAdd extends PreciseCondFlyweightFactory[(Term, Term), MultisetAdd
   override def actualCreate(args: (Term, Term)): MultisetAdd = new MultisetAdd(args._1, args._2)
 }
 
-class MultisetUnion private[terms] (val p0: Term, val p1: Term) extends BinaryMultisetOp with ConditionalFlyweightBinaryOp[MultisetUnion] {
+class MultisetUnion private[terms] (val p0: Term, val p1: Term)
+    extends BinaryMultisetOp with ConditionalFlyweightBinaryOp[MultisetUnion] {
   override val op = "∪"
 }
 
@@ -2003,7 +1995,8 @@ object MultisetUnion extends PreciseCondFlyweightFactory[(Term, Term), MultisetU
   override def actualCreate(args: (Term, Term)): MultisetUnion = new MultisetUnion(args._1, args._2)
 }
 
-class MultisetIntersection private[terms] (val p0: Term, val p1: Term) extends BinaryMultisetOp with ConditionalFlyweightBinaryOp[MultisetIntersection] {
+class MultisetIntersection private[terms] (val p0: Term, val p1: Term)
+    extends BinaryMultisetOp with ConditionalFlyweightBinaryOp[MultisetIntersection] {
   override val op = "∩"
 }
 
@@ -2032,7 +2025,8 @@ object MultisetSubset extends PreciseCondFlyweightFactory[(Term, Term), Multiset
   override def actualCreate(args: (Term, Term)): MultisetSubset = new MultisetSubset(args._1, args._2)
 }
 
-class MultisetDifference private[terms] (val p0: Term, val p1: Term) extends BinaryMultisetOp with ConditionalFlyweightBinaryOp[MultisetDifference] {
+class MultisetDifference private[terms] (val p0: Term, val p1: Term)
+    extends BinaryMultisetOp with ConditionalFlyweightBinaryOp[MultisetDifference] {
   override val op = "\\"
 }
 
@@ -2048,7 +2042,6 @@ object MultisetDifference extends PreciseCondFlyweightFactory[(Term, Term), Mult
 
 class MultisetCardinality private[terms] (val p: Term) extends Term
     with ConditionalFlyweightUnaryOp[MultisetCardinality] {
-
   val sort = sorts.Int
   override lazy val toString = s"|$p|"
 }
@@ -2089,7 +2082,8 @@ sealed trait MapTerm extends Term {
   val sort: sorts.Map
 }
 
-class EmptyMap private[terms] (val keySort: Sort, val valueSort: Sort) extends MapTerm with Literal with ConditionalFlyweight[(Sort, Sort), EmptyMap] {
+class EmptyMap private[terms] (val keySort: Sort, val valueSort: Sort)
+    extends MapTerm with Literal with ConditionalFlyweight[(Sort, Sort), EmptyMap] {
   val sort = sorts.Map(keySort, valueSort)
   override lazy val toString = "Ø"
   override val equalityDefiningMembers: (Sort, Sort) = (keySort, valueSort)
@@ -2131,7 +2125,8 @@ object MapCardinality extends PreciseCondFlyweightFactory[Term, MapCardinality] 
   override def actualCreate(args: Term): MapCardinality = new MapCardinality(args)
 }
 
-class MapUpdate private[terms] (val base: Term, val key: Term, val value: Term) extends MapTerm with ConditionalFlyweight[(Term, Term, Term), MapUpdate] {
+class MapUpdate private[terms] (val base: Term, val key: Term, val value: Term)
+    extends MapTerm with ConditionalFlyweight[(Term, Term, Term), MapUpdate] {
   override val sort: sorts.Map = base.sort.asInstanceOf[sorts.Map]
   override val keySort: Sort = sort.keySort
   override val valueSort: Sort = sort.valueSort
@@ -2233,7 +2228,8 @@ object Second extends CondFlyweightTermFactory[Term, Second] {
 
 /* Quantified permissions */
 
-class Lookup(val field: String, val fvf: Term, val at: Term) extends Term with ConditionalFlyweight[(String, Term, Term), Lookup] {
+class Lookup(val field: String, val fvf: Term, val at: Term)
+    extends Term with ConditionalFlyweight[(String, Term, Term), Lookup] {
   utils.assertSort(fvf, "field value function", "FieldValueFunction", _.isInstanceOf[sorts.FieldValueFunction])
   utils.assertSort(at, "receiver", sorts.Ref)
 
@@ -2245,7 +2241,8 @@ object Lookup extends PreciseCondFlyweightFactory[(String, Term, Term), Lookup] 
   override def actualCreate(args: (String, Term, Term)): Lookup = new Lookup(args._1, args._2, args._3)
 }
 
-class PermLookup(val field: String, val pm: Term, val at: Term) extends Term with ConditionalFlyweight[(String, Term, Term), PermLookup] {
+class PermLookup(val field: String, val pm: Term, val at: Term)
+    extends Term with ConditionalFlyweight[(String, Term, Term), PermLookup] {
   utils.assertSort(pm, "field perm function", "FieldPermFunction", _.isInstanceOf[sorts.FieldPermFunction])
   utils.assertSort(at, "receiver", sorts.Ref)
 
@@ -2257,7 +2254,8 @@ object PermLookup extends PreciseCondFlyweightFactory[(String, Term, Term), Perm
   override def actualCreate(args: (String, Term, Term)): PermLookup = new PermLookup(args._1, args._2, args._3)
 }
 
-class Domain(val field: String, val fvf: Term) extends SetTerm /*with PossibleTrigger*/ with ConditionalFlyweight[(String, Term), Domain] {
+class Domain(val field: String, val fvf: Term)
+    extends SetTerm /*with PossibleTrigger*/ with ConditionalFlyweight[(String, Term), Domain] {
   utils.assertSort(fvf, "field value function", "FieldValueFunction", _.isInstanceOf[sorts.FieldValueFunction])
 
   val elementsSort = sorts.Ref
@@ -2271,7 +2269,8 @@ object Domain extends CondFlyweightTermFactory[(String, Term), Domain] {
 
 /** Marks FVFs that have a defined domain (i.e. for which some information is available about Domain(field, fvf)).
   * Only for these FVFs is it useful to trigger the extensionality axiom.  */
-class HasDomain(val field: String, val fvf: Term, val isGlobal: Boolean) extends Term with ConditionalFlyweight[(String, Term, Boolean), HasDomain] {
+class HasDomain(val field: String, val fvf: Term, val isGlobal: Boolean)
+    extends Term with ConditionalFlyweight[(String, Term, Boolean), HasDomain] {
   utils.assertSort(fvf, "field value function", "FieldValueFunction", _.isInstanceOf[sorts.FieldValueFunction])
 
   val sort = sorts.Bool
@@ -2282,7 +2281,8 @@ object HasDomain extends CondFlyweightTermFactory[(String, Term, Boolean), HasDo
   override def actualCreate(args: (String, Term, Boolean)): HasDomain = new HasDomain(args._1, args._2, args._3)
 }
 
-class FieldTrigger(val field: String, val fvf: Term, val at: Term) extends Term with ConditionalFlyweight[(String, Term, Term), FieldTrigger] {
+class FieldTrigger(val field: String, val fvf: Term, val at: Term)
+    extends Term with ConditionalFlyweight[(String, Term, Term), FieldTrigger] {
   utils.assertSort(fvf, "field value function", "FieldValueFunction", _.isInstanceOf[sorts.FieldValueFunction])
   utils.assertSort(at, "receiver", sorts.Ref)
 
@@ -2296,7 +2296,8 @@ object FieldTrigger extends PreciseCondFlyweightFactory[(String, Term, Term), Fi
 
 /* Quantified predicates */
 
-class PredicateLookup(val predname: String, val psf: Term, val args: Seq[Term]) extends Term with ConditionalFlyweight[(String, Term, Seq[Term]), PredicateLookup] {
+class PredicateLookup(val predname: String, val psf: Term, val args: Seq[Term])
+    extends Term with ConditionalFlyweight[(String, Term, Seq[Term]), PredicateLookup] {
   utils.assertSort(psf, "predicate snap function", "PredicateSnapFunction", _.isInstanceOf[sorts.PredicateSnapFunction])
 
   val sort = psf.sort.asInstanceOf[sorts.PredicateSnapFunction].codomainSort
@@ -2307,7 +2308,8 @@ object PredicateLookup extends PreciseCondFlyweightFactory[(String, Term, Seq[Te
   override def actualCreate(args: (String, Term, Seq[Term])): PredicateLookup = new PredicateLookup(args._1, args._2, args._3)
 }
 
-class PredicatePermLookup(val predname: String, val pm: Term, val args: Seq[Term]) extends Term with ConditionalFlyweight[(String, Term, Seq[Term]), PredicatePermLookup] {
+class PredicatePermLookup(val predname: String, val pm: Term, val args: Seq[Term])
+    extends Term with ConditionalFlyweight[(String, Term, Seq[Term]), PredicatePermLookup] {
   utils.assertSort(pm, "predicate perm function", "PredicatePermFunction", _.isInstanceOf[sorts.PredicatePermFunction])
 
   val sort = sorts.Perm
@@ -2318,7 +2320,8 @@ object PredicatePermLookup extends PreciseCondFlyweightFactory[(String, Term, Se
   override def actualCreate(args: (String, Term, Seq[Term])): PredicatePermLookup = new PredicatePermLookup(args._1, args._2, args._3)
 }
 
-class PredicateDomain(val predname: String, val psf: Term) extends SetTerm /*with PossibleTrigger*/ with ConditionalFlyweight[(String, Term), PredicateDomain] {
+class PredicateDomain(val predname: String, val psf: Term)
+    extends SetTerm /*with PossibleTrigger*/ with ConditionalFlyweight[(String, Term), PredicateDomain] {
   utils.assertSort(psf, "predicate snap function", "PredicateSnapFunction", _.isInstanceOf[sorts.PredicateSnapFunction])
   val elementsSort = sorts.Snap
   val sort = sorts.Set(elementsSort)
@@ -2330,7 +2333,8 @@ object PredicateDomain extends CondFlyweightTermFactory[(String, Term), Predicat
 }
 
 /** Like HasDomain, but for predicate snap functions; see comment above. */
-class HasPredicateDomain(val predname: String, val psf: Term, val isGlobal: Boolean) extends Term with ConditionalFlyweight[(String, Term, Boolean), HasPredicateDomain] {
+class HasPredicateDomain(val predname: String, val psf: Term, val isGlobal: Boolean)
+    extends Term with ConditionalFlyweight[(String, Term, Boolean), HasPredicateDomain] {
   utils.assertSort(psf, "predicate snap function", "PredicateSnapFunction", _.isInstanceOf[sorts.PredicateSnapFunction])
   val sort = sorts.Bool
   override val equalityDefiningMembers: (String, Term, Boolean) = (predname, psf, isGlobal)
@@ -2340,7 +2344,8 @@ object HasPredicateDomain extends CondFlyweightTermFactory[(String, Term, Boolea
   override def actualCreate(args: (String, Term, Boolean)): HasPredicateDomain = new HasPredicateDomain(args._1, args._2, args._3)
 }
 
-class PredicateTrigger(val predname: String, val psf: Term, val args: Seq[Term]) extends Term with ConditionalFlyweight[(String, Term, Seq[Term]), PredicateTrigger] {
+class PredicateTrigger(val predname: String, val psf: Term, val args: Seq[Term])
+    extends Term with ConditionalFlyweight[(String, Term, Seq[Term]), PredicateTrigger] {
   utils.assertSort(psf, "predicate snap function", "PredicateSnapFunction", _.isInstanceOf[sorts.PredicateSnapFunction])
 
   val sort = sorts.Bool
@@ -2492,7 +2497,8 @@ object HeapLookup extends CondFlyweightTermFactory[(Term, Term), HeapLookup] {
 }
 
 
-class HeapToSnap(val heap: Term, val mask: Term, val r: Any) extends Term with HasVarRepr with ConditionalFlyweight[(Term, Term, Any), HeapToSnap] {
+class HeapToSnap(val heap: Term, val mask: Term, val r: Any)
+    extends Term with HasVarRepr with ConditionalFlyweight[(Term, Term, Any), HeapToSnap] {
   val equalityDefiningMembers = (heap, mask, r)
 
   val sort = sorts.Snap
@@ -2503,13 +2509,12 @@ object HeapToSnap extends CondFlyweightTermFactory[(Term, Term, Any), HeapToSnap
   override def actualCreate(args: (Term, Term, Any)): HeapToSnap = new HeapToSnap(args._1, args._2, args._3)
 }
 
-class SnapToHeap(val snap: Term, val r: Any, val sort: Sort) extends Term with HasVarRepr with ConditionalFlyweight[(Term, Any, Sort), SnapToHeap] {
+class SnapToHeap(val snap: Term, val r: Any, val sort: Sort)
+    extends Term with HasVarRepr with ConditionalFlyweight[(Term, Any, Sort), SnapToHeap] {
   val equalityDefiningMembers = (snap, r, sort)
 }
 
 object SnapToHeap extends CondFlyweightTermFactory[(Term, Any, Sort), SnapToHeap] {
-
-
   override def apply(v0: (Term, Any, Sort)) = v0._1 match {
     case HeapToSnap(hp, _, r2) => {
       assert(v0._2 == r2)
@@ -2534,7 +2539,8 @@ object HeapUpdate extends CondFlyweightTermFactory[(Term, Term, Term), HeapUpdat
   override def actualCreate(args: (Term, Term, Term)): HeapUpdate = new HeapUpdate(args._1, args._2, args._3)
 }
 
-class MaskAdd(val mask: Term, val at: Term, val addition: Term) extends Term with HasVarRepr with ConditionalFlyweight[(Term, Term, Term), MaskAdd] {
+class MaskAdd(val mask: Term, val at: Term, val addition: Term)
+    extends Term with HasVarRepr with ConditionalFlyweight[(Term, Term, Term), MaskAdd] {
   if (mask.sort == sorts.PredMaskSort) utils.assertSort(at, "at", sorts.Snap) else utils.assertSort(at, "at", sorts.Ref)
   utils.assertSort(addition, "addition", sorts.Perm)
 
@@ -2548,7 +2554,8 @@ object MaskAdd extends CondFlyweightTermFactory[(Term, Term, Term), MaskAdd] {
   override def apply(v0: (Term, Term, Term)) = v0 match {
     case (mask, _, NoPerm) => mask
     case (MaskAdd(m2, at2, add2), at, addition) if at2 == at => MaskAdd(m2, at, PermPlus(addition, add2))
-    case (MaskAdd(MaskAdd(m1, at1, add1), at2, add2), at, PermNegation(sub)) if at == at1 => MaskAdd(MaskAdd(m1, at1, PermMinus(add1, sub)), at2, add2)
+    case (MaskAdd(MaskAdd(m1, at1, add1), at2, add2), at, PermNegation(sub)) if at == at1 =>
+      MaskAdd(MaskAdd(m1, at1, PermMinus(add1, sub)), at2, add2)
     case _ => createIfNonExistent(v0)
   }
 
@@ -2567,10 +2574,9 @@ object HeapSingleton extends CondFlyweightTermFactory[(Term, Term, Sort), HeapSi
   override def actualCreate(args: (Term, Term, Sort)): HeapSingleton = new HeapSingleton(args._1, args._2, args._3)
 }
 
-class IdenticalOnKnownLocations(val oldHeap: Term, val newHeap: Term, val mask: Term) extends Term with ConditionalFlyweight[(Term, Term, Term), IdenticalOnKnownLocations] {
-
+class IdenticalOnKnownLocations(val oldHeap: Term, val newHeap: Term, val mask: Term)
+    extends Term with ConditionalFlyweight[(Term, Term, Term), IdenticalOnKnownLocations] {
   val equalityDefiningMembers = (oldHeap, newHeap, mask)
-
   val sort = sorts.Bool
 }
 
@@ -2602,10 +2608,9 @@ object GoodMask extends CondFlyweightTermFactory[Term, GoodMask] {
   override def actualCreate(args: Term): GoodMask = new GoodMask(args)
 }
 
-class GoodFieldMask(val mask: Term, upperBound: Boolean) extends Term with ConditionalFlyweight[(Term, Boolean), GoodFieldMask] {
-
+class GoodFieldMask(val mask: Term, upperBound: Boolean)
+    extends Term with ConditionalFlyweight[(Term, Boolean), GoodFieldMask] {
   val equalityDefiningMembers = (mask, upperBound)
-
   val sort = sorts.Bool
 }
 
@@ -2620,7 +2625,8 @@ object GoodFieldMask extends CondFlyweightTermFactory[(Term, Boolean), GoodField
 }
 
 /** Maps resources to their consumed mask/permission terms (consume context). */
-class MaskMapTerm(val masks: immutable.ListMap[Any, Term]) extends Term with ConditionalFlyweight[immutable.ListMap[Any, Term], MaskMapTerm] {
+class MaskMapTerm(val masks: immutable.ListMap[Any, Term])
+    extends Term with ConditionalFlyweight[immutable.ListMap[Any, Term], MaskMapTerm] {
   val equalityDefiningMembers = masks
   val sort = sorts.Snap
 }
@@ -2630,7 +2636,8 @@ object MaskMapTerm extends PreciseCondFlyweightFactory[immutable.ListMap[Any, Te
 }
 
 /** Maps resources to their heap value terms (produce context). */
-class HeapMapTerm(val heaps: immutable.ListMap[Any, Term]) extends Term with ConditionalFlyweight[immutable.ListMap[Any, Term], HeapMapTerm] {
+class HeapMapTerm(val heaps: immutable.ListMap[Any, Term])
+    extends Term with ConditionalFlyweight[immutable.ListMap[Any, Term], HeapMapTerm] {
   val equalityDefiningMembers = heaps
   val sort = sorts.Snap
 }
@@ -2639,7 +2646,8 @@ object HeapMapTerm extends PreciseCondFlyweightFactory[immutable.ListMap[Any, Te
   override def actualCreate(args: immutable.ListMap[Any, Term]): HeapMapTerm = new HeapMapTerm(args)
 }
 
-class MergeSingle(val heap: Term, val mask: Term, val location: Term, val value: Term) extends Term with HasVarRepr with ConditionalFlyweight[(Term, Term, Term, Term), MergeSingle] {
+class MergeSingle(val heap: Term, val mask: Term, val location: Term, val value: Term)
+    extends Term with HasVarRepr with ConditionalFlyweight[(Term, Term, Term, Term), MergeSingle] {
   val equalityDefiningMembers = (heap, mask, location, value)
   val sort = heap.sort
 }
@@ -2665,7 +2673,8 @@ object MergeSingle extends CondFlyweightTermFactory[(Term, Term, Term, Term), Me
   override def actualCreate(args: (Term, Term, Term, Term)): MergeSingle = new MergeSingle(args._1, args._2, args._3, args._4)
 }
 
-class MergeHeaps(val h1: Term, val m1: Term, val h2: Term, val m2: Term) extends Term with HasVarRepr with ConditionalFlyweight[(Term, Term, Term, Term), MergeHeaps] {
+class MergeHeaps(val h1: Term, val m1: Term, val h2: Term, val m2: Term)
+    extends Term with HasVarRepr with ConditionalFlyweight[(Term, Term, Term, Term), MergeHeaps] {
   val equalityDefiningMembers = (h1, m1, h2, m2)
   val sort = h1.sort
 }
@@ -2687,7 +2696,8 @@ object MergeHeaps extends CondFlyweightTermFactory[(Term, Term, Term, Term), Mer
   override def actualCreate(args: (Term, Term, Term, Term)): MergeHeaps = new MergeHeaps(args._1, args._2, args._3, args._4)
 }
 
-class HeapsOverlap(val h1: Term, val m1: Term, val h2: Term, val m2: Term) extends Term with ConditionalFlyweight[(Term, Term, Term, Term), HeapsOverlap] {
+class HeapsOverlap(val h1: Term, val m1: Term, val h2: Term, val m2: Term)
+    extends Term with ConditionalFlyweight[(Term, Term, Term, Term), HeapsOverlap] {
   val equalityDefiningMembers = (h1, m1, h2, m2)
   val sort = h1.sort
 }

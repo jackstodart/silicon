@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.rules
 
@@ -421,19 +421,19 @@ object consumer extends ConsumptionRules {
               case None => "Function preconditions hold in quantifier"
             }
             v2.decider.assume(Quantification(q, vars, transformed, trgs, name+"_precondition", isGlob, weight),
-              Option.when(debugOn)(DebugExp.awaitTerm(comment, true)))
+              Option.when(debugOn)(DebugExp.awaitTerm(comment, isInternal = true)))
             Quantification(q, vars, Implies(transformed, body), trgs, name, isGlob, weight)
           case _ => t
         }
         v2.decider.assert(termToAssert) {
           case true =>
-            val da = Option.when(debugOn)(DebugExp.awaitTerm(e, eNew.getOrElse(e)))
+            val da = Option.when(debugOn)(DebugExp.awaitTerm(e, eNew.get))
             v2.decider.assume(t, da)
             QS(s2, v2)
           case false =>
             val failure = createFailure(pve dueTo AssertionFalse(e), v2, s2, termToAssert, eNew)
             if (s2.retryLevel == 0 && v2.reportFurtherErrors()) {
-              val da = Option.when(debugOn)(DebugExp.awaitTerm(e, eNew.getOrElse(e)))
+              val da = Option.when(debugOn)(DebugExp.awaitTerm(e, eNew.get))
               v2.decider.assume(t, da)
               failure combine QS(s2, v2)
             } else failure
