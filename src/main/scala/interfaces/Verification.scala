@@ -2,21 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.interfaces
 
-import viper.silicon.debugger.{DebugAxiom, DebugExp}
-import viper.silicon.common.collections.immutable.InsertionOrderedSet
-import viper.silicon.debugger.debugger.AnyDebugNode
-import viper.silicon.interfaces.state.Chunk
-import viper.silicon.reporting._
-import viper.silicon.state.terms.{BooleanLiteral, FunctionDecl, IntLiteral, MacroDecl, Term, Var}
-import viper.silicon.state.{State, Store}
-import viper.silicon.verifier.Verifier
 import viper.silver.ast
 import viper.silver.ast.Program
+import viper.silver.utility.Common.OptionOps
 import viper.silver.verifier._
+
+import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.debugger.AnyDebugNode
+import viper.silicon.debugger.{DebugAxiom, DebugExp}
+import viper.silicon.interfaces.state.Chunk
+import viper.silicon.reporting._
+import viper.silicon.state.terms._
+import viper.silicon.state.{State, Store}
+import viper.silicon.verifier.Verifier
 
 /*
  * Results
@@ -122,7 +124,7 @@ case class SiliconFailureContext(branchConditions: Seq[ast.Exp],
   }
 
   lazy val counterExampleString: String = {
-    counterExample.fold("")(ce => s"\n\t\tcounterexample:\n$ce")
+    counterExample.mapOrElse(ce => s"\n\t\tcounterexample:\n$ce", "")
   }
 
   lazy val reasonUnknownString: String = {

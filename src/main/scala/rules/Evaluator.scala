@@ -6,6 +6,14 @@
 
 package viper.silicon.rules
 
+import viper.silver.ast
+import viper.silver.ast.{AnnotationInfo, LocalVarWithVersion, WeightedQuantifier}
+import viper.silver.reporter.{AnnotationWarning, WarningsDuringVerification}
+import viper.silver.utility.Common.{OptionOps, Rational}
+import viper.silver.verifier.errors.{ErrorWrapperWithExampleTransformer, PreconditionInAppFalse}
+import viper.silver.verifier.reasons._
+import viper.silver.verifier.{CounterexampleTransformer, PartialVerificationError, VerifierWarning}
+
 import viper.silicon
 import viper.silicon.Config.JoinMode
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
@@ -21,14 +29,6 @@ import viper.silicon.state.terms.perms.IsPositive
 import viper.silicon.utils.ast._
 import viper.silicon.verifier.Verifier
 import viper.silicon.{Map, TriggerSets}
-import viper.silver.ast
-import viper.silver.ast.{AnnotationInfo, LocalVarWithVersion, WeightedQuantifier}
-import viper.silver.reporter.{AnnotationWarning, WarningsDuringVerification}
-import viper.silver.utility.Common.Rational
-import viper.silver.verifier.errors.{ErrorWrapperWithExampleTransformer, PreconditionInAppFalse}
-import viper.silver.verifier.reasons._
-import viper.silver.verifier.{CounterexampleTransformer, PartialVerificationError, VerifierWarning}
-
 
 /* TODO: With the current design w.r.t. parallelism, eval should never "move" an execution
  *       to a different verifier. Hence, consider not passing the verifier to continuations
@@ -659,7 +659,7 @@ object evaluator extends EvaluationRules {
               val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)),
                 stateArgs ++ tArgs)
               val preExp = Option.when(debugOn)(
-                DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel.map(_.label).getOrElse("missing heap label")))
+                DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel.mapOrElse(_.label, "missing heap label")))
               v3.decider.assume(preFApp, preExp)
               val funcAnn = func.info.getUniqueInfo[AnnotationInfo]
               val tFApp = funcAnn match {
@@ -704,7 +704,7 @@ object evaluator extends EvaluationRules {
           evals(s, eArgs, _ => pve, v)((s1, tArgs, eArgsNew, v1) =>
             eval(s1, ePerm.getOrElse(ast.FullPerm()()), pve, v1)((s2, tPerm, ePermNew, v2) => {
               val s2a = if (debugOn && s1.isRecordingHeaps) v2.recordIntermediateHeap(s2, EvalExp(uf)) else s2
-              val s2Label = v2.getDebugHeapLabel(s2a).map(_.label).getOrElse("missingUnfoldingHeap")
+              val s2Label = v2.getDebugHeapLabel(s2a).mapOrElse(_.label, "missingUnfoldingHeap")
               val unfoldingNew = eArgsNew.map(args => uf.copy(acc = acc.copy(loc = pa.copy(args = args)(pa.pos, pa.info, pa.errT),
                 permExp = Some(ePermNew.get))(acc.pos, acc.info, acc.errT))(uf.pos, uf.info, uf.errT))
               val joinExp = Option.when(debugOn)({
@@ -1128,8 +1128,8 @@ object evaluator extends EvaluationRules {
     )(entries => {
       assert(entries.length <= 2)
       val s1 = entries.tail.foldLeft(entries.head.s)((sAcc, entry) => sAcc.merge(entry.s))
-      val t = Implies(tLhs, entries.headOption.map(_.data._1).getOrElse(True))
-      val e = eLhs._2.map(lhs => ast.Implies(lhs, entries.headOption.map(_.data._2.get).getOrElse(ast.TrueLit()()))())
+      val t = Implies(tLhs, entries.headOption.mapOrElse(_.data._1, True))
+      val e = eLhs._2.map(lhs => ast.Implies(lhs, entries.headOption.mapOrElse(_.data._2.get, ast.TrueLit()()))())
       (s1, (t, e))
     })((s3, r3, v3) => {
       val (t3, e3) = r3

@@ -6,17 +6,18 @@
 
 package viper.silicon.debugger
 
+import java.util.concurrent.atomic.AtomicInteger
+import scala.collection.mutable
+
+import viper.silver.ast
+import viper.silver.ast.utility.Simplifier
+import viper.silver.ast.{Exp, Position}
+import viper.silver.utility.Common.OptionOps
+
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.decider.PathConditions
 import viper.silicon.state.terms.{Quantifier, Term, Trigger, Var}
-import viper.silver.ast
-import viper.silver.ast.utility.Simplifier
-import viper.silver.ast.{Exp, Position}
-
-import java.util.concurrent.atomic.AtomicInteger
-import scala.collection.mutable
-
 
 object DebugCounter {
   private val idCounter: AtomicInteger = new AtomicInteger(0)
@@ -177,7 +178,7 @@ class DebugExp(val id: Int,
                override val originalExp: Option[Exp],
                override val finalExp: Option[Exp]) extends DebugAssumption[DebugExp] {
   override def display(config: DebugPrintConfiguration): String = {
-    val descriptionStr = description.map(_ + ": ").getOrElse("")
+    val descriptionStr = description.mapOrElse(_ + ": ", "")
     val assumptionStr = if (config.printInternalTermRepresentation) term.toString
       else if (finalExp.isDefined) finalExp.get.toString
       else description.getOrElse("Internal assumption")

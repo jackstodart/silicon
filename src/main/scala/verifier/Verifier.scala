@@ -6,6 +6,10 @@
 
 package viper.silicon.verifier
 
+import viper.silver.ast
+import viper.silver.reporter.Reporter
+import viper.silver.utility.Common.OptionOps
+
 import com.typesafe.scalalogging.Logger
 import viper.silicon.decider.{Decider, PathConditionStack}
 import viper.silicon.logger.MemberSymbExLogger
@@ -16,8 +20,6 @@ import viper.silicon.state.terms.{AxiomRewriter, Term, TriggerGenerator}
 import viper.silicon.supporters.{QuantifierSupporter, SnapshotSupporter}
 import viper.silicon.utils.Counter
 import viper.silicon.{Config, Map}
-import viper.silver.ast
-import viper.silver.reporter.Reporter
 
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -105,7 +107,7 @@ class DebugHeapRecorder {
       case column: ast.HasLineColumn => s"l:${column.line}.${column.column}"
       case _ => s"l:unknown"
     }
-    val heapLabel = getDebugHeapLabel(s, v, h).map(_.label).getOrElse("unrecordedHeap")
+    val heapLabel = getDebugHeapLabel(s, v, h).mapOrElse(_.label, "unrecordedHeap")
     s"$heapLabel#$posString"
   }
 

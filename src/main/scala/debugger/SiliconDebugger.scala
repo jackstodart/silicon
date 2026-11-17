@@ -6,6 +6,19 @@
 
 package viper.silicon.debugger
 
+import java.nio.file.Paths
+import scala.io.StdIn.readLine
+
+import viper.silver.ast
+import viper.silver.ast._
+import viper.silver.ast.utility.Simplifier
+import viper.silver.frontend.FrontendStateCache
+import viper.silver.parser._
+import viper.silver.reporter.{NoopReporter, Reporter}
+import viper.silver.utility.Common.OptionOps
+import viper.silver.verifier.errors.ContractNotWellformed
+import viper.silver.verifier.{ErrorReason, PartialVerificationError}
+
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.DebugGroupNode.termsOf
 import viper.silicon.debugger.debugger.AnyDebugNode
@@ -19,17 +32,6 @@ import viper.silicon.state._
 import viper.silicon.state.terms.{Term, True}
 import viper.silicon.utils.ast.simplifyVariableName
 import viper.silicon.verifier.{MainVerifier, Verifier, WorkerVerifier}
-import viper.silver.ast
-import viper.silver.ast._
-import viper.silver.ast.utility.Simplifier
-import viper.silver.frontend.FrontendStateCache
-import viper.silver.parser._
-import viper.silver.reporter.{NoopReporter, Reporter}
-import viper.silver.verifier.errors.ContractNotWellformed
-import viper.silver.verifier.{ErrorReason, PartialVerificationError}
-
-import java.nio.file.Paths
-import scala.io.StdIn.readLine
 
 package object debugger {
   type AnyDebugNode = DebugNode[_]
@@ -120,10 +122,7 @@ case class ProofObligation(s: State,
     val condString = if (heapRecord.newBranchConds.nonEmpty)
       "\t\tNew branch conditions: " + heapRecord.newBranchConds.map(bc => bc._1.toString).mkString(", ") + "\n"
     else ""
-    val causeString = heapRecord.intermediateCause match {
-      case Some(cause) => s"\t\tCause: ${causeToString(cause)}\n"
-      case None => ""
-    }
+    val causeString = heapRecord.intermediateCause.mapOrElse(cause => s"\t\tCause: ${causeToString(cause)}\n", "")
     s"\tIntermediate heap ${label.label}:\n" +
       causeString +
       condString +
@@ -145,7 +144,7 @@ case class ProofObligation(s: State,
     if (!printConfig.printOldHeaps)
       s"Heap:\n${heapChunksString(s.h)}\n"
     else {
-      val currLabel = v.getDebugHeapLabel(s).map(" (" + _.label + ")").getOrElse("")
+      val currLabel = v.getDebugHeapLabel(s).mapOrElse(" (" + _.label + ")", "")
       s"Current Heap$currLabel:\n${heapChunksString(s.h)}\n" +
         s.debugOldHeaps.map { case (label, dh) => debugHeapString(label, dh) }.mkString("") +
         tempHeapString(s.temporaryHeapRecord)

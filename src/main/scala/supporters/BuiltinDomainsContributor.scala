@@ -6,6 +6,7 @@
 
 package viper.silicon.supporters
 
+import viper.silver.utility.Common.OptionOps
 import java.io.File
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
@@ -26,9 +27,9 @@ abstract class BuiltinDomainsContributor extends PreambleContributor[Sort, Domai
   def userProvidedSourceFilepath: Option[String]
 
   lazy val sourceUrl: URL = {
-    userProvidedSourceFilepath
-      .map(filepath => new File(filepath).toURI.toURL)
-      .getOrElse(getClass.getResource(defaultSourceResource))
+    userProvidedSourceFilepath.mapOrElse(
+      filepath => new File(filepath).toURI.toURL,
+      getClass.getResource(defaultSourceResource))
   }
 
   def sourceDomainName: String
