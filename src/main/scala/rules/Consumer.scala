@@ -425,18 +425,24 @@ object consumer extends ConsumptionRules {
             Quantification(q, vars, Implies(transformed, body), trgs, name, isGlob, weight)
           case _ => t
         }
-        v2.decider.assert(termToAssert) {
-          case true =>
-            val da = Option.when(debugOn)(DebugExp.awaitTerm(e, eNew.getOrElse(e)))
-            v2.decider.assume(t, da)
-            QS(s2, v2)
-          case false =>
-            val failure = createFailure(pve dueTo AssertionFalse(e), v2, s2, termToAssert, eNew)
-            if (s2.retryLevel == 0 && v2.reportFurtherErrors()) {
+        if (s.inExternalProverMode)
+          QS(s2, v2) // Don't assert, but keep checking evals TODO: quick check if it's true?
+        else {
+          v2.decider.assert(termToAssert) {
+            case true =>
               val da = Option.when(debugOn)(DebugExp.awaitTerm(e, eNew.getOrElse(e)))
               v2.decider.assume(t, da)
-              failure combine QS(s2, v2)
-            } else failure}})
+              QS(s2, v2)
+            case false =>
+              val failure = createFailure(pve dueTo AssertionFalse(e), v2, s2, termToAssert, eNew)
+              if (s2.retryLevel == 0 && v2.reportFurtherErrors()) {
+                val da = Option.when(debugOn)(DebugExp.awaitTerm(e, eNew.getOrElse(e)))
+                v2.decider.assume(t, da)
+                failure combine QS(s2, v2)
+              } else failure
+          }
+        }
+      })
     })((s4, v4) => {
       val s4a = s4.copy(h = s.h,
                        reserveHeaps = s.reserveHeaps,

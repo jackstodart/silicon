@@ -53,7 +53,7 @@ trait SymbolicExecutionRules {
       if (Verifier.config.generateBlockMessages()) {
         s.currentMember.foreach((member) => {
           val memberName = member.name
-          s.currentBlock.foreach((block) => 
+          s.currentBlock.foreach((block) =>
             v.reporter.report(BlockFailureMessage(memberName, block._1, block._2))
           )
         })

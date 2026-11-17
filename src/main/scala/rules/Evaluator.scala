@@ -579,6 +579,7 @@ object evaluator extends EvaluationRules {
 //          bookkeeper.functionApplications += 1
           val joinFunctionArgs = tArgs //++ c2a.quantifiedVariables.filterNot(tArgs.contains)
           val debugLabel = v1.getDebugOldLabel(s1a, fapp.pos)
+          val heapLabel = v1.getDebugHeapLabel(s1a)
 
           val funcAppNew = eArgsNew.map(args => ast.FuncApp(funcName, args)(fapp.pos, fapp.info, fapp.typ, fapp.errT))
           val joinExp = Option.when(debugOn)({
@@ -655,15 +656,17 @@ object evaluator extends EvaluationRules {
                                s2.assertReadAccessOnly /* should currently always be false */ else true)
             consumes(s2a, pres, true, _ => pvePre, v2)((s3, snap, v3) => {
               val (stateArgs, snapToRecord) = v3.heapSupporter.functionAppSnapArgs(s2a, func, tArgs, snap.get, v3)
-              val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)), stateArgs ++ tArgs)
-              val preExp = Option.when(debugOn)(DebugPrecondition.awaitTerm(fapp, eArgsNew))
+              val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)),
+                stateArgs ++ tArgs)
+              val preExp = Option.when(debugOn)(DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel.getOrElse("missing heap label")))
               v3.decider.assume(preFApp, preExp)
               val funcAnn = func.info.getUniqueInfo[AnnotationInfo]
               val tFApp = funcAnn match {
                 case Some(a) if a.values.contains("opaque") =>
                   val funcAppAnn = fapp.info.getUniqueInfo[AnnotationInfo]
                   funcAppAnn match {
-                    case Some(a) if a.values.contains("reveal") => App(v3.symbolConverter.toFunction(func, s.program), stateArgs ++ tArgs)
+                    case Some(a) if a.values.contains("reveal") =>
+                      App(v3.symbolConverter.toFunction(func, s.program), stateArgs ++ tArgs)
                     case _ => App(functionSupporter.limitedVersion(v3.symbolConverter.toFunction(func, s.program)), stateArgs ++ tArgs)
                   }
                 case _ => App(v3.symbolConverter.toFunction(func, s.program), stateArgs ++ tArgs)
@@ -736,7 +739,9 @@ object evaluator extends EvaluationRules {
                       if (!Verifier.config.disableFunctionUnfoldTrigger()) {
                         val eArgsString = eArgsNew.mkString(", ")
                         val debugExp = Option.when(debugOn)(DebugExp.awaitTerm(s"PredicateTrigger(${predicate.name}($eArgsString))", isInternal = true))
-                        v4.decider.assume(App(s.predicateData(predicate.name).triggerFunction, v4.heapSupporter.predicateTriggerSnapArg(s4, predicate, snap.get, s4.h) +: tArgs), debugExp)
+                        val triggerTerm = App(s.predicateData(predicate.name).triggerFunction,
+                          v4.heapSupporter.predicateTriggerSnapArg(s4, predicate, snap.get, s4.h) +: tArgs)
+                        v4.decider.assume(triggerTerm, debugExp)
                       }
                       val body = predicate.body.get /* Only non-abstract predicates can be unfolded */
                       val s4b = s4a.scalePermissionFactor(tPerm, ePermNew)
@@ -1021,7 +1026,7 @@ object evaluator extends EvaluationRules {
     val indexGeZeroTerm = AtLeast(tIndex, IntLiteral(0))
     val indexGeZeroExp = Option.when(debugOn)(ast.GeCmp(eIndex, ast.IntLit(0)())(eIndex.pos, eIndex.info, eIndex.errT))
     val indexGeZeroExpNew = Option.when(debugOn)(ast.GeCmp(expNew.get(1), ast.IntLit(0)())(eIndex.pos, eIndex.info, eIndex.errT))
-    val failureIdxNeg = createFailure(pve dueTo SeqIndexNegative(eSeq, eIndex), v, s, indexGeZeroTerm, indexGeZeroExpNew)
+    lazy val failureIdxNeg = createFailure(pve dueTo SeqIndexNegative(eSeq, eIndex), v, s, indexGeZeroTerm, indexGeZeroExpNew)
     v.decider.assert(indexGeZeroTerm) {
       case true => assertLtSeqLength()
       case false if s.retryLevel == 0 && v.reportFurtherErrors() =>

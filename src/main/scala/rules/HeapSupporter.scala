@@ -918,7 +918,8 @@ class DefaultHeapSupportRules extends HeapSupportRules {
       chs.map { ch =>
         val bc = IsPositive(ch.perm.replace(ch.quantifiedVars, tArgs))
         val bcExp: ast.Exp = ast.LocalVar("chunk has non-zero permission", ast.Bool)() // TODO
-        val bcExpNew = Option.when(debugOn)(ast.GeCmp(replaceVarsInExp(ch.permExp.get, ch.quantifiedVarExps.get.map(_.name), eArgs.get), ast.NoPerm()())(ch.permExp.get.pos, ch.permExp.get.info, ch.permExp.get.errT))
+        val bcExpNew = Option.when(debugOn)(ast.GeCmp(replaceVarsInExp(ch.permExp.get, ch.quantifiedVarExps.get.map(_.name), eArgs.get),
+          ast.NoPerm()())(ch.permExp.get.pos, ch.permExp.get.info, ch.permExp.get.errT))
         val tTriggers = Seq(Trigger(ch.valueAt(tArgs)))
 
         val trig = ch match {
