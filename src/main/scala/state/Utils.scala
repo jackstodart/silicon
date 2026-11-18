@@ -7,6 +7,7 @@
 package viper.silicon.state
 
 import scala.collection.mutable
+import viper.silicon.resources.FieldID
 import viper.silicon.state.terms._
 import viper.silver.ast
 
@@ -16,10 +17,14 @@ package object utils {
     * Terms and expressions are collected together, keyed by term, so that each assumed term is
     * paired with the expression it was derived from.
     *
+    * Field snapshots without an expression of their own are described by the corresponding field
+    * access, labelled with `heapLabel` (the debug label of the heap `s.h`).
+    * Expressions are only built if `refExp` and `heapLabel` are defined, i.e. in debug mode.
+    *
     * Note: the method accounts for `ref` occurring in `σ`, i.e. it will not generate the
     * unsatisfiable constraint `ref != ref`.
     */
-  def computeReferenceDisjointnesses(s: State, ref: Term, refExp: Option[ast.Exp])
+  def computeReferenceDisjointnesses(s: State, ref: Term, refExp: Option[ast.Exp], heapLabel: Option[String])
                                     : Seq[(Term, Option[ast.Exp])] = {
 
     val refs = mutable.LinkedHashMap[Term, Option[ast.Exp]]()
@@ -36,6 +41,11 @@ package object utils {
       }
     }
 
+    /* The value of field `fieldName` of `rcvrExp` in the heap `s.h` */
+    def fieldValueExp(fieldName: String, rcvrExp: Option[ast.Exp]): Option[ast.Exp] =
+      for (label <- heapLabel; r <- rcvrExp; fld <- s.program.findFieldOptionally(fieldName))
+        yield ast.DebugLabelledOld(ast.FieldAccess(r, fld)(), label)()
+
     /* Collect all Ref/Set[Ref]/Seq[Ref]-typed values from the store */
     s.g.values.values.foreach { case (t, e) => collect(t, e) }
 
@@ -43,7 +53,11 @@ package object utils {
     s.h.values.foreach {
       case bc: BasicChunk =>
         bc.args.zipWithIndex.foreach { case (a, i) => collect(a, bc.argsExp.map(_(i))) }
-        collect(bc.snap, bc.snapExp)
+        val snapExp = bc.resourceID match {
+          case FieldID => bc.snapExp.orElse(fieldValueExp(bc.id.name, bc.argsExp.map(_.head)))
+          case _ => bc.snapExp
+        }
+        collect(bc.snap, snapExp)
       case qch: QuantifiedFieldChunk =>
         /* Terms from quantified chunks contain the implicitly quantified receiver `?r`,
          * hence, they can only be used under quantifiers that bind `?r`.
@@ -52,7 +66,7 @@ package object utils {
          */
         qch.singletonRcvr.foreach(rcvr => {
           collect(rcvr, qch.singletonRcvrExp)
-          collect(qch.valueAt(rcvr), None)
+          collect(qch.valueAt(rcvr), fieldValueExp(qch.id.name, qch.singletonRcvrExp))
         })
       case _ =>
     }

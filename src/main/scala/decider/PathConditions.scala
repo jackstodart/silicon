@@ -6,7 +6,7 @@
 
 package viper.silicon.decider
 
-import viper.silicon.debugger.{DebugAssumption, DebugExp, DebugGroup, DebugImplication, DebugQuantifier}
+import viper.silicon.debugger.{DebugAssumptionNode, DebugExp, DebugGroup, DebugImplication, DebugQuantifier}
 import viper.silicon.Stack
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.debugger.AnyDebugNode
@@ -329,7 +329,7 @@ private trait LayeredPathConditionStackLike {
       // Remove the branch condition itself, which would be c => c.
       val layerConditionals = layer.branchCondition match {
         case Some(bc) => layerNonGlobals.filterNot {
-          case a: DebugAssumption[_] => a.term == bc
+          case a: DebugAssumptionNode[_] => a.term == bc
           case _ => false
         }
         case None => layerNonGlobals

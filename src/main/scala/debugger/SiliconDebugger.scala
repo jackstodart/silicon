@@ -36,7 +36,7 @@ import viper.silicon.verifier.{MainVerifier, Verifier, WorkerVerifier}
 package object debugger {
   type AnyDebugNode = DebugNode[_]
   // These are constructors which are used in decider.assume, where terms are later attached to DebugAssumptions
-  type PreDebugAssumption = Term => DebugAssumption[_]
+  type PreDebugAssumption = Term => DebugAssumptionNode[_]
   type PreDebugGroup = InsertionOrderedSet[DebugNode[_]] => DebugGroupNode[_]
 }
 
@@ -57,7 +57,7 @@ case class ProofObligation(s: State,
 
   def removeAssumptions(ids: Seq[Int]): ProofObligation = {
     val newAssumptionsExp = assumptionsExp.filter(a => !ids.contains(a.id)).map[DebugNode[_]] {
-      case assumption: DebugAssumption[_] => assumption
+      case assumption: DebugAssumptionNode[_] => assumption
       case group: DebugGroupNode[_] => group.removeChildrenById(ids)
     }
     this.copy(assumptionsExp = newAssumptionsExp)
@@ -65,7 +65,7 @@ case class ProofObligation(s: State,
 
   def findAssumption(id: Int): Option[AnyDebugNode] =
     assumptionsExp.iterator.map[Option[AnyDebugNode]] {
-      case ass: DebugAssumption[_] => Option.when(ass.id == id)(ass)
+      case ass: DebugAssumptionNode[_] => Option.when(ass.id == id)(ass)
       case group: DebugGroupNode[_] => group.getNodeWithId(id)
     }.collectFirst { case Some(node) => node }
 
@@ -473,7 +473,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       case Some(id) =>
         obl.findAssumption(id) match {
           case None => println("Assumption not found")
-          case Some(_: DebugAssumption[_]) => println("Assumption has no children")
+          case Some(_: DebugAssumptionNode[_]) => println("Assumption has no children")
           case Some(ass: DebugGroupNode[_]) =>
             val filteredChildren = if (obl.printConfig.isPrintInternalEnabled) ass.children else ass.children.filter(!_.isInternal)
             if (filteredChildren.nonEmpty) {

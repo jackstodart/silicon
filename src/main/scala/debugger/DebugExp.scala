@@ -53,20 +53,20 @@ sealed trait DebugNode[Self <: DebugNode[Self]] {
   }
 }
 
-/** DebugAssumptions need to be passed into 'decider.assume' before the final term is known.
-  * So all extensions should implement 'awaitTerm' to delay construction.
+/** A leaf node holding a single assumption. DebugAssumptions need to be passed into 'Decider.assume'
+  * before the final term is known, so all extensions should implement 'awaitTerm' to delay construction.
   */
-sealed trait DebugAssumption[Self <: DebugAssumption[Self]] extends DebugNode[Self] {
+sealed trait DebugAssumptionNode[Self <: DebugAssumptionNode[Self]] extends DebugNode[Self] {
   def term: Term
   def finalExp: Option[Exp] = None
   def originalExp: Option[Exp] = None
 
   lazy val isGlobal: Boolean = PathConditions.isGlobal(term)
 
-  override def getNodeWithId(soughtId: Int, visited: mutable.HashSet[AnyDebugNode]): Option[DebugAssumption[Self]] =
+  override def getNodeWithId(soughtId: Int, visited: mutable.HashSet[AnyDebugNode]): Option[DebugAssumptionNode[Self]] =
     Option.when(this.id == soughtId)(this)
 
-  override def filterTerm(t: Term): Option[DebugAssumption[Self]] =
+  override def filterTerm(t: Term): Option[DebugAssumptionNode[Self]] =
     Option.when(this.term.contains(t))(this)
 
   def toString(currDepth: Int, maxDepth: Int, config: DebugPrintConfiguration): String =
@@ -79,16 +79,17 @@ sealed trait DebugAssumption[Self <: DebugAssumption[Self]] extends DebugNode[Se
   def display(config: DebugPrintConfiguration): String
 }
 
-/** A category that groups the assumptions made underneath it, rather than standing alone. */
+/** A group of assumptions categorised together. */
 sealed trait DebugGroupNode[Self <: DebugGroupNode[Self]] extends DebugNode[Self] {
   def children: InsertionOrderedSet[AnyDebugNode]
 
-  /** The terms that were actually assumed for this group, which might not directly match the children.
-    * See Decider.assume and PathConditions. Use actualTerms for verification, but children for display.
+  /** The terms that were actually assumed for this group, which might not directly match children because
+    * 'Decider.assume' filters known terms. Use actualTerms for verification, but children for display.
     */
   def actualTerms: InsertionOrderedSet[Term]
 
-  lazy val isGlobal: Boolean = children.forall(_.isGlobal)
+  // Based on the terms actually assumed (which the debugger replays), not on the children
+  lazy val isGlobal: Boolean = actualTerms.forall(PathConditions.isGlobal)
 
   // Return a copy of the group with any children matching 'ids' removed.
   // The terms of removed children are removed from this group's terms. A removed child whose terms
@@ -96,7 +97,7 @@ sealed trait DebugGroupNode[Self <: DebugGroupNode[Self]] extends DebugNode[Self
   // from that term; see SiliconDebugger.removeAssumptions, which reports such children.
   def removeChildrenById(ids: Seq[Int]): DebugGroupNode[Self] = {
     val newChildren = children.flatMap[AnyDebugNode] {
-      case ass: DebugAssumption[_] => if (ids.contains(ass.id)) None else Some(ass)
+      case ass: DebugAssumptionNode[_] => if (ids.contains(ass.id)) None else Some(ass)
       case group: DebugGroupNode[_] => if (ids.contains(group.id)) None else Some(group.removeChildrenById(ids))
     }
     withRemainingChildren(newChildren)
@@ -158,7 +159,7 @@ object DebugGroupNode {
   def termsOf(nodes: Iterable[AnyDebugNode]): InsertionOrderedSet[Term] =
     InsertionOrderedSet(nodes.flatMap {
       case group: DebugGroupNode[_] => group.actualTerms
-      case assum: DebugAssumption[_] => Iterable(assum.term)
+      case assum: DebugAssumptionNode[_] => Iterable(assum.term)
     })
 
   def termsOf(node: AnyDebugNode): InsertionOrderedSet[Term] =
@@ -176,14 +177,15 @@ class DebugExp(val id: Int,
                override val isInternal: Boolean,
                val term: Term,
                override val originalExp: Option[Exp],
-               override val finalExp: Option[Exp]) extends DebugAssumption[DebugExp] {
+               override val finalExp: Option[Exp]) extends DebugAssumptionNode[DebugExp] {
   override def display(config: DebugPrintConfiguration): String = {
-    (description, config.printInternalTermRepresentation) match {
-      case (Some(d), true) => s"$d: $term"
-      case (Some(d), false) if finalExp.isDefined => s"$d: ${finalExp.get}"
-      case (Some(d), false) if finalExp.isEmpty => d
-      case (None, true) => term.toString
-      case (None, false) => "Internal assumption"
+    (description, config.printInternalTermRepresentation, finalExp) match {
+      case (Some(d), true,  _      ) => s"$d: $term"
+      case (Some(d), false, Some(e)) => s"$d: $e"
+      case (Some(d), false, None   ) => d + " (internal)"
+      case (None,    true , _      ) => term.toString
+      case (None,    false, Some(e)) => e.toString
+      case (None,    false, None   ) => "Internal assumption"
     }
   }
 }
@@ -220,7 +222,7 @@ class DebugPrecondition(val id: Int,
                         val term: Term,
                         val funExp: ast.FuncApp,
                         val finalArgs: Option[Seq[Exp]],
-                        val heapLabel: String) extends DebugAssumption[DebugPrecondition] {
+                        val heapLabel: String) extends DebugAssumptionNode[DebugPrecondition] {
   override def description: Option[String] = Some(s"Precondition of ${funExp.funcname}(${funExp.args.mkString(", ")}) holds")
 
   override def isInternal: Boolean = true
@@ -248,7 +250,7 @@ class FreshVarDefinition(val id: Int,
                          val freshVarTerm: Var, // The fresh variable, as a term.
                          val freshVar: ast.LocalVarWithVersion,
                          val rhs: Exp,
-                         val rhsNew: Exp) extends DebugAssumption[FreshVarDefinition] {
+                         val rhsNew: Exp) extends DebugAssumptionNode[FreshVarDefinition] {
   override def description: Option[String] = Some(s"Definition of fresh var")
 
   override def isInternal: Boolean = false

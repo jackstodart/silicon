@@ -470,7 +470,8 @@ object executor extends ExecutionRules {
             })
           }
         }
-        val tsEs = viper.silicon.state.utils.computeReferenceDisjointnesses(s, tRcvr, eRcvrNew)
+        val heapLabel = Option.when(debugOn)(v.getDebugOldLabel(s, stmt.pos))
+        val tsEs = viper.silicon.state.utils.computeReferenceDisjointnesses(s, tRcvr, eRcvrNew, heapLabel)
         addFieldPerms(s, fields, v)((s1, v1) => {
           val s1a = s1.copy(g = s1.g + (x, (tRcvr, eRcvrNew)))
           val s1b = if (debugOn) v1.recordHeap(s1a, oldLabel, ExecStmt(stmt), oldPCS) else s1a

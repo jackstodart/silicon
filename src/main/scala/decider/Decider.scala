@@ -340,8 +340,9 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       val filteredTerms = InsertionOrderedSet(if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue))
       if (filteredTerms.nonEmpty) {
         assumeWithoutSmokeChecks(filteredTerms)
-        // Record the terms actually assumed, which can differ from those of the group's children
-        if (debugMode && debugGroup.get.children.nonEmpty)
+        // Record the terms actually assumed, which can differ from those of the group's children, even if
+        // no child describes them: the debugger replays assumptions from the recorded nodes.
+        if (debugMode)
           addDebugNode(debugGroup.get.withTerms(filteredTerms))
       }
     }

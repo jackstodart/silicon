@@ -6,7 +6,7 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.{DebugAssumption, DebugExp, DebugGroup, DebugGroupNode, DebugNode}
+import viper.silicon.debugger.{DebugAssumptionNode, DebugExp, DebugGroup, DebugGroupNode, DebugNode}
 import viper.silicon._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.debugger.{AnyDebugNode, PreDebugAssumption}
