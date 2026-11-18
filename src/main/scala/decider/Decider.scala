@@ -67,9 +67,8 @@ trait Decider {
              group: Option[PreDebugGroup],
              isInternal: Boolean,
              enforceAssumption: Boolean): Unit
-  // Expects terms and exps to related at each index
-  def assume(terms: Iterable[Term],
-             exps: Option[Iterable[ast.Exp]],
+  // Assumes each term; in debug mode, records each as a child of the group, labelled with its paired exp
+  def assume(termsAndExps: Iterable[(Term, Option[ast.Exp])],
              debugGroup: Option[PreDebugGroup]): Unit
   // Separately assumes terms and adds the debugGroup
   // (we cannot easily connect each term to a leaf in the debugGroup)
@@ -321,20 +320,17 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       assumeGroup(terms, debugGroup, isInternal, isDefinition = false, enforceAssumption)
     }
 
-    def assume(terms: Iterable[Term],
-               exps: Option[Iterable[Exp]],
+    def assume(termsAndExps: Iterable[(Term, Option[Exp])],
                debugGroup: Option[PreDebugGroup]): Unit = {
-      if (debugMode) {
-        val filteredTermExps = terms.zip(exps.get).filterNot(te => isKnownToBeTrue(te._1))
-        if (filteredTermExps.nonEmpty) {
-          val filteredTerms = InsertionOrderedSet(filteredTermExps.map(_._1))
-          assumeWithoutSmokeChecks(filteredTerms)
-          val children = filteredTermExps.map(te => DebugExp(te._1, Some(te._2), None, isInternal = false))
+      val filteredTermExps = termsAndExps.filterNot(te => isKnownToBeTrue(te._1))
+      if (filteredTermExps.nonEmpty) {
+        val filteredTerms = InsertionOrderedSet(filteredTermExps.map(_._1))
+        assumeWithoutSmokeChecks(filteredTerms)
+        if (debugMode) {
+          val children = filteredTermExps.map[AnyDebugNode] { case (t, e) => DebugExp(t, e, e, isInternal = e.isEmpty) }
           addDebugNode(debugGroup.get(InsertionOrderedSet(children)).withTerms(filteredTerms))
         }
       }
-      else
-        assumeGroup(terms, None, isInternal = false, isDefinition = false, enforceAssumption = false)
     }
 
     // Separately assumes terms and adds the debugGroup

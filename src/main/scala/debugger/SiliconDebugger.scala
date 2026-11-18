@@ -388,7 +388,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
       println(s"\nEnter 'q' to quit, 'z' to zoom in on (i.e., show all children of) an assumption, " +
         s"'r' to reset the proof obligation, 'ra' to remove assumptions, 'af' to add free assumptions, " +
         s"'ap' prove additional assumptions, 'p' to execute proof, 'c' to change print configuration, " +
-        s"'s' to change the SMT solver, 't' to change the timeout, 'i' to export to Isabelle")
+        s"'s' to change the SMT solver, 't' to change the timeout")
       try {
         val userInput = readLine()
         userInput.toLowerCase match {

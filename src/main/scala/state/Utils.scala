@@ -11,33 +11,39 @@ import viper.silicon.state.terms._
 import viper.silver.ast
 
 package object utils {
-  /** Note: the method accounts for `ref` occurring in `σ`, i.e. it will not generate the
+  /** Computes the disjointness assumptions between `ref` and all Ref/Set[Ref]/Seq[Ref]-typed
+    * values in the store and heap, each paired with its corresponding expression (if available).
+    * Terms and expressions are collected together, keyed by term, so that each assumed term is
+    * paired with the expression it was derived from.
+    *
+    * Note: the method accounts for `ref` occurring in `σ`, i.e. it will not generate the
     * unsatisfiable constraint `ref != ref`.
     */
-  def computeReferenceDisjointnesses(s: State, ref: Term)
-                                    : Seq[Term] = {
+  def computeReferenceDisjointnesses(s: State, ref: Term, refExp: Option[ast.Exp])
+                                    : Seq[(Term, Option[ast.Exp])] = {
 
-    val refs = mutable.HashSet[Term]()
-    val refSets = mutable.HashSet[Term]()
-    val refSeqs = mutable.HashSet[Term]()
+    val refs = mutable.LinkedHashMap[Term, Option[ast.Exp]]()
+    val refSets = mutable.LinkedHashMap[Term, Option[ast.Exp]]()
+    val refSeqs = mutable.LinkedHashMap[Term, Option[ast.Exp]]()
 
-    def collect(t: Term): Unit = {
+    /* Each term is recorded once; an entry with an expression is preferred over one without */
+    def collect(t: Term, e: Option[ast.Exp]): Unit = {
       t.sort match {
-        case sorts.Ref => if (t != ref) refs += t
-        case sorts.Set(sorts.Ref) => refSets += t
-        case sorts.Seq(sorts.Ref) => refSeqs += t
+        case sorts.Ref => if (t != ref && refs.get(t).forall(_.isEmpty)) refs(t) = e
+        case sorts.Set(sorts.Ref) => if (refSets.get(t).forall(_.isEmpty)) refSets(t) = e
+        case sorts.Seq(sorts.Ref) => if (refSeqs.get(t).forall(_.isEmpty)) refSeqs(t) = e
         case _ =>
       }
     }
 
     /* Collect all Ref/Set[Ref]/Seq[Ref]-typed values from the store */
-    s.g.termValues.values foreach collect
+    s.g.values.values.foreach { case (t, e) => collect(t, e) }
 
     /* Collect all Ref/Set[Ref]/Seq[Ref]-typed terms from heap chunks */
     s.h.values.foreach {
       case bc: BasicChunk =>
-        bc.args foreach collect
-        collect(bc.snap)
+        bc.args.zipWithIndex.foreach { case (a, i) => collect(a, bc.argsExp.map(_(i))) }
+        collect(bc.snap, bc.snapExp)
       case qch: QuantifiedFieldChunk =>
         /* Terms from quantified chunks contain the implicitly quantified receiver `?r`,
          * hence, they can only be used under quantifiers that bind `?r`.
@@ -45,54 +51,23 @@ package object utils {
          * a single location (i.e. for a single receiver) only.
          */
         qch.singletonRcvr.foreach(rcvr => {
-          collect(rcvr)
-          collect(qch.valueAt(rcvr))
+          collect(rcvr, qch.singletonRcvrExp)
+          collect(qch.valueAt(rcvr), None)
         })
       case _ =>
     }
 
-    val disjointnessAssumptions = mutable.ListBuffer[Term]()
+    def mkExp(e: Option[ast.Exp])(f: (ast.Exp, ast.Exp) => ast.Exp): Option[ast.Exp] =
+      for (r <- refExp; x <- e) yield f(r, x)
 
-    refs foreach (r => disjointnessAssumptions += (ref !== r))
-    refSets foreach (rs => disjointnessAssumptions += Not(SetIn(ref, rs)))
-    refSeqs foreach (rs => disjointnessAssumptions += Not(SeqIn(rs, ref)))
+    val disjointnessAssumptions = mutable.ListBuffer[(Term, Option[ast.Exp])]()
 
-    disjointnessAssumptions.result()
-  }
-
-  def computeReferenceDisjointnessesExp(s: State, ref: ast.Exp)
-  : Seq[ast.Exp] = {
-
-    val refs = mutable.HashSet[ast.Exp]()
-    val refSets = mutable.HashSet[ast.Exp]()
-    val refSeqs = mutable.HashSet[ast.Exp]()
-
-    def collect(e: ast.Exp): Unit = {
-      e.typ match {
-        case ast.Ref => if (e != ref) refs += e
-        case ast.SetType(ast.Ref) => refSets += e
-        case ast.SeqType(ast.Ref) => refSeqs += e
-        case _ =>
-      }
-    }
-
-    /* Collect all Ref/Set[Ref]/Seq[Ref]-typed values from the store */
-    s.g.values.values foreach (p => collect(p._2.get))
-
-    /* Collect all Ref/Set[Ref]/Seq[Ref]-typed terms from heap chunks */
-    s.h.values.foreach {
-      case bc: BasicChunk =>
-        bc.argsExp.get foreach collect
-      case qch: QuantifiedFieldChunk =>
-        qch.singletonRcvrExp.foreach(collect)
-      case _ =>
-    }
-
-    val disjointnessAssumptions = mutable.ListBuffer[ast.Exp]()
-
-    refs foreach (r => disjointnessAssumptions += ast.NeCmp(ref, r)())
-    refSets foreach (rs => disjointnessAssumptions += ast.Not(ast.AnySetContains(ref, rs)())())
-    refSeqs foreach (rs => disjointnessAssumptions += ast.Not(ast.SeqContains(ref, rs)())())
+    refs foreach { case (r, e) =>
+      disjointnessAssumptions += ((ref !== r) -> mkExp(e)((re, x) => ast.NeCmp(re, x)())) }
+    refSets foreach { case (rs, e) =>
+      disjointnessAssumptions += (Not(SetIn(ref, rs)) -> mkExp(e)((re, x) => ast.Not(ast.AnySetContains(re, x)())())) }
+    refSeqs foreach { case (rs, e) =>
+      disjointnessAssumptions += (Not(SeqIn(rs, ref)) -> mkExp(e)((re, x) => ast.Not(ast.SeqContains(re, x)())())) }
 
     disjointnessAssumptions.result()
   }

@@ -178,11 +178,13 @@ class DebugExp(val id: Int,
                override val originalExp: Option[Exp],
                override val finalExp: Option[Exp]) extends DebugAssumption[DebugExp] {
   override def display(config: DebugPrintConfiguration): String = {
-    val descriptionStr = description.mapOrElse(_ + ": ", "")
-    val assumptionStr = if (config.printInternalTermRepresentation) term.toString
-      else if (finalExp.isDefined) finalExp.get.toString
-      else description.getOrElse("Internal assumption")
-    descriptionStr + assumptionStr
+    (description, config.printInternalTermRepresentation) match {
+      case (Some(d), true) => s"$d: $term"
+      case (Some(d), false) if finalExp.isDefined => s"$d: ${finalExp.get}"
+      case (Some(d), false) if finalExp.isEmpty => d
+      case (None, true) => term.toString
+      case (None, false) => "Internal assumption"
+    }
   }
 }
 
