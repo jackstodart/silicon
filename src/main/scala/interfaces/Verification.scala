@@ -15,9 +15,12 @@ import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.debugger.{DebugAxiom, DebugExp}
 import viper.silicon.interfaces.state.Chunk
+import viper.silicon.dependencyAnalysis.graphInterpretation.IntraproceduralGraphResult
 import viper.silicon.reporting._
 import viper.silicon.state.terms._
 import viper.silicon.state.{State, Store}
+import viper.silicon.state.chunks.Chunk
+import viper.silicon.state.terms._
 import viper.silicon.verifier.Verifier
 
 /*
@@ -33,6 +36,7 @@ sealed abstract class VerificationResult {
   var previous: Vector[VerificationResult] = Vector() //Sets had problems with equality
   val continueVerification: Boolean = true
   var isReported: Boolean = false
+  var intraproceduralGraphResult: Option[IntraproceduralGraphResult] = None
 
   def isFatal: Boolean
   def &&(other: => VerificationResult): VerificationResult

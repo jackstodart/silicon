@@ -2,14 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2022 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.rules
 
+import viper.silicon.dependencyAnalysis.AnalysisInfos
 import viper.silicon.debugger.{DebugExp, DebugGroup}
 import viper.silicon.interfaces.VerificationResult
 import viper.silicon.rules.evaluator.{eval, evalQuantified, evals}
 import viper.silicon.state._
+import viper.silicon.state.chunks.MagicWandIdentifier
 import viper.silicon.state.terms._
 import viper.silicon.verifier.Verifier
 import viper.silver.ast
@@ -33,7 +35,8 @@ object havocSupporter extends SymbolicExecutionRules {
     */
   def execHavoc(havoc: ast.Quasihavoc,
                 v: Verifier,
-                s: State)
+                s: State,
+                analysisInfos: AnalysisInfos)
                 (Q: (State, Verifier) => VerificationResult)
                : VerificationResult = {
 
@@ -42,15 +45,15 @@ object havocSupporter extends SymbolicExecutionRules {
     // If there is no havoc condition, use True as the condition
     val lhsExpr = havoc.lhs.getOrElse(ast.TrueLit()(havoc.pos))
 
-    eval(s, lhsExpr, pve, v)((s0, lhsTerm, _, v0) => {
-      evals(s0, havoc.exp.args(s0.program), _ => pve, v0)((s1, tRcvrs, _, v1) => {
+    eval(s, lhsExpr, pve, v, analysisInfos)((s0, lhsTerm, _, v0) => {
+      evals(s0, havoc.exp.args(s0.program), _ => pve, v0, analysisInfos)((s1, tRcvrs, _, v1) => {
         val resource = havoc.exp.res(s1.program)
 
         // Call the havoc helper function, which returns a new heap, which is
         // partially havocked. Since we are executing a Havoc statement, we wrap
         // the HavocHelperData inside of a HavocOneData case (as opposed to HavocAllData).
         val condInfo = HavocOneData(tRcvrs)
-        val newHeap = v1.heapSupporter.havocResource(s1, lhsTerm, resource, condInfo, v1)
+        val newHeap = v1.heapSupporter.havocResource(s1, lhsTerm, resource, condInfo, v1, analysisInfos)
 
         Q(s1.copy(h = newHeap), v1)
       })
@@ -70,7 +73,8 @@ object havocSupporter extends SymbolicExecutionRules {
     */
   def execHavocall(havocall: ast.Quasihavocall,
                    v: Verifier,
-                   s: State)
+                   s: State,
+                   analysisInfos: AnalysisInfos)
                    (Q: (State, Verifier) => VerificationResult)
                   : VerificationResult = {
 
@@ -95,7 +99,8 @@ object havocSupporter extends SymbolicExecutionRules {
       optTriggers = None, // Triggers: none needed for Havocall
       name  = qid,
       pve   = pve,
-      v     = v)
+      v     = v,
+      analysisInfos = analysisInfos)
     {
       case (s1, tVars, eVars, Seq(tCond), _, Some((tArgs, eArgs, Seq(), _, _)), v1) =>
         // Seq() represents an empty list of Triggers
@@ -117,11 +122,15 @@ object havocSupporter extends SymbolicExecutionRules {
 
         v.decider.prover.comment("Check havocall receiver injectivity")
         val notInjectiveReason = QuasihavocallNotInjective(havocall)
-
-        val injectivityDebugExp = Option.when(debugOn)(DebugExp.awaitTerm("QP receiver injectivity check is well-defined", true))
-        v.decider.assume(FunctionPreconditionTransformer.transform(receiverInjectivityCheck, s.program), injectivityDebugExp)
-        v.decider.assert(receiverInjectivityCheck) {
-          case false => createFailure(pve dueTo notInjectiveReason, v, s1, receiverInjectivityCheck, "QP receiver injective")
+        val comment = "QP receiver injectivity check is well-defined"
+        val injectivityDebugExp = Option.when(debugOn)(DebugExp.awaitTerm(comment, isInternal = true))
+        v.decider.assume(FunctionPreconditionTransformer.transform(receiverInjectivityCheck, s.program), injectivityDebugExp, analysisInfos)
+        v.decider.assert(receiverInjectivityCheck, analysisInfos) {
+          case false =>
+            val failure = createFailure(pve dueTo notInjectiveReason, v, s1, receiverInjectivityCheck, "QP receiver injective")
+            recordFailedAssertion(s1, v, receiverInjectivityCheck, injectivityDebugExp.flatMap(_.originalExp),
+              injectivityDebugExp.flatMap(_.finalExp), analysisInfos)
+            if (s1.retryLevel == 0 && v.reportFurtherErrors()) failure combine Q(s1, v1) else failure
           case true =>
             // Generate the inverse axioms
             val (inverseFunctions, imagesOfCodomain) = quantifiedChunkSupporter.getFreshInverseFunctions(
@@ -144,13 +153,13 @@ object havocSupporter extends SymbolicExecutionRules {
             val debugGroup = Option.when(debugOn)(DebugGroup.awaitChildren(comment))
             // assume should accept one generic function for all children
             v.decider.assume(inverseFunctions.definitionalAxioms,
-              Option.when(debugOn)(DebugGroup.awaitChildren(comment)), isInternal = true, enforceAssumption = false)
+              debugGroup, isInternal = true, enforceAssumption = false, analysisInfos)
 
             // Call the havoc helper function, which returns a new heap, which is
             // partially havocked. Since we are executing a Havocall statement, we wrap
             // the HavocHelperData inside of a HavocAllData case.
             val condInfo = HavocallData(inverseFunctions, codomainQVars, imagesOfCodomain)
-            val newHeap = v1.heapSupporter.havocResource(s1, tCond, resource, condInfo, v1)
+            val newHeap = v1.heapSupporter.havocResource(s1, tCond, resource, condInfo, v1, analysisInfos)
 
             Q(s1.copy(h = newHeap), v1)
         }

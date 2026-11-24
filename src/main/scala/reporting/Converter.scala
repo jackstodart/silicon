@@ -6,21 +6,22 @@
 
 package viper.silicon.reporting
 
-import scala.util.{Success, Try}
-import viper.silver.ast
-import viper.silver.utility.Common.{OptionOps, Rational}
-import viper.silver.verifier._
-
 import viper.silicon
-import viper.silicon.decider.TermToSMTLib2Converter
-import viper.silicon.interfaces.decider.TermConverter
-import viper.silicon.interfaces.state.Chunk
+
+import scala.util.{Success, Try}
+import viper.silver.verifier.{ApplicationEntry, ConstantEntry, MapEntry, Model, ModelEntry, ValueEntry}
+import viper.silver.ast
+import viper.silicon.Map
 import viper.silicon.resources.{FieldID, PredicateID}
 import viper.silicon.state.terms._
 import viper.silicon.state.terms.sorts.{Snap, UserSort}
-import viper.silicon.state._
-import viper.silicon.{Map, state => st}
-
+import viper.silicon.state.chunks.Chunk
+import viper.silicon.state.chunks._
+import viper.silicon.state.{DefaultSymbolConverter, State, Store, SymbolConverter}
+import viper.silicon.decider.TermToSMTLib2Converter
+import viper.silicon.interfaces.decider.TermConverter
+import viper.silver.utility.Common.Rational
+import viper.silver.verifier._
 
 case class ExtractedModel(entries: Map[String, ExtractedModelEntry]) {
   override lazy val toString: String =
@@ -478,7 +479,7 @@ object Converter {
         entries = entries :+ entry
       case c: BasicChunk =>
         entries = entries :+ UnresolvedHeapEntry(c, "Magic Wands not supported")
-      case c: st.QuantifiedFieldChunk => 
+      case c: QuantifiedFieldChunk =>
         val entry = c.snapshotMap
         val fvf = evaluateTerm(entry, model)
         val fieldname = c.id.name 
@@ -494,7 +495,7 @@ object Converter {
         } catch {
           case _: Throwable => // continue
         }
-      case _: st.QuantifiedPredicateChunk => // it seems that sometimes QPs do occur but not deterministically... :)
+      case _: QuantifiedPredicateChunk => // it seems that sometimes QPs do occur but not deterministically... :)
 
       case c =>
         entries = entries :+ UnresolvedHeapEntry(c, "Non-basic chunks not supported")
@@ -886,8 +887,8 @@ case class DomainValueEntry(domain: String, id: String) extends ExtractedModelEn
   * result when using original as input for the function
   */
 case class ExtendedDomainValueEntry(original: DomainValueEntry, info: Map[ExtractedFunction, ExtractedModelEntry]) extends ExtractedModelEntry {
-	def asValueEntry: ValueEntry = original.asValueEntry
-	override def toString: String =
+  def asValueEntry: ValueEntry = original.asValueEntry
+  override def toString: String =
     original.toString ++" where " ++ info.map(infoEntryToString).mkString("{\n\t",";\n\t","\n\t}")
 
   private def infoEntryToString(entry: (ExtractedFunction, ExtractedModelEntry)): String =
