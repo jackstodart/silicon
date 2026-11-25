@@ -204,6 +204,13 @@ case class NamedLabel(label: String) extends HeapLabel
 case class DebugLabel(number: Int) extends HeapLabel {
   val label = s"debug@$number"
 }
+case object MissingLabel extends HeapLabel {
+  val label = "missingHeapLabel"
+}
+// The first heap of a method/loop has no parent, so we use DummyLabel
+case object DummyLabel extends HeapLabel {
+  val label = "nil"
+}
 
 sealed trait HeapCause
 case object InhalePre extends HeapCause

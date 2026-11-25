@@ -706,7 +706,7 @@ object evaluator extends EvaluationRules {
               val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)),
                 stateArgs ++ tArgs)
               val preExp = Option.when(debugOn)(
-                DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel.mapOrElse(_.label, "missing heap label")))
+                DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel.getOrElse(MissingLabel).label))
               v3.decider.assume(preFApp, preExp, analysisInfos)
               val funcAnn = func.info.getUniqueInfo[AnnotationInfo]
               val tFApp = funcAnn match {

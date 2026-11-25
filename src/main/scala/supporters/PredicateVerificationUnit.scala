@@ -110,7 +110,7 @@ trait DefaultPredicateVerificationUnitProvider extends VerifierComponent { v: Ve
                          h = v.heapSupporter.getEmptyHeap(sInit.program, v),
                          oldHeaps = OldHeaps(),
                          functionRecorder = funcRecorder)
-      val s0 = if (debugOn) v.startKeyHeap(s, NamedLabel("nil"), InhalePre) else s
+      val s0 = if (debugOn) v.startKeyHeap(s, DummyLabel, InhalePre) else s
 
       val err = PredicateNotWellformed(predicate)
 

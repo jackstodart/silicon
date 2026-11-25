@@ -240,7 +240,7 @@ trait DefaultFunctionVerificationUnitProvider extends VerifierComponent { v: Ver
       }
       val g = Store(argsStore + (function.result -> (data.formalResult, data.valFormalResultExp)))
       val s = sInit.copy(g = g, h = v.heapSupporter.getEmptyHeap(sInit.program, v, mayDefineNewVars = false), oldHeaps = OldHeaps())
-      val s0 = if (debugOn) v.startKeyHeap(s, NamedLabel("nil"), InhalePre) else s
+      val s0 = if (debugOn) v.startKeyHeap(s, DummyLabel, InhalePre) else s
 
       val analysisInfosPrecondition = v.decider.defaultAnalysisInfos.withJoinInfo(EvalStackDependencyAnalysisJoin(JoinType.Sink, EdgeType.Up))
       val analysisInfosPostcondition = v.decider.defaultAnalysisInfos.withJoinInfo(EvalStackDependencyAnalysisJoin(JoinType.Source, EdgeType.Down))
@@ -297,7 +297,7 @@ trait DefaultFunctionVerificationUnitProvider extends VerifierComponent { v: Ver
             decider.assume(labelledPcsPre, Option.when(debugOn)(DebugGroup(s"precondition of ${function.name}", pcsPreExp.get)),
               enforceAssumption = false, precondAnalysisSourceInfos)
             v.decider.prover.saturate(Verifier.config.proverSaturationTimeouts.afterContract)
-            val s1a = if (debugOn) v.startKeyHeap(s1, NamedLabel("nil"), EvalExp(body)) else s1
+            val s1a = if (debugOn) v.startKeyHeap(s1, DummyLabel, EvalExp(body)) else s1
             eval(s1a, body, FunctionNotWellformed(function), v, analysisInfosBody)((s2, tBody, bodyNew, _) => {
               val debugExp = if (debugOn) {
                 val e = ast.EqCmp(ast.Result(function.typ)(), body)(function.pos, function.info, function.errT)

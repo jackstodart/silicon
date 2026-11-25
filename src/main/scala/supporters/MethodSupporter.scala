@@ -9,20 +9,20 @@ package viper.silicon.supporters
 import com.typesafe.scalalogging.Logger
 import viper.silver.components.StatefulComponent
 import viper.silver.dependencyAnalysis._
-import viper.silver.verifier.errors._
-import viper.silicon.interfaces._
-import viper.silicon.decider.Decider
-import viper.silicon.logger.records.data.WellformednessCheckRecord
-import viper.silicon.rules.{consumer, executionFlowController, executor, producer}
-import viper.silicon.state.{CreateLabel, ExhalePost, InhalePre, NamedLabel, State, Store}
-import viper.silicon.state.State.OldHeaps
-import viper.silicon.state._
-import viper.silicon.verifier.{Verifier, VerifierComponent}
-import viper.silicon.utils.freshSnap
-import viper.silicon.Map
 import viper.silver.reporter.WarningsDuringVerification
 import viper.silver.verifier.VerifierWarning
+import viper.silver.verifier.errors._
 import viper.silver.{ast, cfg}
+
+import viper.silicon.Map
+import viper.silicon.decider.Decider
+import viper.silicon.interfaces._
+import viper.silicon.logger.records.data.WellformednessCheckRecord
+import viper.silicon.rules.{consumer, executionFlowController, executor, producer}
+import viper.silicon.state.State.OldHeaps
+import viper.silicon.state._
+import viper.silicon.utils.freshSnap
+import viper.silicon.verifier.{Verifier, VerifierComponent}
 
 /* TODO: Consider changing the DefaultMethodVerificationUnitProvider into a SymbolicExecutionRule */
 
@@ -89,7 +89,7 @@ trait DefaultMethodVerificationUnitProvider extends VerifierComponent { v: Verif
                          debugOldHeaps = Map(),
                          methodCfg = body)
 
-      val s0 = if (producer.debugOn) v.startKeyHeap(s, NamedLabel("nil"), InhalePre) else s
+      val s0 = if (producer.debugOn) v.startKeyHeap(s, DummyLabel, InhalePre) else s
       val emptyPCS = v.decider.pcs.duplicate()
 
       if (Verifier.config.printMethodCFGs()) {
@@ -112,7 +112,7 @@ trait DefaultMethodVerificationUnitProvider extends VerifierComponent { v: Verif
             val s2a = s2.copy(oldHeaps = s2.oldHeaps + (Verifier.PRE_STATE_LABEL -> s2.h))
             val s2b = if (producer.debugOn) {
               val tmp = v2.finishKeyHeap(s2a)
-              val parentLabel = v2.getDebugHeapLabel(tmp).getOrElse(NamedLabel("nil"))
+              val parentLabel = v2.getDebugHeapLabel(tmp).getOrElse(MissingLabel)
               v2.recordHeap(tmp, NamedLabel(Verifier.PRE_STATE_LABEL), parentLabel, CreateLabel, emptyPCS)
             } else s2a
             (  executionFlowController.locally(s2b, v2)((s3, v3) => {
@@ -125,7 +125,7 @@ trait DefaultMethodVerificationUnitProvider extends VerifierComponent { v: Verif
             && {
                executionFlowController.locally(s2b, v2)((s3, v3) =>  {
                   exec(s3, body, v3)((s4, v4) => {
-                    val currentLabel = v4.getDebugHeapLabel(s4).getOrElse(NamedLabel("finalHeapMissing"))
+                    val currentLabel = v4.getDebugHeapLabel(s4).getOrElse(MissingLabel)
                     val s4a = if (producer.debugOn) v4.startKeyHeap(s4, currentLabel, ExhalePost) else s4
                     consumes(s4a, posts, false, postViolated, v4, analysisInfosPostcondition)((_, _, _) =>
                       Success())})}) }  )})})

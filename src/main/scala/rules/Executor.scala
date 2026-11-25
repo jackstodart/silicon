@@ -103,7 +103,7 @@ object executor extends ExecutionRules {
     edge.kind match {
       case cfg.Kind.Out if !v.decider.isPathMarkedInfeasible =>
         val analysisInfos = v.decider.defaultAnalysisInfos
-        val s1 = if (debugOn) v.startKeyHeap(s, NamedLabel("nil"), StateMerge) else s
+        val s1 = if (debugOn) v.startKeyHeap(s, DummyLabel, StateMerge) else s
         val (fr1, h1) = v.stateConsolidator(s1).merge(s1.functionRecorder, s1, s1.h, s1.invariantContexts.head, v, analysisInfos)
         val s2 = s1.copy(functionRecorder = fr1, h = h1, invariantContexts = s1.invariantContexts.tail)
         if (debugOn) v.finishKeyHeap(s2) else s2
@@ -307,7 +307,7 @@ object executor extends ExecutionRules {
             (executionFlowController.locally(sBody, v)((s0, v0) => {
               v0.decider.prover.comment("Loop head block: Check well-definedness of invariant")
               val mark = v0.decider.setPathConditionMark()
-              val s0a = if (debugOn) v.startKeyHeap(s0, NamedLabel("nil"), InhaleInv) else s0
+              val s0a = if (debugOn) v.startKeyHeap(s0, DummyLabel, InhaleInv) else s0
               produces(s0a, freshSnap, invs, ContractNotWellformed, v0, analysisInfosInv)((s1, v1) => {
                 val s1a = if (debugOn) v1.finishKeyHeap(s1) else s1
                 phase1data = phase1data :+ (s1a,
@@ -319,7 +319,7 @@ object executor extends ExecutionRules {
             combine executionFlowController.locally(sLocal, v)((s0, v0) => {
               v0.decider.prover.comment("Loop head block: Establish invariant")
               val s0a = if (debugOn)
-                v0.startKeyHeap(s0, v0.getDebugHeapLabel(s0).getOrElse(NamedLabel("missingHeap")), ExhaleInv) else s0
+                v0.startKeyHeap(s0, v0.getDebugHeapLabel(s0).getOrElse(MissingLabel), ExhaleInv) else s0
               consumes(s0a, invs, false, LoopInvariantNotEstablished, v0, analysisInfosInv)((sLeftover, _, v1) => {
                 val sLeftover2 = if (debugOn) v1.finishKeyHeap(sLeftover) else sLeftover
                 val exhaleHeapRecord = Option.when(debugOn)({
@@ -435,7 +435,7 @@ object executor extends ExecutionRules {
     val s = state.copy(h = magicWandSupporter.getExecutionHeap(state))
     val Q: (State, Verifier) => VerificationResult = (s, v) => {
       continuation(magicWandSupporter.moveToReserveHeap(s, v), v)}
-    val oldLabel = v.getDebugHeapLabel(s).getOrElse(NamedLabel("missingHeap"))
+    val oldLabel = v.getDebugHeapLabel(s).getOrElse(MissingLabel)
     val oldPCS = v.decider.pcs.duplicate()
 
     /* For debugging-purposes only */

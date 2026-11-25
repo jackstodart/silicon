@@ -109,7 +109,7 @@ class DebugHeapRecorder {
       case column: ast.HasLineColumn => s"l:${column.line}.${column.column}"
       case _ => s"l:unknown"
     }
-    val heapLabel = getDebugHeapLabel(s, v, h).mapOrElse(_.label, "unrecordedHeap")
+    val heapLabel = getDebugHeapLabel(s, v, h).getOrElse(MissingLabel).label
     s"$heapLabel#$posString"
   }
 
