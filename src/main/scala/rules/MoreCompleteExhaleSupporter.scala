@@ -416,7 +416,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
         newChunks foreach { ch =>
           val resource = Resources.resourceDescriptions(ch.resourceID)
           val pathCond = interpreter.buildPathConditionsForChunk(ch, resource.instanceProperties(s.mayAssumeUpperBounds))
-          pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2, p._2)), analysisInfos))
+          pathCond.foreach(p => v.decider.assume(p._1, p._2, analysisInfos))
         }
         val newHeap = Heap(allChunks)
 

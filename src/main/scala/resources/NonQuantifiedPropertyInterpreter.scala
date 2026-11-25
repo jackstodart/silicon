@@ -7,6 +7,8 @@
 package viper.silicon.resources
 
 import viper.silicon.Map
+import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.debugger.PreDebugAssumption
 import viper.silicon.state.terms.Term
 import viper.silicon.state.terms
 import viper.silicon.state.chunks._
@@ -65,12 +67,22 @@ class NonQuantifiedPropertyInterpreter(heap: Iterable[Chunk], verifier: Verifier
      buildPathCondition(property.expression, Info(Map.empty, resourceID))
   }
 
-  def buildPathConditionsForChunk(chunk: NonQuantifiedChunk, properties: Iterable[Property]): Iterable[(Term, Option[ast.Exp])] = {
-    properties.map(buildPathConditionForChunk(chunk, _))
+  def buildPathConditionsForChunk(chunk: NonQuantifiedChunk, properties: Iterable[Property])
+                                 : Iterable[(Term, Option[PreDebugAssumption])] = {
+    properties.map { p =>
+      val termExp = buildPathConditionForChunk(chunk, p)
+      val debugExp = termExp._2.map(e => DebugExp.awaitTerm(p.description, e, e, isInternal = false))
+      (termExp._1, debugExp)
+    }
   }
 
-  def buildPathConditionsForResource(resourceID: ResourceID, properties: Iterable[Property]): Iterable[(Term, Option[ast.Exp])] = {
-    properties.map(buildPathConditionForResource(resourceID, _))
+  def buildPathConditionsForResource(resourceID: ResourceID, properties: Iterable[Property])
+                                    : Iterable[(Term, Option[PreDebugAssumption])] = {
+    properties.map { p =>
+      val termExp = buildPathConditionForResource(resourceID, p)
+      val debugExp = termExp._2.map(e => DebugExp.awaitTerm(p.description, e, e, isInternal = false))
+      (termExp._1, debugExp)
+    }
   }
 
   override protected def buildPermissionAccess(chunkPlaceholder: ChunkPlaceholder, info: Info) = {
@@ -144,7 +156,9 @@ class NonQuantifiedPropertyInterpreter(heap: Iterable[Chunk], verifier: Verifier
         // when interpreting a static or delayed property, look at every ID separately
         val conds = nonQuantifiedChunks.filter(_.resourceID == info.resourceID)
           .groupBy(ch => ch.id).values.map(chs => buildForEach(chs, chunkVariables, body, info))
-        (terms.And(conds.map(_._1)), Option.when(withExp)(BigAnd(conds.map(_._2.get))))
+        val filteredConds = conds.flatMap(_._2.get.topLevelConjuncts)
+          .filterNot(_.isInstanceOf[ast.TrueLit]).toSeq.distinct
+        (terms.And(conds.map(_._1)), Option.when(withExp)(BigAnd(filteredConds)))
     }
   }
 

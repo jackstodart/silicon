@@ -178,7 +178,7 @@ object chunkSupporter extends ChunkSupportRules {
       val interpreter = new NonQuantifiedPropertyInterpreter(heap.values, v)
       val resource = Resources.resourceDescriptions(chunk.resourceID)
       val pathCond = interpreter.buildPathConditionsForChunk(chunk, resource.instanceProperties(s.mayAssumeUpperBounds))
-      pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2, p._2)), analysisInfos))
+      pathCond.foreach(p => v.decider.assume(p._1, p._2, analysisInfos))
     }
 
     findChunk[NonQuantifiedChunk](h.values, id, args, v, analysisInfos) match {
