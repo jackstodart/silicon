@@ -416,7 +416,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
         newChunks foreach { ch =>
           val resource = Resources.resourceDescriptions(ch.resourceID)
           val pathCond = interpreter.buildPathConditionsForChunk(ch, resource.instanceProperties(s.mayAssumeUpperBounds))
-          pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2.get, p._2.get)), analysisInfos))
+          pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2, p._2)), analysisInfos))
         }
         val newHeap = Heap(allChunks)
 
@@ -511,7 +511,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
             ast.Implies(ast.Not(eqExp.get)(), ast.EqCmp(permTakenExp.get, ast.NoPerm()())())(pe.pos, pe.info, pe.errT))))
 
 
-        v.decider.assume(constraint, Option.when(debugOn)(DebugExp.awaitTerm(constraintExp.get, constraintExp.get)), analysisInfos)
+        v.decider.assume(constraint, Option.when(debugOn)(DebugExp.awaitTerm(constraintExp, constraintExp)), analysisInfos)
 
         newFr = newFr.recordPathSymbol(permTaken.applicable.asInstanceOf[Function]).recordConstraint(constraint)
 
@@ -542,7 +542,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
     v.decider.assert(termToAssert, analysisInfos) {
       case true =>
         val constraintExp = permsExp.map(pe => ast.EqCmp(pe, totalPermTakenExp.get)())
-        v.decider.assume(perms === totalPermTaken, Option.when(debugOn)(DebugExp.awaitTerm(constraintExp.get, constraintExp.get)), analysisInfos)
+        v.decider.assume(perms === totalPermTaken, Option.when(debugOn)(DebugExp.awaitTerm(constraintExp, constraintExp)), analysisInfos)
         if (returnSnap) {
           summarise(s1, relevantChunks.toSeq, resource, args, argsExp, None, v)((s2, snap, _, _, v1) =>
             Q(s2, updatedChunks, Some(snap), v1))

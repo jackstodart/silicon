@@ -111,14 +111,14 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
           val pathCond = interpreter.buildPathConditionsForChunk(ch, resource.instanceProperties(s.mayAssumeUpperBounds))
           pathCond.foreach { p =>
             val pTerm = v.decider.analysisHooks.withLabel(p._1)
-            val debugExp = Option.when(debugOn)(DebugExp.awaitTerm(p._2.get, p._2.get))
+            val debugExp = Option.when(debugOn)(DebugExp.awaitTerm(p._2, p._2))
             v.decider.assume(pTerm, debugExp, analysisInfos)
           }
         }
 
         Resources.resourceDescriptions foreach { case (id, desc) =>
           val pathCond = interpreter.buildPathConditionsForResource(id, desc.delayedProperties(s.mayAssumeUpperBounds))
-          pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2.get, p._2.get)), analysisInfos))
+          pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2, p._2)), analysisInfos))
         }
 
         v.symbExLog.closeScope(sepIdentifier)
@@ -173,7 +173,7 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
     newlyAddedChunks.filter(_.isInstanceOf[BasicChunk]) foreach { case ch: BasicChunk =>
       val resource = Resources.resourceDescriptions(ch.resourceID)
       val pathCond = interpreter.buildPathConditionsForChunk(ch, resource.instanceProperties(s.mayAssumeUpperBounds))
-      pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2.get, p._2.get)),
+      pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2, p._2)),
         analysisInfos1.overrideDependencyType(OriginType.Internal)))
     }
 

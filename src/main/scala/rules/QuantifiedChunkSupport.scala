@@ -277,7 +277,9 @@ trait QuantifiedChunkSupport extends SymbolicExecutionRules {
    * @param v The verifier to use.
    * @return A tuple (fr, sm, def) of functionRecorder, a snapshot map sm and a term def constraining sm.
    */
-  def combineFieldSnapshotMaps(fr: FunctionRecorder, field: String, fqvars: Seq[Var],t1: Term, t2: Term, p1: Term, p2: Term, v: Verifier): (FunctionRecorder, Term, Term)
+  def combineFieldSnapshotMaps(fr: FunctionRecorder, field: String,
+                               fqvars: Seq[Var],t1: Term, t2: Term, p1: Term, p2: Term, v: Verifier)
+                               : (FunctionRecorder, Term, Term)
 
   /** Merge the snapshots of two quantified heap chunks that denote the same predicate
    *
@@ -752,18 +754,20 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             }
 
             val comment = "Definitional axioms for snapshot map domain (instantiated)"
+            val debugGroup = Option.when(debugOn)(DebugGroup.awaitChildren(comment))
             v.decider.prover.comment(comment)
             // TODO: Avoid cast to Quantification
             v.decider.assume(smDef.domainDefinitions.map(_.asInstanceOf[Quantification].instantiate(instantiations)),
-              Option.when(debugOn)(DebugGroup.awaitChildren(comment)), isInternal = true, enforceAssumption = false, analysisInfos)
+              debugGroup, isInternal = true, enforceAssumption = false, analysisInfos)
         }
       }
 
       optQVarsInstantiations match {
         case None =>
           val comment = "Definitional axioms for snapshot map values"
+          val debugGroup = Option.when(debugOn)(DebugGroup.awaitChildren(comment))
           v.decider.prover.comment(comment)
-          v.decider.assume(smDef.valueDefinitions, Option.when(debugOn)(DebugGroup.awaitChildren(comment)), isInternal = true, enforceAssumption = false, analysisInfos)
+          v.decider.assume(smDef.valueDefinitions, debugGroup, isInternal = true, enforceAssumption = false, analysisInfos)
         case Some(_instantiations) =>
           // TODO: Avoid pattern matching on resource
           val instantiations = resource match {
@@ -772,10 +776,11 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
           }
 
           val comment = "Definitional axioms for snapshot map values (instantiated)"
+          val debugGroup = Option.when(debugOn)(DebugGroup.awaitChildren(comment))
           v.decider.prover.comment(comment)
           // TODO: Avoid cast to Quantification
           v.decider.assume(smDef.valueDefinitions.map(_.asInstanceOf[Quantification].instantiate(instantiations)),
-            Option.when(debugOn)(DebugGroup.awaitChildren(comment)), isInternal = true, enforceAssumption = false, analysisInfos)
+            debugGroup, isInternal = true, enforceAssumption = false, analysisInfos)
       }
     }
 
@@ -1057,7 +1062,8 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             Q(s1, v)
           case false =>
             val failure = createFailure(pve dueTo notInjectiveReason, v, s, receiverInjectivityCheck, "QP receiver is injective")
-            val debugFail = Option.when(debugOn)(DebugExp.awaitTerm("QP receiver injectivity (failed, assumed to continue)", isInternal = false))
+            val debugFail = Option.when(debugOn)(
+              DebugExp.awaitTerm("QP receiver injectivity (failed, assumed to continue)", isInternal = true))
             recordFailedAssertion(s, v, completeReceiverInjectivityCheck, debugFail, analysisInfos)
             if (s.retryLevel == 0 && v.reportFurtherErrors()) failure combine Q(s, v) else failure
         }
@@ -1099,7 +1105,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
       val interpreter = new NonQuantifiedPropertyInterpreter(h1.values, v)
       val resourceDescription = Resources.resourceDescriptions(ch.resourceID)
       val pcs = interpreter.buildPathConditionsForChunk(ch, resourceDescription.instanceProperties(s.mayAssumeUpperBounds))
-      pcs.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2.get, p._2.get)), analysisInfos))
+      pcs.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2, p._2)), analysisInfos))
 
       val smCache1 = if (s.isUsedAsTrigger(resource)) {
         val (relevantChunks, _) =
@@ -1247,7 +1253,8 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             qidPrefix = qid,
             program = s.program)
         v.decider.prover.comment("Check receiver injectivity")
-        val completeReceiverInjectivityCheck = Implies(FunctionPreconditionTransformer.transform(receiverInjectivityCheck, s.program), receiverInjectivityCheck)
+        val completeReceiverInjectivityCheck = Implies(
+          FunctionPreconditionTransformer.transform(receiverInjectivityCheck, s.program), receiverInjectivityCheck)
         v.decider.assert(completeReceiverInjectivityCheck, analysisInfos) {
           case true =>
             val qvarsToInvOfLoc = inverseFunctions.qvarsToInversesOf(formalQVars)
@@ -1257,7 +1264,8 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             // ME: We include the following condition to make sure the arguments are contained in the condition (and
             // can trigger other quantifiers) even if neither tCond not loss term mention the arguments.
             val argumentsMatch = And(formalQVars.zip(argsOfInvOfLoc).map(va => va._1 === va._2))
-            val argumentsMatchExp = formalQVarsExp.map(qv => BigAnd(qv.zip(eArgs.get).map(va => ast.EqCmp(va._1.localVar, va._2)(va._1.pos, va._1.info, va._1.errT))))
+            val argumentsMatchExp = formalQVarsExp.map(qv => BigAnd(qv.zip(eArgs.get).map(va =>
+              ast.EqCmp(va._1.localVar, va._2)(va._1.pos, va._1.info, va._1.errT))))
 
             v.decider.prover.comment("Definitional axioms for inverse functions")
 
@@ -1269,12 +1277,13 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
               isInternal = true, enforceAssumption = false, analysisInfos)
 
             if (s.isUsedAsTrigger(resource)){
+              val debugGroup = Option.when(debugOn)(DebugGroup.awaitChildren("Inverse Function"))
               v.decider.assume(
                 Seq(Forall(
                   formalQVars,
                   Implies(condOfInvOfLoc, ResourceTriggerFunction(resource, smDef1.get.sm, formalQVars, s.program)),
                   Trigger(inverseFunctions.inversesOf(formalQVars)))),
-                Option.when(debugOn)(DebugGroup.awaitChildren("Inverse Function")), isInternal = true, enforceAssumption = false, analysisInfos)
+                debugGroup, isInternal = true, enforceAssumption = false, analysisInfos)
             }
 
 
@@ -1440,7 +1449,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             case false =>
               val failure = createFailure(pve dueTo notInjectiveReason, v, s, receiverInjectivityCheck, "QP receiver injective")
               val debugFail = Option.when(debugOn)(
-                DebugExp.awaitTerm("QP receiver injectivity (failed, assumed to continue)", isInternal = false))
+                DebugExp.awaitTerm("QP receiver injectivity (failed, assumed to continue)", isInternal = true))
               recordFailedAssertion(s, v, receiverInjectivityCheck, debugFail, analysisInfos)
               if (s.retryLevel == 0 && v.reportFurtherErrors()) {
                 val snap = v.decider.fresh(v.snapshotSupporter.optimalSnapshotSort(resource, s, v), Option.when(debugOn)(PUnknown()))
@@ -2289,7 +2298,9 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
   }
 
   // Based on StateConsolidator#combineSnapshots
-  override def combinePredicateSnapshotMaps(fr: FunctionRecorder, predicate: String, qVars: Seq[Var], fqvars: Seq[Var], t1: Term, t2: Term, p1: Term, p2: Term, v: Verifier): (FunctionRecorder, Term, Term) = {
+  override def combinePredicateSnapshotMaps(fr: FunctionRecorder, predicate: String, qVars: Seq[Var], fqvars: Seq[Var],
+                                            t1: Term, t2: Term, p1: Term, p2: Term, v: Verifier)
+                                            : (FunctionRecorder, Term, Term) = {
     val lookupT1 = PredicateLookup(predicate, t1, qVars)
     val lookupT2 = PredicateLookup(predicate, t2, qVars)
     val (fr2, sm, smDef, triggers) = (IsPositive(p1), IsPositive(p2)) match {

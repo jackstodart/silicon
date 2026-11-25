@@ -181,10 +181,10 @@ class DebugExp(val id: Int,
     (description, config.printInternalTermRepresentation, finalExp) match {
       case (Some(d), true,  _      ) => s"$d: $term"
       case (Some(d), false, Some(e)) => s"$d: $e"
-      case (Some(d), false, None   ) => d + " (internal)"
+      case (Some(d), false, None   ) => if (isInternal) s"$d (internal)" else d
       case (None,    true , _      ) => term.toString
       case (None,    false, Some(e)) => e.toString
-      case (None,    false, None   ) => "Internal assumption"
+      case (None,    false, None   ) => if (isInternal) "Internal assumption" else "Assumption (no expression)"
     }
   }
 }
@@ -260,8 +260,8 @@ class FreshVarDefinition(val id: Int,
   override def finalExp: Option[Exp] = Some(ast.EqCmp(freshVar, rhsNew)())
 
   override def display(config: DebugPrintConfiguration): String = {
-    if (config.printInternalTermRepresentation) s"${description.get} ${freshVarTerm.id}: ${term.toString}"
-    else s"${description.get} ${freshVar.name}: $freshVar == $rhsNew"
+    if (config.printInternalTermRepresentation) s"${description.get}: ${term.toString}"
+    else s"${description.get}: $freshVar == $rhsNew"
   }
 }
 

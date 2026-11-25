@@ -6,32 +6,31 @@
 
 package viper.silicon.rules
 
+import viper.silver.ast
+import viper.silver.dependencyAnalysis.{DependencyAnalysisSourceInfo, OriginType, SimpleDependencyAnalysisMerge}
+import viper.silver.parser.PUnknown
+import viper.silver.verifier.reasons.{InsufficientPermission, MagicWandChunkNotFound}
+import viper.silver.verifier.{ErrorReason, PartialVerificationError, VerificationError}
+
 import viper.silicon
 import viper.silicon.Config.ExhaleMode
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
-import viper.silicon.debugger.debugger.AnyDebugNode
-import viper.silicon.debugger.{DebugExp, DebugNode}
 import viper.silicon.debugger.DebugExp
+import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.dependencyAnalysis._
 import viper.silicon.interfaces.{Success, VerificationResult}
 import viper.silicon.resources.{FieldID, PredicateID}
 import viper.silicon.rules.havocSupporter.{HavocHelperData, HavocOneData, HavocallData}
 import viper.silicon.rules.quantifiedChunkSupporter.freshSnapshotMap
+import viper.silicon.state._
+import viper.silicon.state.chunks._
 import viper.silicon.state.terms._
 import viper.silicon.state.terms.perms.IsPositive
 import viper.silicon.state.terms.predef.{`?r`, `?s`}
-import viper.silicon.state._
-import viper.silicon.state.chunks._
 import viper.silicon.supporters.functions.{FunctionRecorder, NoopFunctionRecorder}
 import viper.silicon.utils.ast.{BigAnd, replaceVarsInExp}
 import viper.silicon.utils.{freshSnap, toSf}
 import viper.silicon.verifier.Verifier
-import viper.silver.ast
-import viper.silver.dependencyAnalysis.{OriginType, DependencyAnalysisSourceInfo, SimpleDependencyAnalysisMerge}
-import viper.silver.parser.PUnknown
-import viper.silver.verifier.reasons.{InsufficientPermission, MagicWandChunkNotFound}
-import viper.silver.verifier.{ErrorReason, PartialVerificationError, VerificationError}
-
 
 trait HeapSupportRules extends SymbolicExecutionRules {
 
