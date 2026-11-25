@@ -128,8 +128,9 @@ object havocSupporter extends SymbolicExecutionRules {
         v.decider.assert(receiverInjectivityCheck, analysisInfos) {
           case false =>
             val failure = createFailure(pve dueTo notInjectiveReason, v, s1, receiverInjectivityCheck, "QP receiver injective")
-            // TODO: This was using injectivityDebugExp which will always be empty? Injectivity has no Exp.
-            recordFailedAssertion(s1, v, receiverInjectivityCheck, None, None, analysisInfos)
+            val debugFail = Option.when(debugOn)(
+              DebugExp.awaitTerm("Quasihavocall receiver injectivity (failed, assumed to continue)", isInternal = true))
+            recordFailedAssertion(s1, v, receiverInjectivityCheck, debugFail, analysisInfos)
             if (s1.retryLevel == 0 && v.reportFurtherErrors()) failure combine Q(s1, v1) else failure
           case true =>
             // Generate the inverse axioms

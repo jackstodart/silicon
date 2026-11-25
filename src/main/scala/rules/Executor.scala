@@ -436,8 +436,8 @@ object executor extends ExecutionRules {
     val s = state.copy(h = magicWandSupporter.getExecutionHeap(state))
     val Q: (State, Verifier) => VerificationResult = (s, v) => {
       continuation(magicWandSupporter.moveToReserveHeap(s, v), v)}
-    val oldLabel = v.getDebugHeapLabel(s).getOrElse(MissingLabel)
-    val oldPCS = v.decider.pcs.duplicate()
+    val oldLabel = if (debugOn) v.getDebugHeapLabel(s).getOrElse(MissingLabel) else MissingLabel
+    val oldPCS = if (debugOn) v.decider.pcs.duplicate() else v.decider.pcs
 
     /* For debugging-purposes only */
     stmt match {

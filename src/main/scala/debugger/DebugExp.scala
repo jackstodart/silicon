@@ -8,15 +8,14 @@ package viper.silicon.debugger
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable
-
 import viper.silver.ast
 import viper.silver.ast.utility.Simplifier
 import viper.silver.ast.{Exp, Position}
-import viper.silver.utility.Common.OptionOps
 
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.decider.PathConditions
+import viper.silicon.state.HeapLabel
 import viper.silicon.state.terms.{Quantifier, Term, Trigger, Var}
 
 object DebugCounter {
@@ -203,7 +202,7 @@ object DebugExp {
   }
 
   def apply(term: Term, originalExp: Option[Exp], finalExp: Option[Exp], isInternal: Boolean): DebugExp =
-    new DebugExp(DebugCounter.next(), None, isInternal, term, originalExp, finalExp)
+    DebugExp(None, isInternal, term, originalExp, finalExp)
 
   def awaitTerm(description: String, isInternal: Boolean): Term => DebugExp =
     term => DebugExp(Some(description), isInternal, term, None, None)
@@ -222,7 +221,7 @@ class DebugPrecondition(val id: Int,
                         val term: Term,
                         val funExp: ast.FuncApp,
                         val finalArgs: Option[Seq[Exp]],
-                        val heapLabel: String) extends DebugAssumptionNode[DebugPrecondition] {
+                        val heapLabel: HeapLabel) extends DebugAssumptionNode[DebugPrecondition] {
   override def description: Option[String] = Some(s"Precondition of ${funExp.funcname}(${funExp.args.mkString(", ")}) holds")
 
   override def isInternal: Boolean = true
@@ -236,10 +235,10 @@ class DebugPrecondition(val id: Int,
 }
 
 object DebugPrecondition {
-  def apply(term: Term, funExp: ast.FuncApp, finalArgs: Option[Seq[Exp]], heapLabel: String): DebugPrecondition =
+  def apply(term: Term, funExp: ast.FuncApp, finalArgs: Option[Seq[Exp]], heapLabel: HeapLabel): DebugPrecondition =
     new DebugPrecondition(DebugCounter.next(), term, funExp, finalArgs, heapLabel)
 
-  def awaitTerm(fun: ast.FuncApp, finalArgs: Option[Seq[Exp]], heapLabel: String): Term => DebugPrecondition =
+  def awaitTerm(fun: ast.FuncApp, finalArgs: Option[Seq[Exp]], heapLabel: HeapLabel): Term => DebugPrecondition =
     term => DebugPrecondition(term, fun, finalArgs, heapLabel)
 }
 

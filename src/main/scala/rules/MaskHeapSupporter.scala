@@ -718,7 +718,7 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
                   val qpMaskGet = HeapLookup(qpMask, argTerm)
                   val conditionalizedPermissions = Ite(condOfInvOfLoc, lossOfInvOfLoc, NoPerm)
                   val qpMaskConstraint = Forall(formalQVars, qpMaskGet === conditionalizedPermissions, Seq(Trigger(qpMaskGet)), "qpMaskdef")
-                  v.decider.assumeDefinition(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = false)), analysisInfos)
+                  v.decider.assumeDefinition(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = true)), analysisInfos)
                   val newFr = s.functionRecorder.recordFieldInv(inverseFunctions).recordConstrainedVar(qpMask, qpMaskConstraint)
 
                   // simplify only if this mask will be used later
@@ -956,7 +956,7 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
           receiverInjectivityCheck)
         v.decider.assert(completeReceiverInjectivityCheck, analysisInfos) {
           case true =>
-            v.decider.assumeDefinition(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = false)), analysisInfos)
+            v.decider.assumeDefinition(qpMaskConstraint, Option.when(debugOn)(DebugExp.awaitTerm("QP mask definition", isInternal = true)), analysisInfos)
 
             if (assumeGoodMask)
               v.decider.assume(if (resource.isInstanceOf[ast.Field]) GoodFieldMask(newMask, s.mayAssumeUpperBounds) else GoodMask(newMask),

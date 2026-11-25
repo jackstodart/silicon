@@ -7,6 +7,7 @@
 package viper.silicon.decider
 
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.debugger.PreDebugAssumption
 import viper.silicon.dependencyAnalysis._
 import viper.silicon.dependencyAnalysis.graph._
 import viper.silicon.state.chunks.GeneralChunk
@@ -163,9 +164,10 @@ trait DependencyAnalysisAwareDeciderProvider extends DefaultDeciderProvider { v:
       }
     }
 
-    override def handleFailedAssertion(failedAssertion: Term, e: Option[ast.Exp], finalExp: Option[ast.Exp], analysisInfos: AnalysisInfos, assumeFailedAssertion: Boolean): Unit = {
+    override def handleFailedAssertion(failedAssertion: Term, debugAssumption: Option[PreDebugAssumption],
+                                       analysisInfos: AnalysisInfos, assumeFailedAssertion: Boolean): Unit = {
       dependencyAnalyzer.addAssertionFailedNode(failedAssertion, analysisInfos)
-      super.handleFailedAssertion(failedAssertion, e, finalExp, analysisInfos, assumeFailedAssertion)
+      super.handleFailedAssertion(failedAssertion, debugAssumption, analysisInfos, assumeFailedAssertion)
     }
 
     override def handleInfeasiblePath(hasAssertions: Boolean, hasAssumptions: Boolean, analysisInfos: AnalysisInfos): Unit = {

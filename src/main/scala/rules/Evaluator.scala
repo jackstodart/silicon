@@ -631,8 +631,8 @@ object evaluator extends EvaluationRules {
           val s1a = if (debugOn && s.isRecordingHeaps) v1.recordIntermediateHeap(s1, EvalExp(fapp)) else s1
 //          bookkeeper.functionApplications += 1
           val joinFunctionArgs = tArgs //++ c2a.quantifiedVariables.filterNot(tArgs.contains)
-          val debugLabel = v1.getDebugOldLabel(s1a, fapp.pos)
-          val heapLabel = v1.getDebugHeapLabel(s1a)
+          val debugLabel = if (debugOn) v1.getDebugOldLabel(s1a, fapp.pos) else "n/a"
+          val heapLabel = if (debugOn) v1.getDebugHeapLabel(s1a).getOrElse(MissingLabel) else MissingLabel
 
           val funcAppNew = eArgsNew.map(args => ast.FuncApp(funcName, args)(fapp.pos, fapp.info, fapp.typ, fapp.errT))
           val joinExp = Option.when(debugOn)({
@@ -705,8 +705,7 @@ object evaluator extends EvaluationRules {
               val (stateArgs, snapToRecord) = v3.heapSupporter.functionAppSnapArgs(s2a, func, tArgs, snap.get, v3)
               val preFApp = App(functionSupporter.preconditionVersion(v3.symbolConverter.toFunction(func, s.program)),
                 stateArgs ++ tArgs)
-              val preExp = Option.when(debugOn)(
-                DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel.getOrElse(MissingLabel).label))
+              val preExp = Option.when(debugOn)(DebugPrecondition.awaitTerm(fapp, eArgsNew, heapLabel))
               v3.decider.assume(preFApp, preExp, analysisInfos)
               val funcAnn = func.info.getUniqueInfo[AnnotationInfo]
               val tFApp = funcAnn match {

@@ -139,7 +139,8 @@ trait Decider {
 
   def statistics(): Map[String, String]
 
-  def handleFailedAssertion(failedAssertion: Term, e: Option[ast.Exp], finalExp: Option[ast.Exp], analysisInfos: AnalysisInfos, assumeFailedAssertion: Boolean): Unit
+  def handleFailedAssertion(failedAssertion: Term, debugAssumption: Option[PreDebugAssumption],
+                            analysisInfos: AnalysisInfos, assumeFailedAssertion: Boolean): Unit
 
   def defaultAnalysisInfos: AnalysisInfos
 }
@@ -478,10 +479,12 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       result
     }
 
-    override def handleFailedAssertion(failedAssertion: Term, e: Option[ast.Exp], finalExp: Option[ast.Exp], analysisInfos: AnalysisInfos, assumeFailedAssertion: Boolean): Unit = {
+    override def handleFailedAssertion(failedAssertion: Term,
+                                       debugAssumption: Option[PreDebugAssumption],
+                                       analysisInfos: AnalysisInfos,
+                                       assumeFailedAssertion: Boolean): Unit = {
       if (assumeFailedAssertion) {
-        val debugExp = Option.when(debugMode)(DebugExp.awaitTerm(e.get, finalExp.get))
-        assume(failedAssertion, debugExp, failedAssertionInfos(analysisInfos))
+        assume(failedAssertion, debugAssumption, failedAssertionInfos(analysisInfos))
         failedAssertion match {
           case False => checkSmoke(analysisInfos)
           case _ =>

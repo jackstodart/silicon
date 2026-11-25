@@ -1057,7 +1057,8 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
             Q(s1, v)
           case false =>
             val failure = createFailure(pve dueTo notInjectiveReason, v, s, receiverInjectivityCheck, "QP receiver is injective")
-            recordFailedAssertion(s, v, completeReceiverInjectivityCheck, None, None, analysisInfos)
+            val debugFail = Option.when(debugOn)(DebugExp.awaitTerm("QP receiver injectivity (failed, assumed to continue)", isInternal = false))
+            recordFailedAssertion(s, v, completeReceiverInjectivityCheck, debugFail, analysisInfos)
             if (s.retryLevel == 0 && v.reportFurtherErrors()) failure combine Q(s, v) else failure
         }
       case false =>
@@ -1437,15 +1438,17 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
               executionFlowController.tryOrFail2[Heap, Option[Term]](s.copy(h = h), v)((s0, v0, QS) =>
                 consumeQP(s0.copy(h = s.h), s0.h, v0)(QS))(Q)
             case false =>
-            val failure = createFailure(pve dueTo notInjectiveReason, v, s, receiverInjectivityCheck, "QP receiver injective")
-            recordFailedAssertion(s, v, receiverInjectivityCheck, None, None, analysisInfos)
-            if (s.retryLevel == 0 && v.reportFurtherErrors()) {
-              val snap = v.decider.fresh(v.snapshotSupporter.optimalSnapshotSort(resource, s, v), Option.when(debugOn)(PUnknown()))
-              failure combine Q(s, s.h, if (returnSnap) Some(snap) else None, v)
-            } else {
-              failure
-            }
-          }
+              val failure = createFailure(pve dueTo notInjectiveReason, v, s, receiverInjectivityCheck, "QP receiver injective")
+              val debugFail = Option.when(debugOn)(
+                DebugExp.awaitTerm("QP receiver injectivity (failed, assumed to continue)", isInternal = false))
+              recordFailedAssertion(s, v, receiverInjectivityCheck, debugFail, analysisInfos)
+              if (s.retryLevel == 0 && v.reportFurtherErrors()) {
+                val snap = v.decider.fresh(v.snapshotSupporter.optimalSnapshotSort(resource, s, v), Option.when(debugOn)(PUnknown()))
+                failure combine Q(s, s.h, if (returnSnap) Some(snap) else None, v)
+              } else {
+                failure
+              }
+        }
         case false =>
           val failure = createFailure(pve dueTo negativePermissionReason, v, s, nonNegTerm, nonNegExp)
           recordFailedAssertion(s, v, nonNegTerm, nonNegExp, nonNegExp, analysisInfos)
