@@ -8,11 +8,9 @@ package viper.silicon.rules
 
 import viper.silver.ast
 import viper.silver.ast.{AnnotationInfo, LocalVarWithVersion, WeightedQuantifier}
+import viper.silver.dependencyAnalysis._
 import viper.silver.reporter.{AnnotationWarning, WarningsDuringVerification}
 import viper.silver.utility.Common.{OptionOps, Rational}
-import viper.silver.ast.{AnnotationInfo, FalseLit, LocalVarWithVersion, WeightedQuantifier}
-import viper.silver.dependencyAnalysis._
-import viper.silver.verifier.{CounterexampleTransformer, PartialVerificationError, VerifierWarning}
 import viper.silver.verifier.errors.{ErrorWrapperWithExampleTransformer, PreconditionInAppFalse}
 import viper.silver.verifier.reasons._
 import viper.silver.verifier.{CounterexampleTransformer, PartialVerificationError, VerifierWarning}
@@ -33,9 +31,6 @@ import viper.silicon.state.terms.perms.IsPositive
 import viper.silicon.utils.ast._
 import viper.silicon.verifier.Verifier
 import viper.silicon.{Map, TriggerSets}
-import viper.silver.reporter.{AnnotationWarning, WarningsDuringVerification}
-import viper.silver.utility.Common.Rational
-
 
 /* TODO: With the current design w.r.t. parallelism, eval should never "move" an execution
  *       to a different verifier. Hence, consider not passing the verifier to continuations
@@ -569,6 +564,7 @@ object evaluator extends EvaluationRules {
             val tAuxHeapIndep = tAux.flatMap(v.quantifierSupporter.makeTriggersHeapIndependent(_, v1.decider.fresh))
             val auxGlobalsExp = auxExps.map(_._1)
             val auxNonGlobalsExp = auxExps.map(_._2)
+            val auxAnalysisInfos = analysisInfos.overrideDependencyType(OriginType.Internal).withMergeInfo(NoDependencyAnalysisMerge())
 
             val commentGlobal = "Nested auxiliary terms: globals (aux)"
             v1.decider.prover.comment(commentGlobal)

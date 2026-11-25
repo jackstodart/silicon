@@ -6,13 +6,21 @@
 
 package viper.silicon.rules
 
+import viper.silver.ast
+import viper.silver.ast.NoPosition
+import viper.silver.dependencyAnalysis.{NoDependencyAnalysisMerge, OriginType, StringDependencyAnalysisSourceInfo}
+import viper.silver.parser.PUnknown
+import viper.silver.reporter.InternalWarningMessage
+import viper.silver.verifier.reasons.{InsufficientPermission, MagicWandChunkNotFound}
+import viper.silver.verifier.{ErrorReason, PartialVerificationError}
+
 import viper.silicon
-import viper.silicon.debugger.{DebugExp, DebugGroup, DebugNode}
 import viper.silicon.Config.ExhaleMode
 import viper.silicon.Map
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
-import viper.silicon.dependencyAnalysis._
 import viper.silicon.debugger.debugger.AnyDebugNode
+import viper.silicon.debugger.{DebugExp, DebugGroup}
+import viper.silicon.dependencyAnalysis._
 import viper.silicon.interfaces.VerificationResult
 import viper.silicon.logger.records.data.CommentRecord
 import viper.silicon.resources.{NonQuantifiedPropertyInterpreter, QuantifiedPropertyInterpreter, Resources}
@@ -26,16 +34,7 @@ import viper.silicon.supporters.functions.{FunctionRecorder, NoopFunctionRecorde
 import viper.silicon.utils.ast.{BigAnd, buildMinExp}
 import viper.silicon.utils.freshSnap
 import viper.silicon.utils.notNothing.NotNothing
-import viper.silicon.utils.freshSnap
 import viper.silicon.verifier.Verifier
-import viper.silver.ast
-import viper.silver.ast.TrueLit
-import viper.silver.ast.NoPosition
-import viper.silver.dependencyAnalysis.{OriginType, NoDependencyAnalysisMerge, StringDependencyAnalysisSourceInfo}
-import viper.silver.parser.PUnknown
-import viper.silver.reporter.InternalWarningMessage
-import viper.silver.verifier.reasons.{InsufficientPermission, MagicWandChunkNotFound}
-import viper.silver.verifier.{ErrorReason, PartialVerificationError, VerificationError}
 
 import scala.collection.immutable.ArraySeq
 import scala.reflect.ClassTag
@@ -1089,9 +1088,9 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
     val smDef2 = SnapshotMapDefinition(resource, sm, Seq(smValueDef), Seq())
     val comment = "Definitional axioms for singleton-SM's value"
     v.decider.prover.comment(comment)
-    v.decider.assumeDefinition(smValueDef, Option.when(debugOn)(DebugExp.awaitTerm(comment, isInternal = true)))
+    v.decider.assumeDefinition(smValueDef, Option.when(debugOn)(DebugExp.awaitTerm(comment, isInternal = true)), analysisInfos)
     val ch = quantifiedChunkSupporter.createSingletonQuantifiedChunk(formalQVars, formalQVarsExp, resource, tArgs, eArgs, tPerm, ePerm, sm,
-      Some(s.qpTag.getOrElse(v.counter(this).next())), s.program, v, analysisInfos.forChunk)
+        Some(s.qpTag.getOrElse(v.counter(this).next())), s.program, v, analysisInfos.forChunk)
 
     val s1 = if (mergeAndTrigger) {
       val (fr1, h1) = v.stateConsolidator(s).merge(s.functionRecorder, s, s.h, Heap(Seq(ch)), v, v.decider.defaultAnalysisInfos)
@@ -1189,7 +1188,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
     v.decider.assume(auxGlobals, Option.when(debugOn)(DebugGroup(commentGlobals, auxGlobalsExp.get)),
       enforceAssumption = false,
       analysisInfos = v.decider.defaultAnalysisInfos
-        .withInfo(StringDependencyAnalysisSourceInfo.createUnique(comment), OriginType.Internal))
+        .withInfo(StringDependencyAnalysisSourceInfo.createUnique(commentGlobals), OriginType.Internal))
 
     val commentNonGlobals = "Nested auxiliary terms: non-globals"
     val debugNonGlobals = Option.when(debugOn)(DebugGroup(commentNonGlobals, auxNonGlobalsExp.get))
@@ -1198,11 +1197,10 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
       case None =>
         /* No explicit triggers provided */
         v.decider.assume(
-          auxNonGlobals.map(_.copy(
-            vars = effectiveTriggersQVars,
-            triggers = effectiveTriggers)), debugNonGlobals,
-            enforceAssumption = false,
-            analysisInfos = analysisInfos.overrideDependencyType(OriginType.Internal))
+          auxNonGlobals.map(_.copy(vars = effectiveTriggersQVars, triggers = effectiveTriggers)),
+          debugNonGlobals,
+          enforceAssumption = false,
+          analysisInfos.overrideDependencyType(OriginType.Internal))
       case Some(_) =>
         /* Explicit triggers were provided. */
         v.decider.assume(auxNonGlobals, debugNonGlobals, enforceAssumption = false, analysisInfos = analysisInfos.overrideDependencyType(OriginType.Internal))
@@ -2223,7 +2221,7 @@ object quantifiedChunkSupporter extends QuantifiedChunkSupport {
               if (result) {
                 // Learn the equality
                 val debugExp = Option.when(debugOn)(DebugExp.awaitTerm("Chunks alias", true))
-                v.decider.assume(equalityTerm, debugExp, , analysisInfos.overrideDependencyType(OriginType.Internal))
+                v.decider.assume(equalityTerm, debugExp, analysisInfos.overrideDependencyType(OriginType.Internal))
               }
               result
             case _ => false

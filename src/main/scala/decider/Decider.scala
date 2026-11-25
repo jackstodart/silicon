@@ -2,23 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2011-2019 ETH Zurich.
+// Copyright (c) 2011-2026 ETH Zurich.
 
 package viper.silicon.decider
 
-import com.typesafe.scalalogging.Logger
-import viper.silicon.debugger.{DebugExp, DebugGroup, DebugGroupNode, DebugNode}
-import viper.silicon._
-import viper.silicon.common.collections.immutable.InsertionOrderedSet
-import viper.silicon.dependencyAnalysis._
-import viper.silicon.debugger.debugger.{AnyDebugNode, PreDebugAssumption, PreDebugGroup}
-import viper.silicon.interfaces._
-import viper.silicon.interfaces.decider._
-import viper.silicon.logger.records.data.{DeciderAssertRecord, DeciderAssumeRecord, ProverAssertRecord}
-import viper.silicon.state._
-import viper.silicon.state.terms._
-import viper.silicon.utils.ast.{extractPTypeFromExp, simplifyVariableName}
-import viper.silicon.verifier.{Verifier, VerifierComponent}
+import scala.collection.immutable.HashSet
+import scala.collection.mutable
+import scala.reflect.{ClassTag, classTag}
+
 import viper.silver.ast
 import viper.silver.ast.{Exp, LocalVarWithVersion, NoPosition}
 import viper.silver.components.StatefulComponent
@@ -26,9 +17,19 @@ import viper.silver.parser.{PKw, PPrimitiv, PReserved, PType}
 import viper.silver.reporter.{ConfigurationConfirmation, InternalWarningMessage}
 import viper.silver.verifier.{DependencyNotFoundError, Model}
 
-import scala.collection.immutable.HashSet
-import scala.reflect.{ClassTag, classTag}
-import scala.collection.mutable
+import com.typesafe.scalalogging.Logger
+import viper.silicon._
+import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.debugger.{AnyDebugNode, PreDebugAssumption, PreDebugGroup}
+import viper.silicon.debugger.{DebugExp, DebugGroupNode}
+import viper.silicon.dependencyAnalysis._
+import viper.silicon.interfaces._
+import viper.silicon.interfaces.decider._
+import viper.silicon.logger.records.data.{DeciderAssertRecord, DeciderAssumeRecord, ProverAssertRecord}
+import viper.silicon.state._
+import viper.silicon.state.terms._
+import viper.silicon.utils.ast.{extractPTypeFromExp, simplifyVariableName}
+import viper.silicon.verifier.{Verifier, VerifierComponent}
 
 /*
  * Interfaces
@@ -63,22 +64,22 @@ trait Decider {
   /** The interface for reporting to the analysis of this run, which does nothing if there is none. */
   def analysisHooks: AnalysisHooks
 
-  // Assume a single term
-  def assume(t: Term, debugExp: Option[PreDebugAssumption],
-             enforceAssumption: Boolean = false,
-             analysisInfos: AnalysisInfos): Unit
-  // Creates generic assumptions under the group
+  // Assume a single term with its debugAssumption
+  def assume(t: Term, debugAssumption: Option[PreDebugAssumption],
+             analysisInfos: AnalysisInfos,
+             enforceAssumption: Boolean = false): Unit
+  // Assumes terms, and puts them into the debug group as generic assumptions
   def assume(terms: Iterable[Term],
              group: Option[PreDebugGroup],
              isInternal: Boolean,
              enforceAssumption: Boolean,
              analysisInfos: AnalysisInfos): Unit
-  // Assumes each term; in debug mode, records each as a child of the group, labelled with its paired exp
+  // Assumes each term; in debug mode, create a generic assumption from the Exp and add it to the group
   def assume(termsAndExps: Iterable[(Term, Option[ast.Exp])],
              debugGroup: Option[PreDebugGroup],
              analysisInfos: AnalysisInfos): Unit
-  // Separately assumes terms and adds the debugGroup
-  // (we cannot easily connect each term to a leaf in the debugGroup)
+  // Separately assumes terms and adds the debugGroup, when we can't easily
+  // align each term to a leaf in the debugGroup
   def assume(terms: Iterable[Term],
              debugGroup: Option[DebugGroupNode[_]],
              enforceAssumption: Boolean,
@@ -303,6 +304,16 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       //symbExLog.closeScope(sepIdentifier)
     }
 
+    def isPathMarkedInfeasible: Boolean = Verifier.config.analyzeInfeasiblePaths && pcs.isPathMarkedInfeasible
+
+    /**
+     * Called by [[viper.silicon.rules.InfeasiblePath.canPathBeSkipped]] when a rule skips its usual work because the
+     * current path is known to be infeasible, in order to record what the rule would have contributed to the analysis.
+     * Does nothing here since infeasible paths are only handled if the dependency analysis is enabled; see
+     * DependencyAnalysisAwareDecider.
+     */
+    def handleInfeasiblePath(hasAssertions: Boolean, hasAssumptions: Boolean, analysisInfos: AnalysisInfos): Unit = {}
+
     def setCurrentBranchCondition(t: Term, te: (ast.Exp, Option[ast.Exp]), analysisInfos: AnalysisInfos): Unit =
       if (!isPathMarkedInfeasible) {
         pathConditions.setCurrentBranchCondition(t, te)
@@ -324,22 +335,73 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
     def addDebugNode(debugNode: AnyDebugNode): Unit =
       pathConditions.addDebugNode(debugNode)
 
-    def isPathMarkedInfeasible: Boolean = Verifier.config.analyzeInfeasiblePaths && pcs.isPathMarkedInfeasible
+    // Assume a single term with its debugAssumption
+    def assume(term: Term, debugAssumption: Option[PreDebugAssumption],
+               analysisInfos: AnalysisInfos,
+               enforceAssumption: Boolean = false): Unit = {
+      assumeSingle(term, debugAssumption, isDefinition = false, enforceAssumption = enforceAssumption, analysisInfos)
+    }
 
-    /**
-     * Called by [[viper.silicon.rules.InfeasiblePath.canPathBeSkipped]] when a rule skips its usual work because the
-     * current path is known to be infeasible, in order to record what the rule would have contributed to the analysis.
-     * Does nothing here since infeasible paths are only handled if the dependency analysis is enabled; see
-     * DependencyAnalysisAwareDecider.
-     */
-    def handleInfeasiblePath(hasAssertions: Boolean, hasAssumptions: Boolean, analysisInfos: AnalysisInfos): Unit = {}
+    // Assumes terms, and puts them into the debug group as generic assumptions
+    def assume(terms: Iterable[Term],
+               debugGroup: Option[PreDebugGroup],
+               isInternal: Boolean,
+               enforceAssumption: Boolean,
+               analysisInfos: AnalysisInfos): Unit = {
+      assumeGroup(terms, debugGroup, isInternal, isDefinition = false, enforceAssumption, analysisInfos)
+    }
+
+    // Assumes each term; in debug mode, create a generic assumption from the Exp and add it to the group
+    def assume(termsAndExps: Iterable[(Term, Option[Exp])],
+               debugGroup: Option[PreDebugGroup],
+               analysisInfos: AnalysisInfos): Unit = {
+      val filteredTermExps = termsAndExps.filterNot(te => isKnownToBeTrue(te._1))
+      if (filteredTermExps.nonEmpty) {
+        val filteredTerms = InsertionOrderedSet(filteredTermExps.map(_._1))
+        assumeWithoutSmokeChecks(filteredTerms, isDefinition = false, analysisInfos)
+        if (debugMode) {
+          val children = filteredTermExps.map[AnyDebugNode] { case (t, e) => DebugExp(t, e, e, isInternal = e.isEmpty) }
+          addDebugNode(debugGroup.get(InsertionOrderedSet(children)).withTerms(filteredTerms))
+        }
+      }
+    }
+
+    // Separately assumes terms and adds the debugGroup, when we can't easily
+    // align each term to a leaf in the debugGroup
+    def assume(terms: Iterable[Term],
+               debugGroup: Option[DebugGroupNode[_]],
+               enforceAssumption: Boolean,
+               analysisInfos: AnalysisInfos): Unit = {
+      val filteredTerms = InsertionOrderedSet(if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue))
+      if (filteredTerms.nonEmpty) {
+        assumeWithoutSmokeChecks(filteredTerms, isDefinition = false, analysisInfos)
+        // Record the terms actually assumed, which can differ from those of the group's children, even if
+        // no child describes them: the debugger replays assumptions from the recorded nodes.
+        if (debugMode)
+          addDebugNode(debugGroup.get.withTerms(filteredTerms))
+      }
+    }
+
+    def assumeDefinition(term: Term,
+                         debugExp: Option[PreDebugAssumption],
+                         analysisInfos: AnalysisInfos): Unit = {
+      assumeSingle(term, debugExp, isDefinition = true, enforceAssumption = false, analysisInfos)
+    }
+
+    // Note, definitions are always assumed to be internal
+    def assumeDefinition(terms: Iterable[Term],
+                         debugGroup: Option[PreDebugGroup],
+                         analysisInfos: AnalysisInfos): Unit = {
+      assumeGroup(terms, debugGroup, isInternal = true, isDefinition = true, enforceAssumption = false, analysisInfos)
+    }
 
     private def assumeSingle(term: Term,
                              debugExp: Option[PreDebugAssumption],
                              isDefinition: Boolean,
-                             enforceAssumption: Boolean): Unit = {
+                             enforceAssumption: Boolean,
+                             analysisInfos: AnalysisInfos): Unit = {
       if (enforceAssumption || !isKnownToBeTrue(term)) {
-        assumeWithoutSmokeChecks(InsertionOrderedSet(term), isDefinition)
+        assumeWithoutSmokeChecks(InsertionOrderedSet(term), isDefinition, analysisInfos)
         if (debugMode && debugExp.isDefined) addDebugNode(debugExp.get(term))
       }
     }
@@ -352,7 +414,7 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
                             analysisInfos: AnalysisInfos): Unit = {
       val filteredTerms = InsertionOrderedSet(if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue))
       if (filteredTerms.nonEmpty) {
-        assumeWithoutSmokeChecks(filteredTerms, isDefinition)
+        assumeWithoutSmokeChecks(filteredTerms, isDefinition, analysisInfos)
         if (debugMode && debugGroup.isDefined) {
           val children = filteredTerms.map[AnyDebugNode](DebugExp(_, None, None, isInternal))
           addDebugNode(debugGroup.get(children).withTerms(filteredTerms))
@@ -360,64 +422,8 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       }
     }
 
-    def assume(term: Term, debugExp: Option[PreDebugAssumption],
-               enforceAssumption: Boolean = false,
-               analysisInfos: AnalysisInfos): Unit = {
-      assumeSingle(term, debugExp, isDefinition = false, enforceAssumption = enforceAssumption)
-    }
-
-    // Creates generic assumptions under the group
-    def assume(terms: Iterable[Term],
-               debugGroup: Option[PreDebugGroup],
-               isInternal: Boolean,
-               enforceAssumption: Boolean,
-               analysisInfos: AnalysisInfos): Unit = {
-      assumeGroup(terms, debugGroup, isInternal, isDefinition = false, enforceAssumption)
-    }
-
-    def assume(termsAndExps: Iterable[(Term, Option[Exp])],
-               debugGroup: Option[PreDebugGroup]): Unit = {
-      val filteredTermExps = termsAndExps.filterNot(te => isKnownToBeTrue(te._1))
-      if (filteredTermExps.nonEmpty) {
-        val filteredTerms = InsertionOrderedSet(filteredTermExps.map(_._1))
-        assumeWithoutSmokeChecks(filteredTerms)
-        if (debugMode) {
-          val children = filteredTermExps.map[AnyDebugNode] { case (t, e) => DebugExp(t, e, e, isInternal = e.isEmpty) }
-          addDebugNode(debugGroup.get(InsertionOrderedSet(children)).withTerms(filteredTerms))
-        }
-      }
-    }
-
-    // Separately assumes terms and adds the debugGroup
-    def assume(terms: Iterable[Term],
-               debugGroup: Option[DebugGroupNode[_]],
-               enforceAssumption: Boolean,
-               analysisInfos: AnalysisInfos): Unit = {
-      val filteredTerms = InsertionOrderedSet(if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue))
-      if (filteredTerms.nonEmpty) {
-        assumeWithoutSmokeChecks(filteredTerms, analysisInfos)
-        // Record the terms actually assumed, which can differ from those of the group's children, even if
-        // no child describes them: the debugger replays assumptions from the recorded nodes.
-        if (debugMode)
-          addDebugNode(debugGroup.get.withTerms(filteredTerms))
-      }
-    }
-
-    def assumeDefinition(term: Term,
-                         debugExp: Option[PreDebugAssumption],
-                         analysisInfos: AnalysisInfos): Unit = {
-      assumeSingle(term, debugExp, isDefinition = true, enforceAssumption = false)
-    }
-
-    // Note, definitions are always assumed to be internal
-    def assumeDefinition(terms: Iterable[Term],
-                         debugGroup: Option[PreDebugGroup],
-                         analysisInfos: AnalysisInfos): Unit = {
-      assumeGroup(terms, debugGroup, isInternal = true, isDefinition = true, enforceAssumption = false)
-    }
-
     // Used in the interactive debugger session
-    def debuggerAssume(terms: Iterable[Term], de: AnyDebugNode) = {
+    def debuggerAssume(terms: Iterable[Term], de: AnyDebugNode): Unit = {
       terms.foreach(t => {
         if (!_debuggerAssumedTerms.contains(t)) {
           _debuggerAssumedTerms += t
@@ -427,7 +433,9 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       })
     }
 
-    protected def assumeWithoutSmokeChecks(terms: InsertionOrderedSet[Term], analysisInfos: AnalysisInfos, isDefinition: Boolean = false): Unit =
+    protected def assumeWithoutSmokeChecks(terms: InsertionOrderedSet[Term],
+                                           isDefinition: Boolean = false,
+                                           analysisInfos: AnalysisInfos): Unit =
       assumeWithoutSmokeChecksInternal(terms, isDefinition, _ => None)(t => prover.assume(t))
 
     protected def assumeWithoutSmokeChecksInternal(terms: InsertionOrderedSet[Term], isDefinition: Boolean, nodeIds: Term => Option[Int])(proverAssume: Term => Unit): Unit =
@@ -463,7 +471,8 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
 
     override def handleFailedAssertion(failedAssertion: Term, e: Option[ast.Exp], finalExp: Option[ast.Exp], analysisInfos: AnalysisInfos, assumeFailedAssertion: Boolean): Unit = {
       if (assumeFailedAssertion) {
-        assume(failedAssertion, e, finalExp, failedAssertionInfos(analysisInfos))
+        val debugExp = Option.when(debugMode)(DebugExp.awaitTerm(e.get, finalExp.get))
+        assume(failedAssertion, debugExp, failedAssertionInfos(analysisInfos))
         failedAssertion match {
           case False => checkSmoke(analysisInfos)
           case _ =>

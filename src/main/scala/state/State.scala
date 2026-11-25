@@ -11,7 +11,6 @@ import viper.silicon.Config.JoinMode.JoinMode
 import viper.silicon.common.Mergeable
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.decider.{PathConditionStack, RecordedPathConditions}
-import viper.silicon.interfaces.state.{Chunk, GeneralChunk}
 import viper.silicon.dependencyAnalysis.AnalysisInfos
 import viper.silicon.state.State.{DebugOldHeaps, OldHeaps, TemporaryRecord}
 import viper.silicon.state.chunks.{BasicMaskHeapChunk, Chunk, GeneralChunk, MagicWandIdentifier}

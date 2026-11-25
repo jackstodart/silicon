@@ -19,9 +19,6 @@ import viper.silicon.state.terms.utils.{assertSameSorts, consumeExactRead}
 import viper.silicon.state.terms._
 import viper.silicon.state._
 import viper.silicon.state.chunks._
-import viper.silicon.state.terms.utils.consumeExactRead
-import viper.silicon.state.terms.{And, App, AtLeast, AtMost, DummyHeap, First, Forall, FullPerm, GoodFieldMask, GoodMask, Greater, HeapDepFun, HeapLookup, HeapMapTerm, HeapSingleton, HeapToSnap, HeapUpdate, IdenticalOnKnownLocations, Implies, Ite, MWSFLookup, MagicWandSnapshot, MaskAdd, MaskDiff, MaskMapTerm, MaskSum, MergeHeaps, MergeSingle, NoPerm, Not, Null, PermAtMost, PermLess, PermMin, PermMinus, PermNegation, PermTimes, PredZeroMask, Quantification, Second, SnapToHeap, Sort, SortWrapper, Term, Trigger, True, Var, ZeroMask, fromSnapTree, perms, sorts, toSnapTree}
-import viper.silicon.state.{BasicMaskHeapChunk, FunctionPreconditionTransformer, Heap, Identifier, MagicWandIdentifier, State, Store, SuffixedIdentifier, terms}
 import viper.silicon.supporters.functions.{MaskHeapFunctionEncoding, NoopFunctionRecorder}
 import viper.silicon.verifier.Verifier
 import viper.silver.verifier.{ErrorReason, PartialVerificationError, VerificationError}
@@ -971,7 +968,7 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
             val comment = "Definitional axioms for inverse functions"
             v.decider.prover.comment(comment)
             v.decider.assumeDefinition(inv.definitionalAxioms.map(a => FunctionPreconditionTransformer.transform(a, s.program)),
-              Option.when(debugOn)(DebugGroup.awaitChildren(comment)))
+              Option.when(debugOn)(DebugGroup.awaitChildren(comment)), analysisInfos)
             v.decider.assumeDefinition(inv.definitionalAxioms, Option.when(debugOn)(DebugGroup.awaitChildren(comment)), analysisInfos)
 
             val h1 = hp - currentChunk + newChunk

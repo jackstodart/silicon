@@ -113,9 +113,9 @@ object joiner extends JoiningRules {
           feasibleBranchesExpNew = feasibleBranchesExpNew.map(fbe => BigAnd(entry.pathConditions.branchConditionExps.map(_._2.get)) :: fbe)
         })
         // Assume we are in a feasible branch
-        v.decider.assume(Or(feasibleBranches),
-          Option.when(debugOn)(DebugExp.awaitTerm(Some("Feasible Branches"), feasibleBranchesExp.map(BigOr(_)),
-          feasibleBranchesExpNew.map(BigOr(_)), InsertionOrderedSet.empty)), analysisInfos)
+        val debugBCs = Option.when(debugOn)(DebugExp.awaitTerm("Feasible Branches", BigOr(feasibleBranchesExp.get),
+          BigOr(feasibleBranchesExpNew.get), isInternal = false))
+        v.decider.assume(Or(feasibleBranches), debugBCs, analysisInfos)
         Q(sJoined2, dataJoined, v)
       }
     }

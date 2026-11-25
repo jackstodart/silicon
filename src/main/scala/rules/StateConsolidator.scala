@@ -6,25 +6,24 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.{DebugExp, DebugGroup}
+import viper.silver.ast
+import viper.silver.ast.MagicWandStructure.MagicWandStructure
+import viper.silver.dependencyAnalysis.{OriginType, StringDependencyAnalysisSourceInfo}
+
 import viper.silicon.Config
 import viper.silicon.Config.ExhaleMode
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.{DebugExp, DebugGroup}
 import viper.silicon.dependencyAnalysis._
 import viper.silicon.logger.records.data.{CommentRecord, SingleMergeRecord}
 import viper.silicon.resources.{FieldID, MagicWandID, NonQuantifiedPropertyInterpreter, PredicateID, Resources}
 import viper.silicon.state._
 import viper.silicon.state.chunks._
-import viper.silicon.state.terms.{Trigger, _}
 import viper.silicon.state.terms.perms._
 import viper.silicon.state.terms.predef.`?r`
+import viper.silicon.state.terms.{Trigger, _}
 import viper.silicon.supporters.functions.FunctionRecorder
 import viper.silicon.verifier.Verifier
-import viper.silver.ast
-import viper.silver.ast.Exp
-import viper.silver.ast.MagicWandStructure.MagicWandStructure
-import viper.silver.dependencyAnalysis.{OriginType, StringDependencyAnalysisSourceInfo}
-import viper.silver.parser.PUnknown
 
 import scala.annotation.unused
 
@@ -110,7 +109,11 @@ class DefaultStateConsolidator(protected val config: Config) extends StateConsol
         mergedChunks.filter(_.isInstanceOf[BasicChunk]) foreach { case ch: BasicChunk =>
           val resource = Resources.resourceDescriptions(ch.resourceID)
           val pathCond = interpreter.buildPathConditionsForChunk(ch, resource.instanceProperties(s.mayAssumeUpperBounds))
-          pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2.get, p._2.get))), analysisInfos)
+          pathCond.foreach { p =>
+            val pTerm = v.decider.analysisHooks.withLabel(p._1)
+            val debugExp = Option.when(debugOn)(DebugExp.awaitTerm(p._2.get, p._2.get))
+            v.decider.assume(pTerm, debugExp, analysisInfos)
+          }
         }
 
         Resources.resourceDescriptions foreach { case (id, desc) =>

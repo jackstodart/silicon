@@ -179,7 +179,8 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
     }
 
     val (s1, taggedSnap, snapDefs, permSum, permSumExp) = summariseOnly(s, relevantChunks, resource, args, argsExp, knownValue, v)
-    v.decider.assumeDefinition(And(snapDefs), Option.when(debugOn)(DebugExp.awaitTerm("Snapshot", true)), analysisInfos)
+    v.decider.assumeDefinition(And(snapDefs), Option.when(debugOn)(DebugExp.awaitTerm("Snapshot", true)),
+      analysisInfos.overrideDependencyType(OriginType.Internal))
     //    v.decider.assume(PermAtMost(permSum, FullPerm())) /* Done in StateConsolidator instead */
 
     val s2 =
@@ -415,7 +416,7 @@ object moreCompleteExhaleSupporter extends SymbolicExecutionRules {
         newChunks foreach { ch =>
           val resource = Resources.resourceDescriptions(ch.resourceID)
           val pathCond = interpreter.buildPathConditionsForChunk(ch, resource.instanceProperties(s.mayAssumeUpperBounds))
-          pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2.get, p._2.get))), analysisInfos)
+          pathCond.foreach(p => v.decider.assume(p._1, Option.when(debugOn)(DebugExp.awaitTerm(p._2.get, p._2.get)), analysisInfos))
         }
         val newHeap = Heap(allChunks)
 

@@ -99,7 +99,9 @@ trait DependencyAnalysisAwareDeciderProvider extends DefaultDeciderProvider { v:
         dependencyAnalyzer.addAssumption(assumption, analysisInfos, description)
     }
 
-    override protected def assumeWithoutSmokeChecks(terms: InsertionOrderedSet[Term], analysisInfos: AnalysisInfos, isDefinition: Boolean = false): Unit = {
+    override protected def assumeWithoutSmokeChecks(terms: InsertionOrderedSet[Term],
+                                                    isDefinition: Boolean,
+                                                    analysisInfos: AnalysisInfos): Unit = {
       /* The assumptions are registered first since the resulting node ids are needed to label the terms in the prover. */
       val nodeIds = registerAssumptions(terms, analysisInfos)
       assumeWithoutSmokeChecksInternal(terms, isDefinition, nodeIds)(t => prover.assume(t, DependencyAnalyzer.createAssumptionLabel(nodeIds(t))))

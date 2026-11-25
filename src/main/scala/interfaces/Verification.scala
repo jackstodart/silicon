@@ -14,13 +14,11 @@ import viper.silver.verifier._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.debugger.{DebugAxiom, DebugExp}
-import viper.silicon.interfaces.state.Chunk
 import viper.silicon.dependencyAnalysis.graphInterpretation.IntraproceduralGraphResult
 import viper.silicon.reporting._
-import viper.silicon.state.terms._
-import viper.silicon.state.{State, Store}
 import viper.silicon.state.chunks.Chunk
 import viper.silicon.state.terms._
+import viper.silicon.state.{State, Store}
 import viper.silicon.verifier.Verifier
 
 /*

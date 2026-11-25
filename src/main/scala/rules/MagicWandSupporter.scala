@@ -6,12 +6,9 @@
 
 package viper.silicon.rules
 
-import viper.silicon.debugger.{DebugAssumptionNode, DebugExp, DebugGroup, DebugGroupNode, DebugNode}
 import viper.silicon._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
-import viper.silicon.debugger.debugger.{AnyDebugNode, PreDebugAssumption}
-import viper.silicon.decider.RecordedPathConditions
-import viper.silicon.common.collections.immutable.InsertionOrderedSet
+import viper.silicon.debugger.{DebugExp, DebugGroup}
 import viper.silicon.decider.{Mark, RecordedPathConditions}
 import viper.silicon.dependencyAnalysis.AnalysisInfos
 import viper.silicon.interfaces._
@@ -26,7 +23,7 @@ import viper.silver.ast
 import viper.silver.ast.{Exp, NoPosition, Stmt}
 import viper.silver.cfg.Edge
 import viper.silver.cfg.silver.SilverCfg.SilverBlock
-import viper.silver.dependencyAnalysis.{OriginType, ExpDependencyAnalysisSourceInfo, StringDependencyAnalysisSourceInfo}
+import viper.silver.dependencyAnalysis.{ExpDependencyAnalysisSourceInfo, OriginType, StringDependencyAnalysisSourceInfo}
 import viper.silver.parser.PUnknown
 import viper.silver.verifier.PartialVerificationError
 
@@ -308,8 +305,8 @@ object magicWandSupporter extends SymbolicExecutionRules {
 
     def defineSnapshotAndRecordBranch(s5: State, snapRhs: Term, packageMark: Mark, v5: Verifier): VerificationResult = {
       v5.decider.prover.comment(s"Define MagicWandSnapFunction for wand $wand on the current branch")
-      v5.decider.assumeDefinition(wandSnapshot.applyToMWSF(freshSnapRoot) === snapRhs,
-                                  Option.when(debugOn)(DebugExp.awaitTerm("Magic wand snapshot definition", isInternal = true)))
+      val debugExp = Option.when(debugOn)(DebugExp.awaitTerm("Magic wand snapshot definition", isInternal = true))
+      v5.decider.assumeDefinition(wandSnapshot.applyToMWSF(freshSnapRoot) === snapRhs, debugExp, analysisInfos)
 
       val s6 = s5.copy(packagingWandSnapshots = s5.packagingWandSnapshots.filterNot(_._1 == freshSnapRoot),
                        parallelizeBranches = s.parallelizeBranches /* See comment above */)
@@ -429,10 +426,10 @@ object magicWandSupporter extends SymbolicExecutionRules {
         val branchConditions = recordedBranches.map({ case (_, pcs) => And(pcs.branchConditions ++ pcs.conditionalized) })
         val token = wandSnapshot.yieldToken(freshSnapRoot)
         val tokenAxiom = Forall(freshSnapRoot, Implies(token, Or(branchConditions)), Trigger(token))
+        val debugExp = Option.when(debugOn)(
+          DebugExp.awaitTerm("Path conditions recorded while packaging the magic wand", isInternal = true))
         v.decider.prover.comment(s"Path conditions recorded while packaging wand $wand, guarded by the wand's token")
-        v.decider.assume(tokenAxiom,
-          Option.when(debugOn)(DebugExp.awaitTerm("Path conditions recorded while packaging the magic wand", tokenAxiom, true)),
-          analysisInfos /* TODO ake */)
+        v.decider.assume(tokenAxiom, debugExp, analysisInfos /* TODO ake */)
 
         /* Producing the wand's LHS and executing the proof script can introduce definitional path
          * conditions, e.g. definitions of new snapshot and permission maps (see Decider.assumeDefinition),
@@ -447,7 +444,7 @@ object magicWandSupporter extends SymbolicExecutionRules {
                           .filterNot(_.contains(freshSnapRoot))
         v.decider.prover.comment(s"Definitions recorded while packaging wand $wand")
         v.decider.assumeDefinition(definitions,
-          Option.when(debugOn)(DebugGroup.awaitChildren("Definitions recorded while packaging the magic wand", true)), analysisInfos /* TODO ake */)
+          Option.when(debugOn)(DebugGroup.awaitChildren("Definitions recorded while packaging the magic wand")), analysisInfos /* TODO ake */)
 
         /* Merging the states of several branches results in several chunks for the same location, each guarded
          * by the corresponding branch condition. Consuming from such heaps is incomplete (in particular, the

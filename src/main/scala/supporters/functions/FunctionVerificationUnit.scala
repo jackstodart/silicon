@@ -23,7 +23,6 @@ import viper.silicon.state.terms.predef.`?s`
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.{DebugExp, DebugGroup}
 import viper.silicon.debugger.debugger.AnyDebugNode
-import viper.silicon.debugger.debugger.AnyDebugNode
 import viper.silicon.decider.Decider
 import viper.silicon.dependencyAnalysis._
 import viper.silicon.rules.{consumer, evaluator, executionFlowController, producer}

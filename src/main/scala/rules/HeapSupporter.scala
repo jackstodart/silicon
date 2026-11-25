@@ -307,7 +307,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
                 ass.errT)), sm, newTag, s1.program, v, lhsSourceInfos.overrideDependencyType(OriginType.Internal).forChunk)
             if (s3.heapDependentTriggers.contains(field)) {
               val debugExp2 = Option.when(debugOn)(DebugExp.awaitTerm(s"FieldTrigger(${eRcvrNew.toString()}.${field.name})", isInternal = true))
-              v1.decider.assume(FieldTrigger(field.name, sm, tRcvr), debugExp2, analysisInfos)
+              v1.decider.assume(FieldTrigger(field.name, sm, tRcvr), debugExp2, lhsSourceInfos.overrideDependencyType(OriginType.Trigger))
             }
             val s4 = s3.copy(h = h3 + ch)
             val s5 = if (debugOn && s4.isRecordingHeaps) v.recordIntermediateHeap(s4) else s4
@@ -386,9 +386,8 @@ class DefaultHeapSupportRules extends HeapSupportRules {
                 case p: ast.Predicate => p.name
                 case w: ast.MagicWand => MagicWandIdentifier(w, s2.program).toString
               }
-              DebugExp.awaitTerm(s"Resource trigger(${name}($argsString))", isInternal = true),
-              analysisInfos.overrideDependencyType(OriginType.Trigger)
-            }))
+              DebugExp.awaitTerm(s"Resource trigger(${name}($argsString))", isInternal = true)
+            }), analysisInfos.overrideDependencyType(OriginType.Trigger))
           }
 
           val currentPermAmount = ResourcePermissionLookup(res, pmDef.pm, tArgs, s2.program)
@@ -451,7 +450,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
           v.decider.assume(And(fvfDef.valueDefinitions), Option.when(debugOn)(DebugExp.awaitTerm("Value definitions", isInternal = true)), analysisInfos.overrideDependencyType(OriginType.Internal))
           if (s.heapDependentTriggers.contains(fa.field)) {
             val trigger = FieldTrigger(fa.field.name, fvfDef.sm, tRcvr)
-            val triggerExp = Option.when(debugOn)(DebugExp.awaitTerm(s"FieldTrigger(${eRcvr.toString()}.${fa.field.name})"))
+            val triggerExp = Option.when(debugOn)(DebugExp.awaitTerm(s"FieldTrigger(${eRcvr.toString()}.${fa.field.name})", isInternal = true))
             v.decider.assume(trigger, triggerExp, analysisInfos.overrideDependencyType(OriginType.Trigger))
           }
           if (s.triggerExp) {
@@ -586,11 +585,11 @@ class DefaultHeapSupportRules extends HeapSupportRules {
       // The singleton snapshot map maps the wand's arguments to its magic wand snap function.
       val (sm, smValueDef) = quantifiedChunkSupporter.singletonSnapshotMap(s, wand, tArgs, snapshot.mwsf, v)
       v.decider.prover.comment("Definitional axioms for singleton-SM's value")
-      val debugExp = Option.when(debugOn)(DebugExp.awaitTerm("Definitional axioms for singleton-SM's value", true))
+      val debugExp = Option.when(debugOn)(DebugExp.awaitTerm("Definitional axioms for singleton-SM's value", isInternal = true))
       v.decider.assumeDefinition(smValueDef, debugExp, analysisInfos)
       val chunk = quantifiedChunkSupporter.createSingletonQuantifiedChunk(formalVars, formalVarExps, wand, tArgs,
         eArgs, FullPerm, Option.when(debugOn)(ast.FullPerm()()), sm, None, s.program, v, analysisInfos.forChunk)
-      (chunk, Seq(smValueDef), Option.when(debugOn)(Seq(debugExp.get)))
+      (chunk, Seq(smValueDef), Option.when(debugOn)(Seq(debugExp.get(smValueDef))))
     } else {
       val chunk = v.chunkFactory.createMagicWandChunk(MagicWandIdentifier(wand, s.program), s.g.values, tArgs, eArgs, snapshot, FullPerm,
         Option.when(debugOn)(ast.FullPerm()(wand.pos, wand.info, wand.errT)), None, analysisInfos.forChunk)
@@ -643,7 +642,7 @@ class DefaultHeapSupportRules extends HeapSupportRules {
                 val predicate = resource.asInstanceOf[ast.Predicate]
                 val argsString = eArgs.mkString(", ")
                 val debugExp = Option.when(debugOn)(DebugExp.awaitTerm(s"PredicateTrigger(${predicate.name}($argsString))", isInternal = true))
-                v2.decider.assume(App(s2.predicateData(predicate.name).triggerFunction, snap1 +: tArgs), debugExp
+                v2.decider.assume(App(s2.predicateData(predicate.name).triggerFunction, snap1 +: tArgs), debugExp,
                   analysisInfos.overrideDependencyType(OriginType.Trigger))
               }
               Q(s2.copy(h = h2), v2)

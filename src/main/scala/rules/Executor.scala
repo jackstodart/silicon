@@ -6,6 +6,17 @@
 
 package viper.silicon.rules
 
+import viper.silver.ast.NoPosition
+import viper.silver.cfg.silver.SilverCfg
+import viper.silver.cfg.silver.SilverCfg.{SilverBlock, SilverEdge}
+import viper.silver.cfg.{ConditionalEdge, StatementBlock}
+import viper.silver.dependencyAnalysis._
+import viper.silver.reporter.{BlockReachedMessage, PathProcessedMessage}
+import viper.silver.verifier.errors._
+import viper.silver.verifier.reasons._
+import viper.silver.verifier.{CounterexampleTransformer, NullPartialVerificationError, PartialVerificationError}
+import viper.silver.{ast, cfg}
+
 import viper.silicon.Config.JoinMode
 import viper.silicon.debugger.{DebugExp, DebugGroup, DebugInvariant, FreshVarDefinition}
 import viper.silicon.decider.RecordedPathConditions
@@ -18,18 +29,7 @@ import viper.silicon.state.terms._
 import viper.silicon.utils.ast.{extractPTypeFromExp, simplifyVariableName}
 import viper.silicon.utils.{freshSnap, toSf}
 import viper.silicon.verifier.Verifier
-import viper.silver.cfg.silver.SilverCfg
-import viper.silver.cfg.silver.SilverCfg.{SilverBlock, SilverEdge}
-import viper.silver.cfg.{ConditionalEdge, StatementBlock}
-import viper.silver.reporter.{BlockReachedMessage, PathProcessedMessage}
-import viper.silver.verifier.errors._
-import viper.silver.verifier.reasons._
-import viper.silver.verifier.{CounterexampleTransformer, NullPartialVerificationError, PartialVerificationError}
-import viper.silver.{ast, cfg}
 
-import viper.silver.ast.{FalseLit, NoPosition}
-import viper.silver.dependencyAnalysis._
-import scala.annotation.unused
 import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.unused
 

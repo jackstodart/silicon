@@ -108,8 +108,9 @@ object predicateSupporter extends PredicateSupportRules {
             : VerificationResult = {
     tree match {
       case PredicateLeafNode(h, assumptions) =>
-        val debugExp = Option.when(debugOn)(DebugGroup.awaitChildren("Assumptions from unfolded predicate body"))
-        assumptions.foreach(a => v.decider.assume(a.replace(toReplace), debugExp, analysisInfos))
+        val debugGroup = Option.when(debugOn)(DebugGroup.awaitChildren("Assumptions from unfolded predicate body"))
+        v.decider.assume(assumptions.map(_.replace(toReplace)), debugGroup, isInternal = false,
+          enforceAssumption = false, analysisInfos)
         val substChunks = h.values.map(chunk => v.chunkFactory.permScale(v.chunkFactory.substitute(chunk.asInstanceOf[GeneralChunk], toReplace,
           analysisInfos.forChunk), s.permissionScalingFactor, s.permissionScalingFactorExp, analysisInfos.forChunk))
 
@@ -224,7 +225,8 @@ object predicateSupporter extends PredicateSupportRules {
               App(s2.predicateData(predicate.name).triggerFunction,
                 v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, hPreUnfold) +: tArgs)
             val eargs = eArgs.mkString(", ")
-            v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.awaitTerm(s"PredicateTrigger(${predicate.name}($eargs))", isInternal = true)), analysisInfos)
+            v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.awaitTerm(s"PredicateTrigger(${predicate.name}($eargs))", isInternal = true)),
+              analysisInfos.overrideDependencyType(OriginType.Trigger))
           }
           Q(s2.copy(g = s.g,
             permissionScalingFactor = s.permissionScalingFactor,
@@ -239,7 +241,8 @@ object predicateSupporter extends PredicateSupportRules {
               App(s2.predicateData(predicate.name).triggerFunction,
                 v2.heapSupporter.predicateTriggerSnapArg(s2, predicate, snap.get, hPreUnfold) +: tArgs)
             val eargs = eArgs.mkString(", ")
-            v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.awaitTerm(s"PredicateTrigger(${predicate.name}($eargs))", isInternal = true)), analysisInfos)
+            v2.decider.assume(predicateTrigger, Option.when(debugOn)(DebugExp.awaitTerm(s"PredicateTrigger(${predicate.name}($eargs))", isInternal = true)),
+              analysisInfos.overrideDependencyType(OriginType.Trigger))
           }
           Q(s2.copy(g = s.g,
             permissionScalingFactor = s.permissionScalingFactor,
