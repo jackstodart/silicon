@@ -126,7 +126,8 @@ object predicateSupporter extends PredicateSupportRules {
                   case _ => s.program.findPredicate(bc.id.name)
                 }
                 val (sm, smValueDef) = quantifiedChunkSupporter.singletonSnapshotMap(s, resource, bc.args, bc.snap, v)
-                v.decider.assumeDefinition(smValueDef, None, analysisInfos)
+                v.decider.assumeDefinition(smValueDef,
+                  Option.when(debugOn)(DebugExp.awaitTerm("Snapshot map definition", isInternal = true)), analysisInfos)
                 val codQvars = bc.resourceID match {
                   case FieldID => Seq(`?r`)
                   case _ => s.predicateFormalVarMap(resource.asInstanceOf[ast.Predicate].name)
@@ -139,7 +140,8 @@ object predicateSupporter extends PredicateSupportRules {
                 val bodyVars = wand.subexpressionsToEvaluate(s.program)
                 val codQvars = bodyVars.indices.toList.map(i => Var(Identifier(s"x$i"), v.symbolConverter.toSort(bodyVars(i).typ), false))
                 val (sm, smValueDef) = quantifiedChunkSupporter.singletonSnapshotMap(s, wand, mwc.args, mwc.snap, v)
-                v.decider.assumeDefinition(smValueDef, None, analysisInfos)
+                v.decider.assumeDefinition(smValueDef,
+                  Option.when(debugOn)(DebugExp.awaitTerm("Snapshot map definition", isInternal = true)), analysisInfos)
                 newFr = newFr.recordFvfAndDomain(SnapshotMapDefinition(wand, sm, Seq(smValueDef), Seq()))
                 quantifiedChunkSupporter.createSingletonQuantifiedChunk(codQvars, None, wand, mwc.args, None, mwc.perm, None, sm, mwc.tag, s.program,
                   v, analysisInfos.forChunk)

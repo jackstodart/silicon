@@ -1067,7 +1067,7 @@ object maskHeapSupporter extends SymbolicExecutionRules with StatefulComponent w
         val lookupNew = HeapLookup(newHeapVar, at_formal)
         val lookupOld = HeapLookup(chunk.heap, at_formal)
         val framingAxiom = Forall(formalQVars, Implies(Not(cond), lookupNew === lookupOld), Seq(Trigger(lookupNew)), "havocall.framing")
-        v.decider.assume(framingAxiom, None, analysisInfos)
+        v.decider.assume(framingAxiom, Option.when(debugOn)(DebugExp.awaitTerm("havocall framing", isInternal = true)), analysisInfos)
         s.h - chunk + chunk.copy(chunk.mask, newHeapVar)
     }
   }

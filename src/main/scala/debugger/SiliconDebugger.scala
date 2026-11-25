@@ -479,7 +479,7 @@ class SiliconDebugger(verificationResults: List[VerificationResult],
           case Some(ass: DebugGroupNode[_]) =>
             val filteredChildren = if (obl.printConfig.isPrintInternalEnabled) ass.children else ass.children.filter(!_.isInternal)
             if (filteredChildren.nonEmpty) {
-              println(s"${filteredChildren.foldLeft[String]("")((s, de) => s + de.toString(obl.printConfig))}\n\n")
+              println(filteredChildren.foldLeft[String]("")((s, de) => s + de.toString(obl.printConfig) + "\n"))
             }
         }
       case None =>

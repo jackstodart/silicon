@@ -415,9 +415,10 @@ object executor extends ExecutionRules {
   private def callArgumentBindings(tArgs: Seq[Term], eArgsWithDAInfo: Seq[ast.Exp], eArgsNew: Option[Seq[ast.Exp]],
                                    analysisInfos: AnalysisInfos, v: Verifier): Seq[(Term, Option[ast.Exp])] = {
     if (Verifier.config.isDependencyAnalysisEnabled) {
-      tArgs.zip(eArgsWithDAInfo).map { case (tArg, eArg) =>
+      tArgs.zip(eArgsWithDAInfo).zipWithIndex.map { case ((tArg, eArg), i) =>
         val argNew = v.decider.fresh(tArg.sort, None)
-        v.decider.assume(Equals(argNew, tArg), None,
+        val debugExp = Option.when(debugOn)(DebugExp.awaitTerm("Call argument binding", eArg, eArgsNew.get(i), isInternal = false))
+        v.decider.assume(Equals(argNew, tArg), debugExp,
           analysisInfos.withMergeInfo(SimpleDependencyAnalysisMerge(DependencyAnalysisSourceInfo.createAnalysisSourceInfo(eArg))))
         (argNew, None)
       }

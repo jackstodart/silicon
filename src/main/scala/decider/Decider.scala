@@ -15,13 +15,14 @@ import viper.silver.ast.{Exp, LocalVarWithVersion, NoPosition}
 import viper.silver.components.StatefulComponent
 import viper.silver.parser.{PKw, PPrimitiv, PReserved, PType}
 import viper.silver.reporter.{ConfigurationConfirmation, InternalWarningMessage}
+import viper.silver.utility.Common.OptionOps
 import viper.silver.verifier.{DependencyNotFoundError, Model}
 
 import com.typesafe.scalalogging.Logger
 import viper.silicon._
 import viper.silicon.common.collections.immutable.InsertionOrderedSet
 import viper.silicon.debugger.debugger.{AnyDebugNode, PreDebugAssumption, PreDebugGroup}
-import viper.silicon.debugger.{DebugExp, DebugGroupNode}
+import viper.silicon.debugger.{DebugExp, DebugGroup, DebugGroupNode}
 import viper.silicon.dependencyAnalysis._
 import viper.silicon.interfaces._
 import viper.silicon.interfaces.decider._
@@ -361,7 +362,8 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
         assumeWithoutSmokeChecks(filteredTerms, isDefinition = false, analysisInfos)
         if (debugMode) {
           val children = filteredTermExps.map[AnyDebugNode] { case (t, e) => DebugExp(t, e, e, isInternal = e.isEmpty) }
-          addDebugNode(debugGroup.get(InsertionOrderedSet(children)).withTerms(filteredTerms))
+          val group = debugGroup.mapOrElse(g => g(InsertionOrderedSet(children)), DebugGroup("Unknown Group", children))
+          addDebugNode(group.withTerms(filteredTerms))
         }
       }
     }
@@ -377,8 +379,11 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
         assumeWithoutSmokeChecks(filteredTerms, isDefinition = false, analysisInfos)
         // Record the terms actually assumed, which can differ from those of the group's children, even if
         // no child describes them: the debugger replays assumptions from the recorded nodes.
-        if (debugMode)
-          addDebugNode(debugGroup.get.withTerms(filteredTerms))
+        if (debugMode) {
+          val group = debugGroup.getOrElse(
+            DebugGroup("Unknown Group", filteredTerms.map[AnyDebugNode](DebugExp(_, None, None, isInternal = true))))
+          addDebugNode(group.withTerms(filteredTerms))
+        }
       }
     }
 
@@ -402,7 +407,10 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
                              analysisInfos: AnalysisInfos): Unit = {
       if (enforceAssumption || !isKnownToBeTrue(term)) {
         assumeWithoutSmokeChecks(InsertionOrderedSet(term), isDefinition, analysisInfos)
-        if (debugMode && debugExp.isDefined) addDebugNode(debugExp.get(term))
+        if (debugMode) {
+          val assumption = debugExp.getOrElse(DebugExp.awaitTerm("Unknown internal assumption", isInternal = true))
+          addDebugNode(assumption(term))
+        }
       }
     }
 
@@ -415,9 +423,10 @@ trait DefaultDeciderProvider extends VerifierComponent { this: Verifier =>
       val filteredTerms = InsertionOrderedSet(if (enforceAssumption) terms else terms.filterNot(isKnownToBeTrue))
       if (filteredTerms.nonEmpty) {
         assumeWithoutSmokeChecks(filteredTerms, isDefinition, analysisInfos)
-        if (debugMode && debugGroup.isDefined) {
+        if (debugMode) {
           val children = filteredTerms.map[AnyDebugNode](DebugExp(_, None, None, isInternal))
-          addDebugNode(debugGroup.get(children).withTerms(filteredTerms))
+          val group = debugGroup.mapOrElse(g => g(children), DebugGroup("Unknown Group", children))
+          addDebugNode(group.withTerms(filteredTerms))
         }
       }
     }
