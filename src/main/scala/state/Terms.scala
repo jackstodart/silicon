@@ -520,10 +520,12 @@ trait ConditionalFlyweight[T, V] { self: AnyRef =>
   // The single value or tuple of values that define equality
   val equalityDefiningMembers: T
 
+  // Hash the values as a tuple: separate arguments combine their hashes linearly,
+  // causing different orders of snapshot projections to collide.
   override lazy val hashCode = if (Verifier.config.useFlyweight)
     System.identityHashCode(this)
   else
-    viper.silver.utility.Common.generateHashCode(equalityDefiningMembers)
+    viper.silver.utility.Common.generateHashCode((this.getClass.getName, equalityDefiningMembers))
 
   override def equals(other: Any): Boolean = {
     if (Verifier.config.useFlyweight) {
@@ -998,37 +1000,26 @@ class Or private[terms] (val ts: Seq[Term]) extends BooleanTerm
   override lazy val toString = ts.mkString(" || ")
 }
 
-/* TODO: Or should be (Term, Term) => BooleanTerm, but that would require
+/* Note: Or (also And) should be Term* => BooleanTerm, but that would require
  *       a Boolean(t: Term) wrapper, because e0/e1 may just be a Var.
  *       It would be sooooo handy to be able to work with Term[Sort], but
  *       that conflicts with using extractor objects to simplify terms,
  *       since extractor objects can't be type-parametrised.
  */
 object Or extends GeneralCondFlyweightFactory[Iterable[Term], Seq[Term], Term, Or] {
-  def apply(ts: Term*) = createOr(ts)
-  def apply(ts: Iterable[Term]) = createOr(ts.toSeq)
-
-
-
-  //  def apply(e0: Term, e1: Term) = (e0, e1) match {
-  //    case (True, _) | (_, True) => True
-  //    case (False, _) => e1
-  //    case (_, False) => e0
-  //    case _ if e0 == e1 => e0
-  //    case _ => new Or(e0, e1)
-  //  }
+  def apply(ts: Term*): Term = createOr(ts)
+  def apply(ts: Iterable[Term]): Term = createOr(ts.toSeq)
 
   @inline
-  def createOr(_ts: Seq[Term]): Term = {
-    var ts = _ts.flatMap { case Or(ts1) => ts1; case other => other :: Nil}
-    ts = _ts.filterNot(_ == False)
-    ts = ts.distinct
+  def createOr(ts: Seq[Term]): Term = {
+    val flattened = ts.flatMap { case Or(ts1) => ts1; case other => other :: Nil}
+    val disjuncts = flattened.filterNot(_ == False).distinct
 
-    ts match {
+    disjuncts match {
       case Seq() => False
       case Seq(t) => t
-      case _ if ts.contains(True) => True
-      case _ => createIfNonExistent(ts)
+      case _ if disjuncts.contains(True) => True
+      case _ => createIfNonExistent(disjuncts)
     }
   }
 
@@ -1038,6 +1029,10 @@ object Or extends GeneralCondFlyweightFactory[Iterable[Term], Seq[Term], Term, O
 class And private[terms](val ts: Seq[Term]) extends BooleanTerm
     with ConditionalFlyweight[Seq[Term], And] {
   assert(ts.nonEmpty, "Expected at least one term, but found none")
+  /* Note: conjuncts are not asserted to be of sort Bool, because And is also used to group
+   * arbitrary terms into a single root for trigger search (e.g. `And(invertibles)` in
+   * QuantifiedChunkSupport.getFreshInverseFunctions). Such terms should never be sent to the prover.
+   */
 
   val equalityDefiningMembers = ts
 
@@ -1045,20 +1040,19 @@ class And private[terms](val ts: Seq[Term]) extends BooleanTerm
 }
 
 object And extends GeneralCondFlyweightFactory[Iterable[Term], Seq[Term], Term, And] {
-  def apply(ts: Term*) = createAnd(ts)
-  def apply(ts: Iterable[Term]) = createAnd(ts.toSeq)
+  def apply(ts: Term*): Term = createAnd(ts)
+  def apply(ts: Iterable[Term]): Term = createAnd(ts.toSeq)
 
   @inline
-  def createAnd(_ts: Seq[Term]): Term = {
-    var ts = _ts.flatMap { case And(ts1) => ts1; case other => other :: Nil}
-    ts = _ts.filterNot(_ == True)
-    ts = ts.distinct
+  def createAnd(ts: Seq[Term]): Term = {
+    val flattened = ts.flatMap { case And(ts1) => ts1; case other => other :: Nil }
+    val conjuncts = flattened.filterNot(_ == True).distinct
 
-    ts match {
+    conjuncts match {
       case Seq() => True
       case Seq(t) => t
-      case _ if ts.contains(False) => False
-      case _ => createIfNonExistent(ts)
+      case _ if conjuncts.contains(False) => False
+      case _ => createIfNonExistent(conjuncts)
     }
   }
 
@@ -1180,9 +1174,9 @@ object BuiltinEquals extends CondFlyweightFactory[(Term, Term), BooleanTerm, Bui
   override def apply(v0: (Term, Term)) = v0 match {
     case (v0: Var, v1: Var) if v0 == v1 => True
     case (p0: PermLiteral, p1: PermLiteral) =>
-      // NOTE: The else-case (False) is only justified because permission literals are stored in a normal form
+      // NOTE: The != case is only justified because permission literals are stored in a normal form
       // such that two literals are semantically equivalent iff they are syntactically equivalent.
-      if (p0.literal == p1.literal) True else False
+      BooleanLiteral(p0.literal == p1.literal)
     case _ => createIfNonExistent(v0)
   }
 
@@ -1210,8 +1204,8 @@ class Less private[terms] (val p0: Term, val p1: Term) extends ComparisonTerm
 
 object Less extends /* OptimisingBinaryArithmeticOperation with */ CondFlyweightTermFactory[(Term, Term), Less] {
   override def apply(v0: (Term, Term)) = v0 match {
-    case (IntLiteral(n0), IntLiteral(n1)) => if (n0 < n1) True else False
-    case (pl0: PermLiteral, pl1: PermLiteral) => if (pl0.literal < pl1.literal) True else False
+    case (IntLiteral(n0), IntLiteral(n1)) => BooleanLiteral(n0 < n1)
+    case (pl0: PermLiteral, pl1: PermLiteral) => BooleanLiteral(pl0.literal < pl1.literal)
     case (t0, t1) if t0 == t1 => False
     case _ => createIfNonExistent(v0)
   }
@@ -1221,13 +1215,16 @@ object Less extends /* OptimisingBinaryArithmeticOperation with */ CondFlyweight
 
 class AtMost private[terms] (val p0: Term, val p1: Term)
     extends ComparisonTerm with ConditionalFlyweightBinaryOp[AtMost] {
+  assert(p0.sort == p1.sort,
+         s"Expected both operands to be of the same sort, but found ${p0.sort} ($p0) and ${p1.sort} ($p1).")
+
   override val op = "<="
 }
 
 object AtMost extends /* OptimisingBinaryArithmeticOperation with */ CondFlyweightTermFactory[(Term, Term), AtMost] {
   override def apply(v0: (Term, Term)) = v0 match {
-    case (IntLiteral(n0), IntLiteral(n1)) => if (n0 <= n1) True else False
-    case (pl0: PermLiteral, pl1: PermLiteral) => if (pl0.literal <= pl1.literal) True else False
+    case (IntLiteral(n0), IntLiteral(n1)) => BooleanLiteral(n0 <= n1)
+    case (pl0: PermLiteral, pl1: PermLiteral) => BooleanLiteral(pl0.literal <= pl1.literal)
     case (t0, t1) if t0 == t1 => True
     case _ => createIfNonExistent(v0)
   }
@@ -1237,13 +1234,16 @@ object AtMost extends /* OptimisingBinaryArithmeticOperation with */ CondFlyweig
 
 class Greater private[terms] (val p0: Term, val p1: Term)
     extends ComparisonTerm with ConditionalFlyweightBinaryOp[Greater] {
+  assert(p0.sort == p1.sort,
+         s"Expected both operands to be of the same sort, but found ${p0.sort} ($p0) and ${p1.sort} ($p1).")
+
   override val op = ">"
 }
 
 object Greater extends /* OptimisingBinaryArithmeticOperation with */ CondFlyweightTermFactory[(Term, Term), Greater] {
   override def apply(v0: (Term, Term)) = v0 match {
-    case (IntLiteral(n0), IntLiteral(n1)) => if (n0 > n1) True else False
-    case (pl0: PermLiteral, pl1: PermLiteral) => if (pl0.literal > pl1.literal) True else False
+    case (IntLiteral(n0), IntLiteral(n1)) => BooleanLiteral(n0 > n1)
+    case (pl0: PermLiteral, pl1: PermLiteral) => BooleanLiteral(pl0.literal > pl1.literal)
     case (t0, t1) if t0 == t1 => False
     case _ => createIfNonExistent(v0)
   }
@@ -1253,13 +1253,16 @@ object Greater extends /* OptimisingBinaryArithmeticOperation with */ CondFlywei
 
 class AtLeast private[terms] (val p0: Term, val p1: Term)
   extends ComparisonTerm with ConditionalFlyweightBinaryOp[AtLeast] {
+  assert(p0.sort == p1.sort,
+         s"Expected both operands to be of the same sort, but found ${p0.sort} ($p0) and ${p1.sort} ($p1).")
+
   override val op = ">="
 }
 
 object AtLeast extends /* OptimisingBinaryArithmeticOperation with */ CondFlyweightTermFactory[(Term, Term), AtLeast] {
   override def apply(v0: (Term, Term)) = v0 match {
-    case (IntLiteral(n0), IntLiteral(n1)) => if (n0 >= n1) True else False
-    case (pl0: PermLiteral, pl1: PermLiteral) => if (pl0.literal >= pl1.literal) True else False
+    case (IntLiteral(n0), IntLiteral(n1)) => BooleanLiteral(n0 >= n1)
+    case (pl0: PermLiteral, pl1: PermLiteral) => BooleanLiteral(pl0.literal >= pl1.literal)
     case (t0, t1) if t0 == t1 => True
     case _ => createIfNonExistent(v0)
   }
@@ -1519,8 +1522,8 @@ object PermLess extends CondFlyweightTermFactory[(Term, Term), PermLess] {
   override def apply(v0: (Term, Term)): Term = {
     v0 match {
       case (t0, t1) if t0 == t1 => False
-      case (p0: PermLiteral, p1: PermLiteral) => if (p0.literal < p1.literal) True else False
-      case (NoPerm, PermMinus(p0, p1)) => PermLess(p1, p0)
+      case (p0: PermLiteral, p1: PermLiteral) => BooleanLiteral(p0.literal < p1.literal)
+
       case (t0, Ite(tCond, tIf, tElse)) =>
         /* The pattern p0 < b ? p1 : p2 arises very often in the context of quantified permissions.
          * Pushing the comparisons into the ite allows further simplifications.
@@ -1542,7 +1545,7 @@ class PermAtMost private[terms] (val p0: Term, val p1: Term) extends ComparisonT
 
 object PermAtMost extends CondFlyweightTermFactory[(Term, Term), PermAtMost] {
   override def apply(v0: (Term, Term)) = v0 match {
-    case (p0: PermLiteral, p1: PermLiteral) => if (p0.literal <= p1.literal) True else False
+    case (p0: PermLiteral, p1: PermLiteral) => BooleanLiteral(p0.literal <= p1.literal)
     case (t0, t1) if t0 == t1 => True
     case _ => createIfNonExistent(v0)
   }
@@ -1972,7 +1975,7 @@ class MultisetAdd private[terms] (val p0: Term, val p1: Term)
 object MultisetAdd extends PreciseCondFlyweightFactory[(Term, Term), MultisetAdd] {
   override def apply(v0: (Term, Term)) = {
     val (t0, t1) = v0
-    utils.assertSort(t0, "first operand", "Set", _.isInstanceOf[sorts.Multiset])
+    utils.assertSort(t0, "first operand", "Multiset", _.isInstanceOf[sorts.Multiset])
     utils.assertSort(t1, "second operand", t0.sort.asInstanceOf[sorts.Multiset].elementsSort)
 
     createIfNonExistent(v0)
@@ -2459,7 +2462,7 @@ object MagicWandToken extends PreciseCondFlyweightFactory[(Term, Term), MagicWan
 
 class MagicWandChunkTerm(val chunk: MagicWandChunk) extends Term with ConditionalFlyweight[MagicWandChunk, MagicWandChunkTerm] {
   override val sort = sorts.Unit /* TODO: Does this make sense? */
-  override lazy val toString = s"wand@${chunk.id.ghostFreeWand.pos}}"
+  override lazy val toString = s"wand@${chunk.id.ghostFreeWand.pos}"
   override val equalityDefiningMembers: MagicWandChunk = chunk
 }
 
@@ -2873,20 +2876,8 @@ object ResourcePermissionLookup {
   }
 }
 
-/* TODO: remove
-case class PsfAfterRelation(predname: String, psf2: Term, psf1: Term) extends BooleanTerm {
-  utils.assertSameSorts[sorts.PredicateSnapFunction](psf2, psf1)
-}
-
-object PsfTop extends (String => Identifier) {
-  def apply(predicateName: String): Identifier = Identifier(s"$$psfTOP_$predicateName")
-}*/
 
 /* Sort wrappers */
-
-/* Note: Sort wrappers should probably not be used as (outermost) triggers
- * because they are optimised away if wrappee `t` already has sort `to`.
- */
 
 /* Note: Sort wrappers should probably not be used as (outermost) triggers
  * because they are optimised away if wrapped `t` already has sort `to`.
@@ -2899,7 +2890,7 @@ class SortWrapper(val t: Term, val to: Sort)
          s"Unexpected sort wrapping of $t from ${t.sort} to $to")
 
   val equalityDefiningMembers = (t, to)
-//  override lazy val toString = s"SortWrapper($t, $to)"
+
   override lazy val toString = t.toString
   override val sort = to
 }
@@ -2976,7 +2967,7 @@ object perms {
     ast.GeCmp(e, ast.NoPerm()())(pos, info, errT)
 
   def IsPositive(p: Term): Term = p match {
-    case p: PermLiteral => if (p.literal > Rational.zero) True else False
+    case p: PermLiteral => BooleanLiteral(p.literal > Rational.zero)
     case _ => PermLess(NoPerm, p)
   }
 
@@ -2984,7 +2975,7 @@ object perms {
     ast.GtCmp(e, ast.NoPerm()())(pos, info, errT)
 
   def IsNonPositive(p: Term): Term = p match {
-    case p: PermLiteral => if (p.literal <= Rational.zero) True else False
+    case p: PermLiteral => BooleanLiteral(p.literal <= Rational.zero)
     case _ => Or(p === NoPerm, PermLess(p, NoPerm))
   }
 
@@ -3068,5 +3059,5 @@ object implicits {
   import scala.language.implicitConversions
 
   implicit def intToTerm(i: Int): IntLiteral = IntLiteral(i)
-  implicit def boolToTerm(b: Boolean): BooleanLiteral = if (b) True else False
+  implicit def boolToTerm(b: Boolean): BooleanLiteral = BooleanLiteral(b)
 }
