@@ -238,7 +238,8 @@ class HeapDepFun private[terms] (val id: Identifier, val argSorts: Seq[Sort], va
     HeapDepFun(id, argSorts, resultSort)
 }
 
-object HeapDepFun extends CondFlyweightFactory[(Identifier, Seq[Sort], Sort), HeapDepFun, HeapDepFun] with GenericFunctionCompanion[HeapDepFun] {
+object HeapDepFun extends CondFlyweightFactory[(Identifier, Seq[Sort], Sort), HeapDepFun, HeapDepFun]
+    with GenericFunctionCompanion[HeapDepFun] {
   def apply(id: Identifier, argSorts: Seq[Sort], resultSort: Sort) = createIfNonExistent((id, argSorts, resultSort))
 
   override def actualCreate(args: (Identifier, Seq[Sort], Sort)): HeapDepFun = new HeapDepFun(args._1, args._2, args._3)
@@ -251,7 +252,8 @@ class DomainFun private[terms] (val id: Identifier, val argSorts: Seq[Sort], val
     DomainFun(id, argSorts, resultSort)
 }
 
-object DomainFun extends CondFlyweightFactory[(Identifier, Seq[Sort], Sort), DomainFun, DomainFun] with GenericFunctionCompanion[DomainFun] {
+object DomainFun extends CondFlyweightFactory[(Identifier, Seq[Sort], Sort), DomainFun, DomainFun]
+    with GenericFunctionCompanion[DomainFun] {
   def apply(id: Identifier, argSorts: Seq[Sort], resultSort: Sort) = createIfNonExistent((id, argSorts, resultSort))
 
   override def actualCreate(args: (Identifier, Seq[Sort], Sort)): DomainFun = new DomainFun(args._1, args._2, args._3)
@@ -623,7 +625,8 @@ case object Unit extends SnapshotTerm with Literal {
   override lazy val toString = "_"
 }
 
-class IntLiteral private[terms] (val n: BigInt) extends ArithmeticTerm with Literal with ConditionalFlyweight[BigInt, IntLiteral] {
+class IntLiteral private[terms] (val n: BigInt)
+    extends ArithmeticTerm with Literal with ConditionalFlyweight[BigInt, IntLiteral] {
   def +(m: Int) = IntLiteral(n + m)
   def -(m: Int) = IntLiteral(n - m)
   def *(m: Int) = IntLiteral(n * m)
@@ -1283,7 +1286,8 @@ sealed abstract class PermLiteral(val literal: Rational) extends Permissions
 case object NoPerm extends PermLiteral(Rational.zero) { override lazy val toString = "Z" }
 case object FullPerm extends PermLiteral(Rational.one) { override lazy val toString = "W" }
 
-class FractionPermLiteral private[terms] (r: Rational) extends PermLiteral(r) with ConditionalFlyweight[Rational, FractionPermLiteral] {
+class FractionPermLiteral private[terms] (r: Rational)
+    extends PermLiteral(r) with ConditionalFlyweight[Rational, FractionPermLiteral] {
   override val equalityDefiningMembers: Rational = r
   override lazy val toString = literal.toString
 }
@@ -2441,7 +2445,8 @@ object MWSFLookup extends PreciseCondFlyweightFactory[(Term, Term), MWSFLookup] 
  * @param mwsf Term of sort [[sorts.MagicWandSnapFunction]].
  * @param snapLhs Term of sort [[sorts.Snap]] that represents the values of the wand's left-hand side.
  */
-class MagicWandToken(val mwsf: Term, val snapLhs: Term) extends BooleanTerm with ConditionalFlyweightBinaryOp[MagicWandToken] {
+class MagicWandToken(val mwsf: Term, val snapLhs: Term)
+    extends BooleanTerm with ConditionalFlyweightBinaryOp[MagicWandToken] {
   override def p0: Term = mwsf
   override def p1: Term = snapLhs
   override lazy val toString = s"MW_token($mwsf, $snapLhs)"
@@ -2460,7 +2465,8 @@ object MagicWandToken extends PreciseCondFlyweightFactory[(Term, Term), MagicWan
     new MagicWandToken(args._1, args._2)
 }
 
-class MagicWandChunkTerm(val chunk: MagicWandChunk) extends Term with ConditionalFlyweight[MagicWandChunk, MagicWandChunkTerm] {
+class MagicWandChunkTerm(val chunk: MagicWandChunk)
+    extends Term with ConditionalFlyweight[MagicWandChunk, MagicWandChunkTerm] {
   override val sort = sorts.Unit /* TODO: Does this make sense? */
   override lazy val toString = s"wand@${chunk.id.ghostFreeWand.pos}"
   override val equalityDefiningMembers: MagicWandChunk = chunk
@@ -2488,7 +2494,8 @@ object HeapLookup extends CondFlyweightTermFactory[(Term, Term), HeapLookup] {
     case (PredZeroMask, _) => NoPerm
     case (HeapSingleton(r1, v, _), r2) if r1 == r2 => v
     case (HeapUpdate(_, r1, v), r2) if r1 == r2 => v
-    case (MergeSingle(_, msk, r1, v), r2) if r1 == r2 && (msk == ZeroMask || msk == PredZeroMask) => v // incomplete for anything but zeromasks, ignores info from merged heap
+    case (MergeSingle(_, msk, r1, v), r2) if r1 == r2 && (msk == ZeroMask || msk == PredZeroMask) => v
+      // incomplete for anything but zeromasks, ignores info from merged heap
     case (MaskAdd(ZeroMask, r1, v), r2) if r1 == r2 => v
     case (MaskAdd(PredZeroMask, r1, v), r2) if r1 == r2 => v
     // TODO: this seems to be (usually) bad because a) it won't trigger some things, and b) Z3 won't be able to
@@ -2530,16 +2537,13 @@ object SnapToHeap extends CondFlyweightTermFactory[(Term, Any, Sort), SnapToHeap
   override def actualCreate(args: (Term, Any, Sort)): SnapToHeap = new SnapToHeap(args._1, args._2, args._3)
 }
 
-class HeapUpdate(val heap: Term, val at: Term, val value: Term) extends Term with HasVarRepr with ConditionalFlyweight[(Term, Term, Term), HeapUpdate] {
-
+class HeapUpdate(val heap: Term, val at: Term, val value: Term)
+    extends Term with HasVarRepr with ConditionalFlyweight[(Term, Term, Term), HeapUpdate] {
   val sort = heap.sort
   val equalityDefiningMembers = (heap, at, value)
 }
 
 object HeapUpdate extends CondFlyweightTermFactory[(Term, Term, Term), HeapUpdate] {
-
-
-
   override def actualCreate(args: (Term, Term, Term)): HeapUpdate = new HeapUpdate(args._1, args._2, args._3)
 }
 
@@ -2566,7 +2570,8 @@ object MaskAdd extends CondFlyweightTermFactory[(Term, Term, Term), MaskAdd] {
   override def actualCreate(args: (Term, Term, Term)): MaskAdd = new MaskAdd(args._1, args._2, args._3)
 }
 
-class HeapSingleton(val at: Term, val value: Term, val sort: Sort) extends Term with ConditionalFlyweight[(Term, Term, Sort), HeapSingleton] {
+class HeapSingleton(val at: Term, val value: Term, val sort: Sort)
+    extends Term with ConditionalFlyweight[(Term, Term, Sort), HeapSingleton] {
   val equalityDefiningMembers = (at, value, sort)
 }
 
@@ -2591,7 +2596,8 @@ object IdenticalOnKnownLocations extends CondFlyweightTermFactory[(Term, Term, T
     case _ => createIfNonExistent(v0)
   }
 
-  override def actualCreate(args: (Term, Term, Term)): IdenticalOnKnownLocations = new IdenticalOnKnownLocations(args._1, args._2, args._3)
+  override def actualCreate(args: (Term, Term, Term)): IdenticalOnKnownLocations =
+    new IdenticalOnKnownLocations(args._1, args._2, args._3)
 }
 
 
@@ -2674,7 +2680,8 @@ object MergeSingle extends CondFlyweightTermFactory[(Term, Term, Term, Term), Me
     }
   }
 
-  override def actualCreate(args: (Term, Term, Term, Term)): MergeSingle = new MergeSingle(args._1, args._2, args._3, args._4)
+  override def actualCreate(args: (Term, Term, Term, Term)): MergeSingle =
+    new MergeSingle(args._1, args._2, args._3, args._4)
 }
 
 class MergeHeaps(val h1: Term, val m1: Term, val h2: Term, val m2: Term)
@@ -2719,7 +2726,8 @@ object HeapsOverlap extends CondFlyweightTermFactory[(Term, Term, Term, Term), H
     }
   }
 
-  override def actualCreate(args: (Term, Term, Term, Term)): HeapsOverlap = new HeapsOverlap(args._1, args._2, args._3, args._4)
+  override def actualCreate(args: (Term, Term, Term, Term)): HeapsOverlap =
+    new HeapsOverlap(args._1, args._2, args._3, args._4)
 }
 
 class MaskEq(val m1: Term, val m2: Term) extends Term with ConditionalFlyweight[(Term, Term), MaskEq] {
